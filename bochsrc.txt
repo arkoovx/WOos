@@ -1,0 +1,11 @@
+megs: 512
+romimage: file=/usr/share/bochs/BIOS-bochs-latest
+vgaromimage: file=/usr/share/bochs/VGABIOS-lgpl-latest
+boot: disk
+cpu: model=silvermont
+ata0-master: type=disk, path="os.img", mode=flat
+log: bochs.log
+panic: action=ask
+error: action=report
+info: action=report
+display_library: x
