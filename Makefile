@@ -17,7 +17,7 @@ os.bin: boot.o kernel.o linker.ld
 	$(LD) $(LDFLAGS) boot.o kernel.o -o os.bin
 
 os.img: os.bin
-	truncate -s 1474560 os.img
+	dd if=/dev/zero of=os.img bs=512 count=2880 status=none
 	dd if=os.bin of=os.img conv=notrunc status=none
 
 clean:
