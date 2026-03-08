@@ -25,3 +25,8 @@ jobs:
         with:
           name: woos-image
           path: os.img
+      - name: Verify build
+        run: |
+          ls -l os.img
+          strings os.img | grep "KERNEL_START_MARKER" || (echo "KERNEL NOT FOUND IN IMAGE!" && exit 1)
+
