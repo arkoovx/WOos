@@ -12,8 +12,9 @@ SECTIONS
 
     . = 0x8000;
 
-    .stage2 : ALIGN(16)
+    .text : ALIGN(16)
     {
+        KEEP(*(.stage2_entry))
         *(.stage2)
         *(.text*)
         *(.rodata*)

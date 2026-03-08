@@ -47,7 +47,7 @@ disk_address_packet:
 TIMES 510 - ($ - $$) db 0
 DW 0xAA55
 
-SECTION .stage2
+SECTION .stage2_entry
 BITS 16
 GLOBAL _start
 _start:
@@ -89,6 +89,8 @@ _start:
 stage2_fail:
     hlt
     jmp stage2_fail
+
+SECTION .stage2
 
 BITS 32
 protected_mode_start:
@@ -150,6 +152,9 @@ long_mode_start:
     mov ds, ax
     mov es, ax
     mov ss, ax
+
+    mov rsp, 0x90000
+    mov rbp, rsp
 
     lea rdi, [rel boot_info]
     call kmain
