@@ -1,5 +1,7 @@
 // Freestanding WoOS kernel (x86_64)
 
+__attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
+
 typedef unsigned char      uint8_t;
 typedef unsigned short     uint16_t;
 typedef unsigned int       uint32_t;
