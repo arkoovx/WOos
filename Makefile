@@ -5,6 +5,10 @@ LD        := ld
 CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -nostdlib -nostartfiles -Wall -Wextra
 LDFLAGS   := -m elf_x86_64 -T linker.ld
 
+BOOT_OBJ  := boot.o
+KERNEL_OBJ:= kernel.o
+OBJS      := $(BOOT_OBJ) $(KERNEL_OBJ)
+
 all: os.img
 
 boot.o: boot.asm
@@ -13,8 +17,8 @@ boot.o: boot.asm
 kernel.o: kernel.c
 	$(CC) $(CFLAGS) -c kernel.c -o kernel.o
 
-os.bin: boot.o kernel.o linker.ld
-	$(LD) $(LDFLAGS) boot.o kernel.o -o os.bin
+os.bin: $(OBJS) linker.ld
+	$(LD) $(LDFLAGS) $(OBJS) -o os.bin
 
 os.img: os.bin
 	dd if=/dev/zero of=os.img bs=512 count=2880 status=none
