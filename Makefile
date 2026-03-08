@@ -24,8 +24,9 @@ kernel.bin: kernel.elf
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
 
 os.img: bootsect.bin kernel.bin
-	cat bootsect.bin kernel.bin > os.img
-	truncate -s 1440k os.img
+	dd if=/dev/zero of=os.img bs=1024 count=1440
+	dd if=bootsect.bin of=os.img conv=notrunc
+	dd if=kernel.bin of=os.img seek=1 conv=notrunc
 
 clean:
 	rm -f *.o *.bin *.elf *.img
