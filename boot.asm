@@ -4,14 +4,14 @@
 BITS 16
 
 SECTION .boot_sector
-GLOBAL _start
+GLOBAL boot_start
 EXTERN kmain
 
 %define VBE_MODE_1024x768x32 0x118
 %define VBE_SET_LINEAR      0x4000
-%define STAGE2_SECTORS      127
+%define STAGE2_SECTORS      64
 
-_start:
+boot_start:
     cli
     xor ax, ax
     mov ds, ax
@@ -20,14 +20,14 @@ _start:
     mov sp, 0x7C00
     mov [boot_drive], dl
 
-    ; Read sectors [1..] into 0000:7E00 so the linked image remains contiguous.
+    ; Read stage2 from disk into 0000:8000.
     mov si, disk_address_packet
     mov dl, [boot_drive]
     mov ah, 0x42
     int 0x13
     jc boot_fail
 
-    jmp stage2_start
+    jmp _start
 
 boot_fail:
     hlt
@@ -39,9 +39,9 @@ disk_address_packet:
     db 0x10
     db 0x00
     dw STAGE2_SECTORS
-    dw 0x7E00
+    dw 0x8000
     dw 0x0000
-    dq 1
+    dq 2
 
 ; BIOS signature at bytes 510..511 of sector 0.
 TIMES 510 - ($ - $$) db 0
@@ -49,7 +49,8 @@ DW 0xAA55
 
 SECTION .stage2
 BITS 16
-stage2_start:
+GLOBAL _start
+_start:
     ; -----------------------------------------------------------------
     ; VBE setup in real mode. We request 1024x768 with LFB and store
     ; framebuffer metadata for the 64-bit kernel entry point.

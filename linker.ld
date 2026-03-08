@@ -10,6 +10,8 @@ SECTIONS
         KEEP(*(.boot_sector))
     }
 
+    . = 0x8000;
+
     .stage2 : ALIGN(16)
     {
         *(.stage2)
