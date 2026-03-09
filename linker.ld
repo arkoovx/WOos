@@ -35,4 +35,10 @@ SECTIONS
     {
         *(.paging)
     }
+
+    . = ALIGN(512);
+    .pad :
+    {
+        BYTE(0)
+    }
 }
