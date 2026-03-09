@@ -4,7 +4,7 @@ LD        := ld
 OBJCOPY   := objcopy
 OBJDUMP   := objdump
 
-CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -nostdlib -nostartfiles -Wall -Wextra
+CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra
 LDFLAGS   := -m elf_x86_64 -T linker.ld
 
 all: os.img
