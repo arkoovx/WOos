@@ -38,11 +38,10 @@ start:
     mov es, ax
     mov bx, LOAD_OFFSET
 
-    mov ah, 0x02        ; BIOS read sectors (CHS)
-    mov al, KERNEL_SECTORS
-    mov ch, 0x00        ; cylinder 0
-    mov cl, 0x02        ; sector 2 (LBA 1)
-    mov dh, 0x00        ; head 0
+    ; INT 13h extensions (AH=42h) are used so large payloads load reliably
+    ; regardless of disk geometry.
+    mov si, disk_address_packet
+    mov ah, 0x42
     mov dl, [boot_drive]
     int 0x13
     jc disk_error
@@ -68,6 +67,17 @@ disk_error:
 
 boot_drive:     db 0
 retry_count:    db 0
+
+; Disk Address Packet for INT 13h extensions.
+; LBA starts at 1 (sector right after the boot sector).
+disk_address_packet:
+    db 0x10                 ; size of DAP
+    db 0x00                 ; reserved
+    dw KERNEL_SECTORS       ; number of sectors to read
+    dw LOAD_OFFSET          ; destination offset
+    dw LOAD_SEGMENT         ; destination segment
+    dq 1                    ; start LBA
+
 disk_error_msg: db 'Disk Error', 0
 
 times 510 - ($ - $$) db 0
