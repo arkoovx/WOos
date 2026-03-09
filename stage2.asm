@@ -7,6 +7,7 @@ EXTERN kmain
 %define VBE_MODE_1024x768x32 0x118
 %define VBE_SET_LINEAR      0x4000
 %define LONG_MODE_STACK_TOP 0x0009F000
+%define BOCHS_LFB_FALLBACK  0xE0000000
 
 SECTION .text.boot
 _start:
@@ -38,6 +39,14 @@ _start:
     mov [boot_info + 12], ax
     mov al, [vbe_mode_info + 0x19]
     mov [boot_info + 14], al
+
+    ; Some BIOS/emulator combinations may report success but leave an invalid
+    ; PhysBasePtr in mode info. If LFB looks suspicious, force Bochs default.
+    mov eax, [boot_info + 0]
+    cmp eax, 0x80000000
+    jae .lfb_ok
+    mov dword [boot_info + 0], BOCHS_LFB_FALLBACK
+.lfb_ok:
 
     cli
     lgdt [gdt64_descriptor]
