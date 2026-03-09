@@ -9,8 +9,8 @@ LDFLAGS   := -m elf_x86_64 -T linker.ld
 
 all: os.img
 
-bootsect.bin: bootsect.asm
-	$(NASM) -f bin bootsect.asm -o bootsect.bin
+boot.bin: boot.asm kernel.bin
+	$(NASM) -f bin -DKERNEL_SECTORS=$(shell expr $$(stat -c%s kernel.bin) / 512) boot.asm -o boot.bin
 
 stage2.o: stage2.asm
 	$(NASM) -f elf64 stage2.asm -o stage2.o
@@ -23,15 +23,16 @@ kernel.elf: stage2.o kernel.o linker.ld
 
 kernel.bin: kernel.elf
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
+	truncate -s %512 kernel.bin
 
-os.img: bootsect.bin kernel.bin
+os.img: boot.bin kernel.bin
 	dd if=/dev/zero of=os.img bs=1024 count=1440
-	dd if=bootsect.bin of=os.img conv=notrunc
+	dd if=boot.bin of=os.img conv=notrunc
 	dd if=kernel.bin of=os.img seek=1 conv=notrunc
 
 verify-layout: os.img
 	dd if=os.img bs=1 skip=512 count=32 status=none | od -An -tx1
-	$(OBJDUMP) -D -b binary -m i386:x86-64 --start-address=512 --stop-address=640 os.img
+	$(OBJDUMP) -D -b binary -m i386 --start-address=512 --stop-address=640 os.img
 
 clean:
 	rm -f *.o *.bin *.elf *.img
