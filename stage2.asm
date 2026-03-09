@@ -62,28 +62,51 @@ protected_mode_start:
 
     xor eax, eax
     mov edi, pml4_table
-    mov ecx, (4096 * 2) / 4
+    mov ecx, (4096 * 6) / 4
     rep stosd
 
     mov eax, pdpt_table
     or eax, 0x03
     mov [pml4_table], eax
 
-    ; Identity-map low 4 GiB using 1 GiB pages so VBE LFB addresses are valid.
-    mov dword [pdpt_table + 0], 0x00000083
-    mov dword [pdpt_table + 4], 0x00000000
-    mov dword [pdpt_table + 8], 0x40000083
-    mov dword [pdpt_table + 12], 0x00000000
-    mov dword [pdpt_table + 16], 0x80000083
-    mov dword [pdpt_table + 20], 0x00000000
-    mov dword [pdpt_table + 24], 0xC0000083
-    mov dword [pdpt_table + 28], 0x00000000
+    ; Identity-map low 4 GiB using 2 MiB pages. This avoids relying on 1 GiB
+    ; page support, which is not guaranteed on every virtual CPU model.
+    mov eax, pd_table_0
+    or eax, 0x03
+    mov [pdpt_table + 0], eax
+
+    mov eax, pd_table_1
+    or eax, 0x03
+    mov [pdpt_table + 8], eax
+
+    mov eax, pd_table_2
+    or eax, 0x03
+    mov [pdpt_table + 16], eax
+
+    mov eax, pd_table_3
+    or eax, 0x03
+    mov [pdpt_table + 24], eax
+
+    ; Fill 4 page directories * 512 entries with 2 MiB identity mappings.
+    mov edi, pd_table_0
+    xor ebx, ebx
+    mov ecx, 2048
+.map_2m_loop:
+    mov eax, ebx
+    or eax, 0x83                ; present + writable + page size (2 MiB)
+    mov [edi], eax
+    mov dword [edi + 4], 0
+    add ebx, 0x200000
+    add edi, 8
+    loop .map_2m_loop
 
     mov eax, pml4_table
     mov cr3, eax
 
     mov eax, cr4
-    or eax, 1 << 5
+    ; Enable PAE and PSE before turning on paging. Some emulators are
+    ; stricter about 2 MiB-page prerequisites.
+    or eax, (1 << 5) | (1 << 4)
     mov cr4, eax
 
     mov ecx, 0xC0000080
@@ -145,4 +168,16 @@ pml4_table:
     times 512 dq 0
 ALIGN 4096
 pdpt_table:
+    times 512 dq 0
+ALIGN 4096
+pd_table_0:
+    times 512 dq 0
+ALIGN 4096
+pd_table_1:
+    times 512 dq 0
+ALIGN 4096
+pd_table_2:
+    times 512 dq 0
+ALIGN 4096
+pd_table_3:
     times 512 dq 0
