@@ -5,24 +5,29 @@ SECTIONS
 {
     . = 0x8000;
 
+    .text.boot : ALIGN(16)
+    {
+        KEEP(*(.text.boot))
+    }
+
     .text : ALIGN(16)
     {
-        *(.text*)
+        *(.text .text.*)
     }
 
     .rodata : ALIGN(16)
     {
-        *(.rodata*)
+        *(.rodata .rodata.*)
     }
 
     .data : ALIGN(16)
     {
-        *(.data*)
+        *(.data .data.*)
     }
 
     .bss : ALIGN(16)
     {
-        *(.bss*)
+        *(.bss .bss.*)
         *(COMMON)
     }
 

@@ -7,7 +7,7 @@ EXTERN kmain
 %define VBE_MODE_1024x768x32 0x118
 %define VBE_SET_LINEAR      0x4000
 
-SECTION .text
+SECTION .text.boot
 _start:
     mov ax, 0x4F01
     mov cx, VBE_MODE_1024x768x32
@@ -43,6 +43,7 @@ stage2_fail:
     hlt
     jmp stage2_fail
 
+SECTION .text
 BITS 32
 protected_mode_start:
     mov ax, 0x10
@@ -54,19 +55,22 @@ protected_mode_start:
 
     xor eax, eax
     mov edi, pml4_table
-    mov ecx, (4096 * 3) / 4
+    mov ecx, (4096 * 2) / 4
     rep stosd
 
     mov eax, pdpt_table
     or eax, 0x03
     mov [pml4_table], eax
 
-    mov eax, page_directory
-    or eax, 0x03
-    mov [pdpt_table], eax
-
-    mov dword [page_directory], 0x00000083
-    mov dword [page_directory + 4], 0x00000000
+    ; Identity-map low 4 GiB using 1 GiB pages so VBE LFB addresses are valid.
+    mov dword [pdpt_table + 0], 0x00000083
+    mov dword [pdpt_table + 4], 0x00000000
+    mov dword [pdpt_table + 8], 0x40000083
+    mov dword [pdpt_table + 12], 0x00000000
+    mov dword [pdpt_table + 16], 0x80000083
+    mov dword [pdpt_table + 20], 0x00000000
+    mov dword [pdpt_table + 24], 0xC0000083
+    mov dword [pdpt_table + 28], 0x00000000
 
     mov eax, pml4_table
     mov cr3, eax
@@ -132,7 +136,4 @@ pml4_table:
     times 512 dq 0
 ALIGN 4096
 pdpt_table:
-    times 512 dq 0
-ALIGN 4096
-page_directory:
     times 512 dq 0

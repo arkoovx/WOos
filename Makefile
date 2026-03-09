@@ -2,6 +2,7 @@ NASM      := nasm
 CC        := gcc
 LD        := ld
 OBJCOPY   := objcopy
+OBJDUMP   := objdump
 
 CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -nostdlib -nostartfiles -Wall -Wextra
 LDFLAGS   := -m elf_x86_64 -T linker.ld
@@ -28,7 +29,11 @@ os.img: bootsect.bin kernel.bin
 	dd if=bootsect.bin of=os.img conv=notrunc
 	dd if=kernel.bin of=os.img seek=1 conv=notrunc
 
+verify-layout: os.img
+	dd if=os.img bs=1 skip=512 count=32 status=none | od -An -tx1
+	$(OBJDUMP) -D -b binary -m i386:x86-64 --start-address=512 --stop-address=640 os.img
+
 clean:
 	rm -f *.o *.bin *.elf *.img
 
-.PHONY: all clean
+.PHONY: all clean verify-layout

@@ -20,13 +20,17 @@ jobs:
       - name: Build image
         run: make os.img
 
+      - name: Dump early disk sectors
+        run: |
+          objdump -D -b binary -m i386:x86-64 os.img | sed -n '1,220p'
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: woos-image
           path: os.img
+
       - name: Verify build
         run: |
           ls -l os.img
           strings os.img | grep "KERNEL_START_MARKER" || (echo "KERNEL NOT FOUND IN IMAGE!" && exit 1)
-

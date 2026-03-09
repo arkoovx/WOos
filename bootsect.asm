@@ -5,6 +5,7 @@ BITS 16
 ORG 0x7C00
 
 %define STAGE2_SECTORS 64
+%define MAX_RETRIES    3
 
 boot_start:
     cli
@@ -17,10 +18,24 @@ boot_start:
     mov [boot_drive], dl
 
     mov si, disk_address_packet
+    mov byte [retry_count], MAX_RETRIES
+
+.read_retry:
     mov dl, [boot_drive]
     mov ah, 0x42
     int 0x13
-    jc boot_fail
+    jnc .check_count
+
+    mov ah, 0x00
+    int 0x13
+
+    dec byte [retry_count]
+    jnz .read_retry
+    jmp boot_fail
+
+.check_count:
+    cmp word [disk_address_packet + 2], STAGE2_SECTORS
+    jne boot_fail
 
     jmp 0x0000:0x8000
 
@@ -29,6 +44,7 @@ boot_fail:
     jmp boot_fail
 
 boot_drive: db 0
+retry_count: db 0
 
 disk_address_packet:
     db 0x10
