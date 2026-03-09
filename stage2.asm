@@ -6,9 +6,15 @@ EXTERN kmain
 
 %define VBE_MODE_1024x768x32 0x118
 %define VBE_SET_LINEAR      0x4000
+%define LONG_MODE_STACK_TOP 0x0009F000
 
 SECTION .text.boot
 _start:
+    cld
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+
     mov ax, 0x4F01
     mov cx, VBE_MODE_1024x768x32
     mov di, vbe_mode_info
@@ -33,6 +39,7 @@ _start:
     mov al, [vbe_mode_info + 0x19]
     mov [boot_info + 14], al
 
+    cli
     lgdt [gdt64_descriptor]
     mov eax, cr0
     or eax, 0x1
@@ -97,7 +104,9 @@ long_mode_start:
     mov es, ax
     mov ss, ax
 
-    mov rsp, 0x90000
+    ; Keep the stack below VGA memory (0xA0000) and away from stage2/kernel image
+    ; loaded at 0x8000.
+    mov rsp, LONG_MODE_STACK_TOP
     mov rbp, rsp
 
     lea rdi, [rel boot_info]
