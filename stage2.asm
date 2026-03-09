@@ -127,7 +127,7 @@ protected_mode_start:
     or eax, (1 << 31) | (1 << 0)
     mov cr0, eax
 
-    jmp 0x08:long_mode_start
+    jmp 0x18:long_mode_start
 
 BITS 64
 long_mode_start:
@@ -163,12 +163,14 @@ vbe_mode_info:
 
 ALIGN 16
 gdt64:
-    dq 0x0000000000000000
-    dq 0x00AF9A000000FFFF
-    dq 0x00AF92000000FFFF
+    dq 0x0000000000000000          ; 0x00: null
+    dq 0x00CF9A000000FFFF          ; 0x08: 32-bit code (for protected-mode trampoline)
+    dq 0x00CF92000000FFFF          ; 0x10: data (L=0, valid for strict emulators)
+    dq 0x00AF9A000000FFFF          ; 0x18: 64-bit code
 
+gdt64_end:
 gdt64_descriptor:
-    dw gdt64_descriptor - gdt64 - 1
+    dw gdt64_end - gdt64 - 1
     dq gdt64
 
 SECTION .paging ALIGN=4096
