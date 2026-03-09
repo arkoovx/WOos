@@ -7,6 +7,7 @@ EXTERN kmain
 %define VBE_MODE_1024x768x32 0x118
 %define VBE_SET_LINEAR      0x4000
 %define LONG_MODE_STACK_TOP 0x0009F000
+%define BOCHS_LFB_FALLBACK  0xE0000000
 
 SECTION .text.boot
 _start:
@@ -39,6 +40,14 @@ _start:
     mov al, [vbe_mode_info + 0x19]
     mov [boot_info + 14], al
 
+    ; Some BIOS/emulator combinations may report success but leave an invalid
+    ; PhysBasePtr in mode info. If LFB looks suspicious, force Bochs default.
+    mov eax, [boot_info + 0]
+    cmp eax, 0x80000000
+    jae .lfb_ok
+    mov dword [boot_info + 0], BOCHS_LFB_FALLBACK
+.lfb_ok:
+
     cli
     lgdt [gdt64_descriptor]
     mov eax, cr0
@@ -62,28 +71,51 @@ protected_mode_start:
 
     xor eax, eax
     mov edi, pml4_table
-    mov ecx, (4096 * 2) / 4
+    mov ecx, (4096 * 6) / 4
     rep stosd
 
     mov eax, pdpt_table
     or eax, 0x03
     mov [pml4_table], eax
 
-    ; Identity-map low 4 GiB using 1 GiB pages so VBE LFB addresses are valid.
-    mov dword [pdpt_table + 0], 0x00000083
-    mov dword [pdpt_table + 4], 0x00000000
-    mov dword [pdpt_table + 8], 0x40000083
-    mov dword [pdpt_table + 12], 0x00000000
-    mov dword [pdpt_table + 16], 0x80000083
-    mov dword [pdpt_table + 20], 0x00000000
-    mov dword [pdpt_table + 24], 0xC0000083
-    mov dword [pdpt_table + 28], 0x00000000
+    ; Identity-map low 4 GiB using 2 MiB pages. This avoids relying on 1 GiB
+    ; page support, which is not guaranteed on every virtual CPU model.
+    mov eax, pd_table_0
+    or eax, 0x03
+    mov [pdpt_table + 0], eax
+
+    mov eax, pd_table_1
+    or eax, 0x03
+    mov [pdpt_table + 8], eax
+
+    mov eax, pd_table_2
+    or eax, 0x03
+    mov [pdpt_table + 16], eax
+
+    mov eax, pd_table_3
+    or eax, 0x03
+    mov [pdpt_table + 24], eax
+
+    ; Fill 4 page directories * 512 entries with 2 MiB identity mappings.
+    mov edi, pd_table_0
+    xor ebx, ebx
+    mov ecx, 2048
+.map_2m_loop:
+    mov eax, ebx
+    or eax, 0x83                ; present + writable + page size (2 MiB)
+    mov [edi], eax
+    mov dword [edi + 4], 0
+    add ebx, 0x200000
+    add edi, 8
+    loop .map_2m_loop
 
     mov eax, pml4_table
     mov cr3, eax
 
     mov eax, cr4
-    or eax, 1 << 5
+    ; Enable PAE and PSE before turning on paging. Some emulators are
+    ; stricter about 2 MiB-page prerequisites.
+    or eax, (1 << 5) | (1 << 4)
     mov cr4, eax
 
     mov ecx, 0xC0000080
@@ -95,7 +127,7 @@ protected_mode_start:
     or eax, (1 << 31) | (1 << 0)
     mov cr0, eax
 
-    jmp 0x08:long_mode_start
+    jmp 0x18:long_mode_start
 
 BITS 64
 long_mode_start:
@@ -131,12 +163,14 @@ vbe_mode_info:
 
 ALIGN 16
 gdt64:
-    dq 0x0000000000000000
-    dq 0x00AF9A000000FFFF
-    dq 0x00AF92000000FFFF
+    dq 0x0000000000000000          ; 0x00: null
+    dq 0x00CF9A000000FFFF          ; 0x08: 32-bit code (for protected-mode trampoline)
+    dq 0x00CF92000000FFFF          ; 0x10: data (L=0, valid for strict emulators)
+    dq 0x00AF9A000000FFFF          ; 0x18: 64-bit code
 
+gdt64_end:
 gdt64_descriptor:
-    dw gdt64_descriptor - gdt64 - 1
+    dw gdt64_end - gdt64 - 1
     dq gdt64
 
 SECTION .paging ALIGN=4096
@@ -145,4 +179,16 @@ pml4_table:
     times 512 dq 0
 ALIGN 4096
 pdpt_table:
+    times 512 dq 0
+ALIGN 4096
+pd_table_0:
+    times 512 dq 0
+ALIGN 4096
+pd_table_1:
+    times 512 dq 0
+ALIGN 4096
+pd_table_2:
+    times 512 dq 0
+ALIGN 4096
+pd_table_3:
     times 512 dq 0
