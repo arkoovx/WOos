@@ -40,11 +40,11 @@ _start:
     mov al, [vbe_mode_info + 0x19]
     mov [boot_info + 14], al
 
-    ; Some BIOS/emulator combinations may report success but leave an invalid
-    ; PhysBasePtr in mode info. If LFB looks suspicious, force Bochs default.
+    ; Some BIOS/emulator combinations may report success but leave a null
+    ; PhysBasePtr in mode info. In that case, fall back to Bochs/QEMU default.
     mov eax, [boot_info + 0]
-    cmp eax, 0x80000000
-    jae .lfb_ok
+    test eax, eax
+    jnz .lfb_ok
     mov dword [boot_info + 0], BOCHS_LFB_FALLBACK
 .lfb_ok:
 
