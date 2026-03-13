@@ -6,20 +6,27 @@ OBJDUMP   := objdump
 
 CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra
 LDFLAGS   := -m elf_x86_64 -T linker.ld
+KERNEL_OBJS := stage2.o kernel.o fb.o ui.o
 
 all: os.img
 
-boot.bin: boot.asm kernel.bin
+boot.bin: kernel.bin boot.asm
 	$(NASM) -f bin -DKERNEL_SECTORS=$(shell expr $$(stat -c%s kernel.bin) / 512) boot.asm -o boot.bin
 
 stage2.o: stage2.asm
 	$(NASM) -f elf64 stage2.asm -o stage2.o
 
-kernel.o: kernel.c
+kernel.o: kernel.c kernel.h ui.h
 	$(CC) $(CFLAGS) -c kernel.c -o kernel.o
 
-kernel.elf: stage2.o kernel.o linker.ld
-	$(LD) $(LDFLAGS) stage2.o kernel.o -o kernel.elf
+fb.o: fb.c fb.h kernel.h
+	$(CC) $(CFLAGS) -c fb.c -o fb.o
+
+ui.o: ui.c ui.h fb.h kernel.h
+	$(CC) $(CFLAGS) -c ui.c -o ui.o
+
+kernel.elf: $(KERNEL_OBJS) linker.ld
+	$(LD) $(LDFLAGS) $(KERNEL_OBJS) -o kernel.elf
 
 kernel.bin: kernel.elf
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
