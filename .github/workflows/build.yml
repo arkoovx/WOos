@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -24,13 +28,15 @@ jobs:
         run: |
           objdump -D -b binary -m i386:x86-64 os.img | sed -n '1,220p'
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: woos-image
-          path: os.img
-
       - name: Verify build
         run: |
           ls -l os.img
           strings os.img | grep "KERNEL_START_MARKER" || (echo "KERNEL NOT FOUND IN IMAGE!" && exit 1)
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: os-image-${{ github.sha }}
+          path: os.img
+          if-no-files-found: error
+          retention-days: 14
