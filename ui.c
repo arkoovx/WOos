@@ -61,7 +61,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
     (void)clip;
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, 12, 8, 136, 18, COLOR_ACCENT);
-    fb_draw_text(info, 18, 13, "WOOS 1.3.0", COLOR_TEXT_LIGHT, COLOR_ACCENT);
+    fb_draw_text(info, 18, 13, "WOOS 1.4.0", COLOR_TEXT_LIGHT, COLOR_ACCENT);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -80,7 +80,7 @@ static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip) 
 
 static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
     (void)clip;
-    fb_draw_text(info, 16, (uint16_t)(info->height - 20), "NEXT: DIRTY RECTS + DBL BUFFER", COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 16, (uint16_t)(info->height - 20), "NEXT: INPUT PATH + CURSOR", COLOR_TEXT_LIGHT, COLOR_BG_DARK);
 }
 
 static void ui_draw_region(video_info_t* info, const ui_dirty_rect_t* clip) {
@@ -137,6 +137,7 @@ void ui_render_dirty(video_info_t* info) {
         }
 
         ui_draw_region(info, &clip);
+        fb_present_rect(info, clip.x, clip.y, clip.w, clip.h);
     }
 
     g_dirty_count = 0;

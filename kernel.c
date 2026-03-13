@@ -3,6 +3,7 @@
 __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 
 #include "kernel.h"
+#include "fb.h"
 #include "ui.h"
 
 typedef enum init_stage {
@@ -39,6 +40,7 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             sanitize_boot_info(video);
             break;
         case INIT_PLATFORM:
+            fb_init(video);
             break;
         case INIT_DRIVERS:
             break;
