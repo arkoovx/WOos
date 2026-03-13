@@ -1,40 +1,75 @@
 name: release-woos
 
 on:
-  push:
-    tags:
-      - 'v*'
+  pull_request_target:
+    types:
+      - closed
 
 permissions:
   contents: write
-  actions: read
+  pull-requests: read
 
 jobs:
-  release:
+  auto_release:
+    if: ${{ github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout merge commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
-      - name: Resolve version from tag
+      - name: Verify PR approval exists
+        id: approval
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+            const reviews = await github.paginate(
+              github.rest.pulls.listReviews,
+              { owner, repo, pull_number, per_page: 100 }
+            );
+            const hasApproval = reviews.some((review) => review.state === 'APPROVED');
+            core.info(`Reviews fetched: ${reviews.length}, has approval: ${hasApproval}`);
+            core.setOutput('approved', hasApproval ? 'true' : 'false');
+
+      - name: Stop if PR has no approvals
+        if: ${{ steps.approval.outputs.approved != 'true' }}
+        run: |
+          echo "PR #${{ github.event.pull_request.number }} merged without approval. Release skipped."
+          exit 0
+
+      - name: Install build tools
+        if: ${{ steps.approval.outputs.approved == 'true' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm xorriso
+
+      - name: Build os.img
+        if: ${{ steps.approval.outputs.approved == 'true' }}
+        run: make os.img
+
+      - name: Resolve version and tag
+        if: ${{ steps.approval.outputs.approved == 'true' }}
         id: version
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          VERSION="$(cat VERSION)"
+          TAG="v${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Download os.img artifact from build workflow
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          workflow: build.yml
-          commit: ${{ github.sha }}
-          name: os-image-${{ github.sha }}
-          path: dist
-          if_no_artifact_found: fail
+      - name: Ensure tag does not exist
+        if: ${{ steps.approval.outputs.approved == 'true' }}
+        run: |
+          if git ls-remote --exit-code --tags origin "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.version.outputs.tag }} already exists."
+            exit 1
+          fi
 
       - name: Build release notes from changelog
+        if: ${{ steps.approval.outputs.approved == 'true' }}
         id: notes
         run: |
           NOTES_FILE="release_notes.md"
@@ -42,27 +77,28 @@ jobs:
           {
             echo "# WoOS ${VERSION}"
             echo
-            echo "Автоматический релиз, сформированный из CI-артефакта сборки."
+            echo "Автоматический релиз после merge одобренного PR #${{ github.event.pull_request.number }}."
             echo
             echo "## Изменения"
             bash .github/scripts/extract_changelog.sh "$VERSION"
           } > "$NOTES_FILE"
-          {
-            echo "notes_path=${NOTES_FILE}"
-          } >> "$GITHUB_OUTPUT"
+          echo "notes_path=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
+
 
       - name: Verify release payload
+        if: ${{ steps.approval.outputs.approved == 'true' }}
         run: |
-          test -f dist/os.img
+          test -f os.img
           test -s "${{ steps.notes.outputs.notes_path }}"
-
       - name: Publish GitHub Release
+        if: ${{ steps.approval.outputs.approved == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.event.pull_request.merge_commit_sha }}
           name: WoOS ${{ steps.version.outputs.version }}
           body_path: ${{ steps.notes.outputs.notes_path }}
           files: |
-            dist/os.img
+            os.img
           draft: false
           prerelease: false
