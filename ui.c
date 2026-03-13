@@ -15,6 +15,21 @@ static ui_dirty_rect_t g_dirty_queue[UI_DIRTY_CAPACITY];
 static uint16_t g_dirty_count = 0;
 static uint16_t g_last_dirty_count = 0;
 
+#define CURSOR_W 10u
+#define CURSOR_H 16u
+#define COLOR_CURSOR 0xFFFFFFu
+
+typedef struct ui_cursor_state {
+    uint16_t x;
+    uint16_t y;
+    uint8_t buttons;
+    uint8_t visible;
+    uint32_t saved[CURSOR_W * CURSOR_H];
+} ui_cursor_state_t;
+
+static ui_cursor_state_t g_cursor = {0, 0, 0, 0, {0}};
+
+
 static inline uint16_t clamp_u16(uint16_t value, uint16_t max) {
     return (value > max) ? max : value;
 }
@@ -61,7 +76,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
     (void)clip;
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, 12, 8, 136, 18, COLOR_ACCENT);
-    fb_draw_text(info, 18, 13, "WOOS 1.4.0", COLOR_TEXT_LIGHT, COLOR_ACCENT);
+    fb_draw_text(info, 18, 13, "WOOS 1.5.2", COLOR_TEXT_LIGHT, COLOR_ACCENT);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -80,7 +95,7 @@ static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip) 
 
 static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
     (void)clip;
-    fb_draw_text(info, 16, (uint16_t)(info->height - 20), "NEXT: INPUT PATH + CURSOR", COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 16, (uint16_t)(info->height - 20), "NEXT: PS/2 PACKETS + EVENT QUEUE", COLOR_TEXT_LIGHT, COLOR_BG_DARK);
 }
 
 static void ui_draw_region(video_info_t* info, const ui_dirty_rect_t* clip) {
@@ -88,6 +103,85 @@ static void ui_draw_region(video_info_t* info, const ui_dirty_rect_t* clip) {
     draw_top_panel(info, clip);
     draw_status_window(info, clip);
     draw_footer(info, clip);
+}
+
+static inline uint32_t* fb_row_ptr(video_info_t* info, uint16_t y) {
+    return (uint32_t*)((uint8_t*)(uint64_t)info->framebuffer + ((uint64_t)y * info->pitch));
+}
+
+static void cursor_restore_underlay(video_info_t* info) {
+    if (!g_cursor.visible) {
+        return;
+    }
+
+    for (uint16_t py = 0; py < CURSOR_H; py++) {
+        uint16_t y = (uint16_t)(g_cursor.y + py);
+        if (y >= info->height) {
+            break;
+        }
+
+        uint32_t* row = fb_row_ptr(info, y);
+        for (uint16_t px = 0; px < CURSOR_W; px++) {
+            uint16_t x = (uint16_t)(g_cursor.x + px);
+            if (x >= info->width) {
+                break;
+            }
+
+            row[x] = g_cursor.saved[(py * CURSOR_W) + px];
+        }
+    }
+
+    fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
+}
+
+static void cursor_draw(video_info_t* info) {
+    for (uint16_t py = 0; py < CURSOR_H; py++) {
+        uint16_t y = (uint16_t)(g_cursor.y + py);
+        if (y >= info->height) {
+            break;
+        }
+
+        uint32_t* row = fb_row_ptr(info, y);
+        for (uint16_t px = 0; px < CURSOR_W; px++) {
+            uint16_t x = (uint16_t)(g_cursor.x + px);
+            uint32_t* slot = &g_cursor.saved[(py * CURSOR_W) + px];
+
+            if (x >= info->width) {
+                *slot = 0;
+                continue;
+            }
+
+            *slot = row[x];
+
+            // Простая L-образная форма курсора без альфа-смешивания.
+            uint8_t on = (px == 0) || (py == 0) || (px == py && px < 8);
+            if (on) {
+                row[x] = COLOR_CURSOR;
+            }
+        }
+    }
+
+    g_cursor.visible = 1;
+    fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
+}
+
+void ui_set_cursor(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons) {
+    uint16_t max_x = (info->width > CURSOR_W) ? (uint16_t)(info->width - CURSOR_W) : 0;
+    uint16_t max_y = (info->height > CURSOR_H) ? (uint16_t)(info->height - CURSOR_H) : 0;
+
+    if (x > max_x) {
+        x = max_x;
+    }
+
+    if (y > max_y) {
+        y = max_y;
+    }
+
+    cursor_restore_underlay(info);
+    g_cursor.x = x;
+    g_cursor.y = y;
+    g_cursor.buttons = buttons;
+    cursor_draw(info);
 }
 
 void ui_mark_dirty(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
@@ -150,4 +244,5 @@ uint16_t ui_last_dirty_count(void) {
 void ui_render_desktop(video_info_t* info) {
     ui_mark_dirty(0, 0, info->width, info->height);
     ui_render_dirty(info);
+    ui_set_cursor(info, (uint16_t)(info->width / 2), (uint16_t)(info->height / 2), 0);
 }
