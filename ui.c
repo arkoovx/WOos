@@ -25,7 +25,7 @@ void ui_render_desktop(video_info_t* info) {
 
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, 12, 8, 136, 18, COLOR_ACCENT);
-    fb_draw_text(info, 18, 13, "WOOS 1.0.2", COLOR_TEXT_LIGHT, COLOR_ACCENT);
+    fb_draw_text(info, 18, 13, "WOOS 1.2.0", COLOR_TEXT_LIGHT, COLOR_ACCENT);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 
     uint16_t win_w = (uint16_t)(info->width / 3);
@@ -38,5 +38,5 @@ void ui_render_desktop(video_info_t* info) {
     fb_rect(info, win_x, win_y, win_w, 22, COLOR_ACCENT);
     fb_draw_text(info, (uint16_t)(win_x + 8), (uint16_t)(win_y + 7), "STATUS: UI SHELL READY", COLOR_TEXT_LIGHT, COLOR_ACCENT);
 
-    fb_draw_text(info, 16, (uint16_t)(info->height - 20), "NEXT: IDT TIMER PMM VMM MOUSE", COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 16, (uint16_t)(info->height - 20), "NEXT: PS2 CURSOR + EVENT QUEUE", COLOR_TEXT_LIGHT, COLOR_BG_DARK);
 }

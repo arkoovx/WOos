@@ -8,6 +8,9 @@ EXTERN kmain
 %define VBE_SET_LINEAR      0x4000
 %define LONG_MODE_STACK_TOP 0x0009F000
 %define BOCHS_LFB_FALLBACK  0xE0000000
+%define BOOT_INFO_MAGIC     0x31424957 ; 'WIB1' (WoOS Info Block v1)
+%define BOOT_INFO_VERSION   0x0001
+%define BOOT_INFO_SIZE      24
 
 SECTION .text.boot
 _start:
@@ -15,6 +18,10 @@ _start:
     xor ax, ax
     mov ds, ax
     mov es, ax
+
+    mov dword [boot_info + 0], BOOT_INFO_MAGIC
+    mov word  [boot_info + 4], BOOT_INFO_VERSION
+    mov word  [boot_info + 6], BOOT_INFO_SIZE
 
     mov ax, 0x4F01
     mov cx, VBE_MODE_1024x768x32
@@ -30,22 +37,22 @@ _start:
     jne stage2_fail
 
     mov eax, [vbe_mode_info + 0x28]
-    mov [boot_info + 0], eax
+    mov [boot_info + 8], eax
     mov ax, [vbe_mode_info + 0x10]
-    mov [boot_info + 8], ax
+    mov [boot_info + 16], ax
     mov ax, [vbe_mode_info + 0x12]
-    mov [boot_info + 10], ax
+    mov [boot_info + 18], ax
     mov ax, [vbe_mode_info + 0x14]
-    mov [boot_info + 12], ax
+    mov [boot_info + 20], ax
     mov al, [vbe_mode_info + 0x19]
-    mov [boot_info + 14], al
+    mov [boot_info + 22], al
 
     ; Some BIOS/emulator combinations may report success but leave a null
     ; PhysBasePtr in mode info. In that case, fall back to Bochs/QEMU default.
-    mov eax, [boot_info + 0]
+    mov eax, [boot_info + 8]
     test eax, eax
     jnz .lfb_ok
-    mov dword [boot_info + 0], BOCHS_LFB_FALLBACK
+    mov dword [boot_info + 8], BOCHS_LFB_FALLBACK
 .lfb_ok:
 
     cli
@@ -150,6 +157,9 @@ long_mode_start:
 
 ALIGN 16
 boot_info:
+    dd 0
+    dw 0
+    dw 0
     dq 0
     dw 0
     dw 0
