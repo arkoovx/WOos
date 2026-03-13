@@ -5,8 +5,8 @@
 ## Что уже есть
 - Загрузка через `boot.asm` + `stage2.asm`.
 - Переход в long mode и запуск ядра.
-- Простая графическая подсистема (`fb`) и базовый desktop-style UI (`ui`).
-- Текстовый bitmap-рендер для отображения статуса и версий.
+- Простая графическая подсистема (`fb`) и desktop-style UI (`ui`) с partial redraw через dirty-rectangles.
+- Текстовый bitmap-рендер для отображения статуса и версий, плюс счётчик dirty-областей как профилировочная метка кадра.
 - Базовый init-flow ядра по стадиям: `early -> platform -> drivers -> ui`.
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
 
