@@ -1,6 +1,6 @@
 # WoOS
 
-Минималистичная 64-битная учебная ОС с графическим framebuffer-интерфейсом, собранная в freestanding-режиме без libc.
+64-битная ОС с графическим framebuffer-интерфейсом, собранная в freestanding-режиме без libc.
 
 ## Что уже есть
 - Загрузка через `boot.asm` + `stage2.asm`.
@@ -31,7 +31,7 @@ make os.img DBL_BUFFER=1
 - `stage2.asm` — второй этап загрузки и старт ядра.
 - `kernel.c` — вход и orchestration базовых подсистем.
 - `fb.c/.h` — примитивы framebuffer-рендера.
-- `ui.c/.h` — простая отрисовка оболочки.
+- `ui.c/.h` — отрисовка оболочки.
 - `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
 
 ## Процесс разработки
@@ -46,8 +46,8 @@ make os.img DBL_BUFFER=1
 Подробности — в `RELEASE_CHECKLIST.md`.
 
 ## Релизы
-- CI-сборка (`.github/workflows/build.yml`) публикует `os.img` как артефакт Actions.
-- Релизный workflow (`.github/workflows/release.yml`) при пуше тега `v*`:
-  - достаёт `os.img` из артефактов Actions,
-  - генерирует релизные заметки из `CHANGELOG.md`,
-  - создаёт GitHub Release и прикладывает образ.
+- CI-сборка (`.github/workflows/build.yml`) публикует `os.img` как артефакт Actions для проверки изменений в PR.
+- Релизный workflow (`.github/workflows/release.yml`) автоматически запускается после merge PR и публикует релиз только для одобренного PR (есть минимум один `APPROVED` review):
+  - собирает `os.img` из merge-коммита,
+  - берёт версию из `VERSION` и извлекает описание из соответствующей секции `CHANGELOG.md`,
+  - создаёт GitHub Release с тегом `vX.Y.Z` и прикладывает `os.img`.
