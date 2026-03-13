@@ -8,6 +8,9 @@ CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protect
 LDFLAGS   := -m elf_x86_64 -T linker.ld
 KERNEL_OBJS := stage2.o kernel.o fb.o ui.o
 
+DBL_BUFFER ?= 0
+FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)
+
 all: os.img
 
 boot.bin: kernel.bin boot.asm
@@ -20,7 +23,7 @@ kernel.o: kernel.c kernel.h ui.h
 	$(CC) $(CFLAGS) -c kernel.c -o kernel.o
 
 fb.o: fb.c fb.h kernel.h
-	$(CC) $(CFLAGS) -c fb.c -o fb.o
+	$(CC) $(CFLAGS) $(FB_CPPFLAGS) -c fb.c -o fb.o
 
 ui.o: ui.c ui.h fb.h kernel.h
 	$(CC) $(CFLAGS) -c ui.c -o ui.o

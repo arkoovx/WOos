@@ -3,6 +3,12 @@
 #define FONT_W 8
 #define FONT_H 8
 
+#ifndef WOOS_ENABLE_DBL_BUFFER
+#define WOOS_ENABLE_DBL_BUFFER 0
+#endif
+
+#define FB_BACKBUFFER_CAPACITY (8u * 1024u * 1024u)
+
 static const uint8_t glyph_space[FONT_H] = {0, 0, 0, 0, 0, 0, 0, 0};
 static const uint8_t glyph_dot[FONT_H]   = {0, 0, 0, 0, 0, 0, 0x18, 0x18};
 static const uint8_t glyph_colon[FONT_H] = {0, 0x18, 0x18, 0, 0, 0x18, 0x18, 0};
@@ -72,18 +78,61 @@ static inline uint16_t clamp_u16(uint16_t value, uint16_t max) {
     return (value > max) ? max : value;
 }
 
+static inline uint16_t rect_end(uint16_t start, uint16_t length) {
+    return (uint16_t)(start + length);
+}
+
+#if WOOS_ENABLE_DBL_BUFFER
+static uint8_t* const g_backbuffer = (uint8_t*)(uint64_t)0x01000000ull;
+static uint8_t g_backbuffer_enabled = 0;
+
+static inline void mem_copy(uint8_t* dst, const uint8_t* src, uint16_t len) {
+    for (uint16_t i = 0; i < len; i++) {
+        dst[i] = src[i];
+    }
+}
+
+static inline uint8_t* fb_target_base(video_info_t* info) {
+    if (g_backbuffer_enabled) {
+        return g_backbuffer;
+    }
+
+    return (uint8_t*)(uint64_t)info->framebuffer;
+}
+#else
+static inline uint8_t* fb_target_base(video_info_t* info) {
+    return (uint8_t*)(uint64_t)info->framebuffer;
+}
+#endif
+
+void fb_init(video_info_t* info) {
+#if WOOS_ENABLE_DBL_BUFFER
+    uint32_t required = (uint32_t)info->pitch * (uint32_t)info->height;
+    g_backbuffer_enabled = (required <= FB_BACKBUFFER_CAPACITY) ? 1u : 0u;
+
+    if (g_backbuffer_enabled) {
+        uint8_t* front = (uint8_t*)(uint64_t)info->framebuffer;
+        for (uint32_t i = 0; i < required; i++) {
+            g_backbuffer[i] = front[i];
+        }
+    }
+#else
+    (void)info;
+#endif
+}
+
 static inline void fb_putpixel(video_info_t* info, uint16_t x, uint16_t y, uint32_t color) {
     if (x >= info->width || y >= info->height) {
         return;
     }
 
-    uint8_t* base = (uint8_t*)(uint64_t)info->framebuffer;
+    uint8_t* base = fb_target_base(info);
     uint32_t* row = (uint32_t*)(base + ((uint64_t)y * info->pitch));
     row[x] = color;
 }
 
 void fb_fill(video_info_t* info, uint32_t color) {
-    uint8_t* base = (uint8_t*)(uint64_t)info->framebuffer;
+    uint8_t* base = fb_target_base(info);
 
     for (uint16_t y = 0; y < info->height; y++) {
         uint32_t* row = (uint32_t*)(base + ((uint64_t)y * info->pitch));
@@ -96,7 +145,7 @@ void fb_fill(video_info_t* info, uint32_t color) {
 void fb_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint32_t color) {
     uint16_t x_end = clamp_u16((uint16_t)(x + w), info->width);
     uint16_t y_end = clamp_u16((uint16_t)(y + h), info->height);
-    uint8_t* base = (uint8_t*)(uint64_t)info->framebuffer;
+    uint8_t* base = fb_target_base(info);
 
     for (uint16_t py = y; py < y_end; py++) {
         uint32_t* row = (uint32_t*)(base + ((uint64_t)py * info->pitch));
@@ -141,4 +190,30 @@ void fb_draw_text(video_info_t* info, uint16_t x, uint16_t y, const char* text, 
         cursor_x = (uint16_t)(cursor_x + FONT_W);
         text++;
     }
+}
+
+void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+#if WOOS_ENABLE_DBL_BUFFER
+    if (!g_backbuffer_enabled || w == 0 || h == 0) {
+        return;
+    }
+
+    uint16_t x_end = clamp_u16(rect_end(x, w), info->width);
+    uint16_t y_end = clamp_u16(rect_end(y, h), info->height);
+    uint16_t copy_width = (uint16_t)(x_end - x);
+    uint16_t row_len = (uint16_t)(copy_width * sizeof(uint32_t));
+    uint8_t* front = (uint8_t*)(uint64_t)info->framebuffer;
+
+    for (uint16_t py = y; py < y_end; py++) {
+        uint8_t* src = g_backbuffer + ((uint64_t)py * info->pitch) + ((uint64_t)x * sizeof(uint32_t));
+        uint8_t* dst = front + ((uint64_t)py * info->pitch) + ((uint64_t)x * sizeof(uint32_t));
+        mem_copy(dst, src, row_len);
+    }
+#else
+    (void)info;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+#endif
 }

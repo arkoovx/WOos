@@ -16,6 +16,12 @@ make clean
 make os.img
 ```
 
+Для сборки с двойной буферизацией:
+```bash
+make clean
+make os.img DBL_BUFFER=1
+```
+
 Полезные цели:
 - `make verify-layout` — быстрый дамп и проверка расположения загрузочного/ядерного кода в образе.
 - `make clean` — очистка артефактов.
