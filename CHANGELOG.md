@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+- Существенно расширен `DEVELOPMENT_PLAN.md`: добавлены инженерные принципы, детальные этапы A–E, Definition of Done, метрики и порядок ближайших PR.
+- Добавлен `README.md` с быстрым стартом, структурой проекта, процессом разработки и описанием релизного контура.
+- Улучшен CI-build workflow: артефакт `os.img` публикуется с именем, привязанным к SHA (`os-image-<sha>`), добавлены настройки retention и concurrency.
+- Добавлен автоматический релизный workflow по тегам `v*`, который забирает `os.img` из Actions artifacts, формирует release notes из `CHANGELOG.md` и публикует GitHub Release.
+- Добавлен скрипт `.github/scripts/extract_changelog.sh` для извлечения секции версии из changelog.
+- Обновлён `RELEASE_CHECKLIST.md` с формальной политикой тегов и автопубликации.
+
 ## 1.0.2
 - Добавлен bitmap-рендер текста в framebuffer (`fb_draw_char`, `fb_draw_text`).
 - Обновлён desktop UI: отрисовка версии, статуса и технической строки следующего этапа.
