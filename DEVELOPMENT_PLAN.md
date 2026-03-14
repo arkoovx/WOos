@@ -63,7 +63,7 @@
 **Цель:** управляемый интерактивный UI.
 
 ### B.1 PS/2 и курсор
-- [ ] Инициализация PS/2-контроллера и чтение пакетов мыши.
+- [x] Инициализация PS/2-контроллера и чтение пакетов мыши.
 - [x] Поддержка состояния курсора (`x/y`, `buttons`, `clamp to screen`).
 - [x] Отрисовка курсора без полного redraw (save/restore фонового блока).
 
@@ -157,7 +157,7 @@
 ---
 
 ## 6) Ближайшие 3 PR (рекомендуемая последовательность)
-1. **PR-1:** стабилизация input path (PS/2 + cursor state + debug overlay).
+1. **PR-1:** стабилизация input path (PS/2 + cursor state + debug overlay). ✅ Выполнено.
 2. **PR-2:** ring buffer событий + UI handlers (hover/click). ✅ Выполнено.
 3. **PR-3:** IDT skeleton + timer tick + базовые panic diagnostics. ✅ Выполнено (IRQ keyboard/mouse остаётся в C.1).
 

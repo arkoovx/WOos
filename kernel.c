@@ -8,6 +8,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "ui.h"
 #include "idt.h"
 #include "timer.h"
+#include "mouse.h"
 
 typedef enum init_stage {
     INIT_EARLY = 0,
@@ -79,10 +80,7 @@ void kmain(video_info_t* video) {
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);
     uint16_t cursor_y = (uint16_t)(video->height / 2);
-    int16_t dx = 2;
-    int16_t dy = 1;
-    uint16_t max_x = (video->width > 12) ? (uint16_t)(video->width - 12) : 0;
-    uint16_t max_y = (video->height > 18) ? (uint16_t)(video->height - 18) : 0;
+    mouse_init(cursor_x, cursor_y);
 
 
     while (1) {
@@ -90,33 +88,13 @@ void kmain(video_info_t* video) {
             __asm__ __volatile__("pause");
         }
 
-
-        if (cursor_x <= 2 || cursor_x >= max_x) {
-            dx = (int16_t)-dx;
-        }
-
-        if (cursor_y <= 2 || cursor_y >= max_y) {
-            dy = (int16_t)-dy;
-        }
-
-        cursor_x = (uint16_t)(cursor_x + dx);
-        cursor_y = (uint16_t)(cursor_y + dy);
-
         input_event_t tick_event = {INPUT_EVENT_TIMER_TICK, 0, 0, 0};
-        input_event_t move_event = {INPUT_EVENT_MOUSE_MOVE, cursor_x, cursor_y, 0};
-        input_event_t button_event = {INPUT_EVENT_MOUSE_BUTTON, cursor_x, cursor_y, 0};
-
-        if ((timer_ticks() % 24u) >= 18u) {
-            button_event.buttons = 0x1u;
-            move_event.buttons = 0x1u;
-        }
 
         if (timer_poll_tick()) {
             input_push(&tick_event);
         }
 
-        input_push(&move_event);
-        input_push(&button_event);
+        mouse_poll();
 
         input_event_t next_event;
         while (input_pop(&next_event)) {

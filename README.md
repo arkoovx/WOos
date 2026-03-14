@@ -8,6 +8,7 @@
 - Простая графическая подсистема (`fb`) и desktop-style UI (`ui`) с partial redraw через dirty-rectangles.
 - Добавлено базовое состояние курсора с clamp-to-screen и отрисовкой через локальный save/restore фонового блока.
 - Добавлена очередь событий input (ring buffer) и базовый dispatcher для `mouse move` / `mouse button` / `timer tick`.
+- Добавлен polling-драйвер PS/2-мыши (`mouse`) с инициализацией через 8042 и разбором 3-байтовых пакетов в реальные UI-события.
 - Реализованы UI-handlers для hover/click по верхней панели (интерактивная подсветка и статус в footer).
 - Текстовый bitmap-рендер для отображения статуса и версий, плюс счётчик dirty-областей как профилировочная метка кадра.
 - Базовый init-flow ядра по стадиям: `early -> platform -> drivers -> ui`.
@@ -40,6 +41,7 @@ make os.img DBL_BUFFER=1
 - `input.c/.h` — очередь событий и input dispatcher contract.
 - `idt.c/.h`, `idt_asm.asm` — каркас подсистемы прерываний (IDT load + default stub).
 - `timer.c/.h` — программный heartbeat-таймер для событий `timer tick`.
+- `mouse.c/.h` — polling-драйвер PS/2-мыши и трансляция пакетов в очередь input.
 - `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
 
 ## Процесс разработки
