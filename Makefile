@@ -6,7 +6,7 @@ OBJDUMP   := objdump
 
 CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra
 LDFLAGS   := -m elf_x86_64 -T linker.ld
-KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o
+KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o mouse.o
 
 DBL_BUFFER ?= 0
 FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)
@@ -19,7 +19,7 @@ boot.bin: kernel.bin boot.asm
 stage2.o: stage2.asm
 	$(NASM) -f elf64 stage2.asm -o stage2.o
 
-kernel.o: kernel.c kernel.h ui.h input.h idt.h timer.h
+kernel.o: kernel.c kernel.h ui.h input.h idt.h timer.h mouse.h
 	$(CC) $(CFLAGS) -c kernel.c -o kernel.o
 
 idt_asm.o: idt_asm.asm
@@ -60,3 +60,6 @@ clean:
 	rm -f *.o *.bin *.elf *.img
 
 .PHONY: all clean verify-layout
+
+mouse.o: mouse.c mouse.h input.h kernel.h
+	$(CC) $(CFLAGS) -c mouse.c -o mouse.o
