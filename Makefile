@@ -6,7 +6,7 @@ OBJDUMP   := objdump
 
 CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra
 LDFLAGS   := -m elf_x86_64 -T linker.ld
-KERNEL_OBJS := stage2.o kernel.o fb.o ui.o
+KERNEL_OBJS := stage2.o kernel.o fb.o ui.o input.o
 
 DBL_BUFFER ?= 0
 FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)
@@ -19,8 +19,11 @@ boot.bin: kernel.bin boot.asm
 stage2.o: stage2.asm
 	$(NASM) -f elf64 stage2.asm -o stage2.o
 
-kernel.o: kernel.c kernel.h ui.h
+kernel.o: kernel.c kernel.h ui.h input.h
 	$(CC) $(CFLAGS) -c kernel.c -o kernel.o
+
+input.o: input.c input.h kernel.h
+	$(CC) $(CFLAGS) -c input.c -o input.o
 
 fb.o: fb.c fb.h kernel.h
 	$(CC) $(CFLAGS) $(FB_CPPFLAGS) -c fb.c -o fb.o

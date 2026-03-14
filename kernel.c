@@ -4,6 +4,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 
 #include "kernel.h"
 #include "fb.h"
+#include "input.h"
 #include "ui.h"
 
 typedef enum init_stage {
@@ -43,9 +44,23 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             fb_init(video);
             break;
         case INIT_DRIVERS:
+            input_init();
             break;
         case INIT_UI:
             ui_render_desktop(video);
+            break;
+    }
+}
+
+static void dispatch_input_event(video_info_t* video, const input_event_t* event) {
+    switch (event->type) {
+        case INPUT_EVENT_MOUSE_MOVE:
+            ui_handle_mouse_move(video, event->x, event->y, event->buttons);
+            break;
+        case INPUT_EVENT_MOUSE_BUTTON:
+            ui_handle_mouse_button(video, event->buttons);
+            break;
+        case INPUT_EVENT_TIMER_TICK:
             break;
     }
 }
@@ -63,10 +78,14 @@ void kmain(video_info_t* video) {
     uint16_t max_x = (video->width > 12) ? (uint16_t)(video->width - 12) : 0;
     uint16_t max_y = (video->height > 18) ? (uint16_t)(video->height - 18) : 0;
 
+    uint32_t tick = 0;
+
     while (1) {
         for (volatile uint32_t delay = 0; delay < 2500000u; delay++) {
             __asm__ __volatile__("pause");
         }
+
+        tick++;
 
         if (cursor_x <= 2 || cursor_x >= max_x) {
             dx = (int16_t)-dx;
@@ -78,6 +97,25 @@ void kmain(video_info_t* video) {
 
         cursor_x = (uint16_t)(cursor_x + dx);
         cursor_y = (uint16_t)(cursor_y + dy);
-        ui_set_cursor(video, cursor_x, cursor_y, 0);
+
+        input_event_t tick_event = {INPUT_EVENT_TIMER_TICK, 0, 0, 0};
+        input_event_t move_event = {INPUT_EVENT_MOUSE_MOVE, cursor_x, cursor_y, 0};
+        input_event_t button_event = {INPUT_EVENT_MOUSE_BUTTON, cursor_x, cursor_y, 0};
+
+        if ((tick % 24u) >= 18u) {
+            button_event.buttons = 0x1u;
+            move_event.buttons = 0x1u;
+        }
+
+        input_push(&tick_event);
+        input_push(&move_event);
+        input_push(&button_event);
+
+        input_event_t next_event;
+        while (input_pop(&next_event)) {
+            dispatch_input_event(video, &next_event);
+        }
+
+        ui_render_dirty(video);
     }
 }
