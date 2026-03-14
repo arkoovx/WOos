@@ -5,6 +5,8 @@
 #define COLOR_BG_LIGHT   0x141A22u
 #define COLOR_PANEL      0x1F2630u
 #define COLOR_ACCENT     0x58A6FFu
+#define COLOR_ACCENT_HOVER 0x79C0FFu
+#define COLOR_ACCENT_PRESSED 0x1F6FEBu
 #define COLOR_WINDOW     0xE6EDF3u
 #define COLOR_BORDER     0x2B3442u
 #define COLOR_TEXT_LIGHT 0xE6EDF3u
@@ -28,6 +30,18 @@ typedef struct ui_cursor_state {
 } ui_cursor_state_t;
 
 static ui_cursor_state_t g_cursor = {0, 0, 0, 0, {0}};
+
+typedef struct ui_interaction_state {
+    uint8_t panel_hover;
+    uint8_t panel_pressed;
+} ui_interaction_state_t;
+
+static ui_interaction_state_t g_ui_state = {0, 0};
+
+#define PANEL_BTN_X 12u
+#define PANEL_BTN_Y 8u
+#define PANEL_BTN_W 136u
+#define PANEL_BTN_H 18u
 
 
 static inline uint16_t clamp_u16(uint16_t value, uint16_t max) {
@@ -74,9 +88,17 @@ static void draw_background_band(video_info_t* info, const ui_dirty_rect_t* clip
 
 static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
     (void)clip;
+    uint32_t panel_button_color = COLOR_ACCENT;
+
+    if (g_ui_state.panel_pressed) {
+        panel_button_color = COLOR_ACCENT_PRESSED;
+    } else if (g_ui_state.panel_hover) {
+        panel_button_color = COLOR_ACCENT_HOVER;
+    }
+
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
-    fb_rect(info, 12, 8, 136, 18, COLOR_ACCENT);
-    fb_draw_text(info, 18, 13, "WOOS 1.5.2", COLOR_TEXT_LIGHT, COLOR_ACCENT);
+    fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.6.0", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -95,7 +117,15 @@ static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip) 
 
 static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
     (void)clip;
-    fb_draw_text(info, 16, (uint16_t)(info->height - 20), "NEXT: PS/2 PACKETS + EVENT QUEUE", COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    const char* status = "EVENTS: MOVE CURSOR OVER PANEL";
+
+    if (g_ui_state.panel_pressed) {
+        status = "EVENTS: PANEL CLICK HANDLED";
+    } else if (g_ui_state.panel_hover) {
+        status = "EVENTS: PANEL HOVER ACTIVE";
+    }
+
+    fb_draw_text(info, 16, (uint16_t)(info->height - 20), status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
 }
 
 static void ui_draw_region(video_info_t* info, const ui_dirty_rect_t* clip) {
@@ -212,6 +242,10 @@ void ui_render_dirty(video_info_t* info) {
         return;
     }
 
+    if (g_cursor.visible) {
+        cursor_restore_underlay(info);
+    }
+
     g_last_dirty_count = g_dirty_count;
 
     for (uint16_t i = 0; i < g_dirty_count; i++) {
@@ -235,6 +269,10 @@ void ui_render_dirty(video_info_t* info) {
     }
 
     g_dirty_count = 0;
+
+    if (g_cursor.visible) {
+        cursor_draw(info);
+    }
 }
 
 uint16_t ui_last_dirty_count(void) {
@@ -245,4 +283,33 @@ void ui_render_desktop(video_info_t* info) {
     ui_mark_dirty(0, 0, info->width, info->height);
     ui_render_dirty(info);
     ui_set_cursor(info, (uint16_t)(info->width / 2), (uint16_t)(info->height / 2), 0);
+}
+
+static uint8_t point_inside_panel_button(uint16_t x, uint16_t y) {
+    uint16_t end_x = (uint16_t)(PANEL_BTN_X + PANEL_BTN_W);
+    uint16_t end_y = (uint16_t)(PANEL_BTN_Y + PANEL_BTN_H);
+    return (x >= PANEL_BTN_X && x < end_x && y >= PANEL_BTN_Y && y < end_y);
+}
+
+void ui_handle_mouse_move(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons) {
+    uint8_t next_hover = point_inside_panel_button(x, y);
+
+    if (next_hover != g_ui_state.panel_hover) {
+        g_ui_state.panel_hover = next_hover;
+        ui_mark_dirty(0, 0, info->width, 34);
+        ui_mark_dirty(0, (uint16_t)(info->height - 24), info->width, 24);
+    }
+
+    ui_set_cursor(info, x, y, buttons);
+}
+
+void ui_handle_mouse_button(video_info_t* info, uint8_t buttons) {
+    uint8_t left_pressed = (uint8_t)(buttons & 0x1u);
+    uint8_t next_pressed = (uint8_t)(left_pressed && g_ui_state.panel_hover);
+
+    if (next_pressed != g_ui_state.panel_pressed) {
+        g_ui_state.panel_pressed = next_pressed;
+        ui_mark_dirty(0, 0, info->width, 34);
+        ui_mark_dirty(0, (uint16_t)(info->height - 24), info->width, 24);
+    }
 }

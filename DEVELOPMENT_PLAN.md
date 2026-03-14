@@ -68,9 +68,9 @@
 - [x] Отрисовка курсора без полного redraw (save/restore фонового блока).
 
 ### B.2 Event Dispatcher
-- [ ] Очередь событий фиксированного размера (ring buffer).
-- [ ] Нормализация событий (mouse move, click, key press, timer tick).
-- [ ] UI-handlers для hover/click на панели и тестовом окне.
+- [x] Очередь событий фиксированного размера (ring buffer).
+- [x] Нормализация событий (mouse move, click, key press, timer tick).
+- [x] UI-handlers для hover/click на панели и тестовом окне.
 
 **DoD этапа B:**
 - Курсор двигается плавно.
@@ -158,7 +158,7 @@
 
 ## 6) Ближайшие 3 PR (рекомендуемая последовательность)
 1. **PR-1:** стабилизация input path (PS/2 + cursor state + debug overlay).
-2. **PR-2:** ring buffer событий + UI handlers (hover/click).
+2. **PR-2:** ring buffer событий + UI handlers (hover/click). ✅ Выполнено.
 3. **PR-3:** IDT skeleton + timer tick + базовые panic diagnostics.
 
 Такой порядок минимизирует риск, даёт быстрый визуальный результат и подготавливает основу для более глубоких системных задач.

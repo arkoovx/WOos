@@ -7,6 +7,8 @@
 - Переход в long mode и запуск ядра.
 - Простая графическая подсистема (`fb`) и desktop-style UI (`ui`) с partial redraw через dirty-rectangles.
 - Добавлено базовое состояние курсора с clamp-to-screen и отрисовкой через локальный save/restore фонового блока.
+- Добавлена очередь событий input (ring buffer) и базовый dispatcher для `mouse move` / `mouse button` / `timer tick`.
+- Реализованы UI-handlers для hover/click по верхней панели (интерактивная подсветка и статус в footer).
 - Текстовый bitmap-рендер для отображения статуса и версий, плюс счётчик dirty-областей как профилировочная метка кадра.
 - Базовый init-flow ядра по стадиям: `early -> platform -> drivers -> ui`.
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
@@ -32,7 +34,8 @@ make os.img DBL_BUFFER=1
 - `stage2.asm` — второй этап загрузки и старт ядра.
 - `kernel.c` — вход и orchestration базовых подсистем.
 - `fb.c/.h` — примитивы framebuffer-рендера.
-- `ui.c/.h` — отрисовка оболочки.
+- `ui.c/.h` — отрисовка оболочки и обработка базовых UI-событий.
+- `input.c/.h` — очередь событий и input dispatcher contract.
 - `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
 
 ## Процесс разработки
