@@ -38,6 +38,13 @@ typedef struct ui_interaction_state {
 
 static ui_interaction_state_t g_ui_state = {0, 0};
 
+typedef struct ui_kernel_health_state {
+    uint8_t idt_ready;
+    uint32_t heartbeat;
+} ui_kernel_health_state_t;
+
+static ui_kernel_health_state_t g_kernel_health = {0u, 0u};
+
 #define PANEL_BTN_X 12u
 #define PANEL_BTN_Y 8u
 #define PANEL_BTN_W 136u
@@ -98,7 +105,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
 
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
-    fb_draw_text(info, 18, 13, "WOOS 1.6.0", COLOR_TEXT_LIGHT, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.7.0", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -111,8 +118,11 @@ static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip) 
 
     fb_rect(info, win_x, win_y, win_w, win_h, COLOR_WINDOW);
     fb_frame(info, win_x, win_y, win_w, win_h, 2, COLOR_BORDER);
-    fb_rect(info, win_x, win_y, win_w, 22, COLOR_ACCENT);
-    fb_draw_text(info, (uint16_t)(win_x + 8), (uint16_t)(win_y + 7), "STATUS: UI SHELL READY", COLOR_TEXT_LIGHT, COLOR_ACCENT);
+    uint32_t title_color = g_kernel_health.idt_ready ? COLOR_ACCENT : COLOR_ACCENT_PRESSED;
+    const char* title = g_kernel_health.idt_ready ? "STATUS: IDT READY" : "STATUS: IDT BAD";
+
+    fb_rect(info, win_x, win_y, win_w, 22, title_color);
+    fb_draw_text(info, (uint16_t)(win_x + 8), (uint16_t)(win_y + 7), title, COLOR_TEXT_LIGHT, title_color);
 }
 
 static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
@@ -125,7 +135,16 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
         status = "EVENTS: PANEL HOVER ACTIVE";
     }
 
+    char heartbeat_text[17] = "HEARTBEAT: 000000";
+    uint32_t value = g_kernel_health.heartbeat;
+
+    for (int i = 15; i >= 10; i--) {
+        heartbeat_text[i] = (char)('0' + (value % 10u));
+        value /= 10u;
+    }
+
     fb_draw_text(info, 16, (uint16_t)(info->height - 20), status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, (uint16_t)(info->width - 142), (uint16_t)(info->height - 20), heartbeat_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
 }
 
 static void ui_draw_region(video_info_t* info, const ui_dirty_rect_t* clip) {
@@ -312,4 +331,18 @@ void ui_handle_mouse_button(video_info_t* info, uint8_t buttons) {
         ui_mark_dirty(0, 0, info->width, 34);
         ui_mark_dirty(0, (uint16_t)(info->height - 24), info->width, 24);
     }
+}
+
+void ui_set_kernel_health(video_info_t* info, uint8_t idt_ready, uint32_t heartbeat) {
+    if (g_kernel_health.idt_ready == idt_ready && g_kernel_health.heartbeat == heartbeat) {
+        return;
+    }
+
+    g_kernel_health.idt_ready = idt_ready;
+    g_kernel_health.heartbeat = heartbeat;
+
+    uint16_t win_w = (uint16_t)(info->width / 3);
+    uint16_t win_x = (uint16_t)(info->width - win_w - 24);
+    ui_mark_dirty(win_x, 56, win_w, 22);
+    ui_mark_dirty((uint16_t)(info->width - 150), (uint16_t)(info->height - 24), 150, 24);
 }
