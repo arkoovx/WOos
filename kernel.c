@@ -17,6 +17,10 @@ typedef enum init_stage {
     INIT_UI,
 } init_stage_t;
 
+// Пауза в основном цикле: нужна, чтобы не загружать CPU на 100%,
+// но без «тормозов» интерфейса в эмуляторе.
+#define KERNEL_MAIN_LOOP_PAUSE 20000u
+
 static void sanitize_boot_info(video_info_t* video) {
     if (video->magic != BOOT_INFO_MAGIC_EXPECTED) {
         video->magic = BOOT_INFO_MAGIC_EXPECTED;
@@ -49,7 +53,9 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             break;
         case INIT_DRIVERS:
             input_init();
-            timer_init(5u);
+            // Heartbeat обновляется заметно медленнее кадрового цикла,
+            // чтобы UI оставался отзывчивым, а счётчик не «улетал» слишком быстро.
+            timer_init(120u);
             break;
         case INIT_UI:
             ui_render_desktop(video);
@@ -84,7 +90,7 @@ void kmain(video_info_t* video) {
 
 
     while (1) {
-        for (volatile uint32_t delay = 0; delay < 2500000u; delay++) {
+        for (volatile uint32_t delay = 0; delay < KERNEL_MAIN_LOOP_PAUSE; delay++) {
             __asm__ __volatile__("pause");
         }
 
