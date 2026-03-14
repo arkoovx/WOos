@@ -83,14 +83,8 @@ static ui_dirty_rect_t rect_union(const ui_dirty_rect_t* a, const ui_dirty_rect_
 }
 
 static void draw_background_band(video_info_t* info, const ui_dirty_rect_t* clip) {
+    // Однотонный фон: без полос по всей высоте экрана.
     fb_rect(info, clip->x, clip->y, clip->w, clip->h, COLOR_BG_DARK);
-
-    uint16_t y_end = rect_end(clip->y, clip->h);
-    for (uint16_t y = clip->y; y < y_end; y++) {
-        if ((y / 8u) & 1u) {
-            fb_rect(info, clip->x, y, clip->w, 1, COLOR_BG_LIGHT);
-        }
-    }
 }
 
 static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
@@ -105,7 +99,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
 
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
-    fb_draw_text(info, 18, 13, "WOOS 1.7.1", COLOR_TEXT_LIGHT, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.7.2", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -154,10 +148,6 @@ static void ui_draw_region(video_info_t* info, const ui_dirty_rect_t* clip) {
     draw_footer(info, clip);
 }
 
-static inline uint32_t* fb_row_ptr(video_info_t* info, uint16_t y) {
-    return (uint32_t*)((uint8_t*)(uint64_t)info->framebuffer + ((uint64_t)y * info->pitch));
-}
-
 static void cursor_restore_underlay(video_info_t* info) {
     if (!g_cursor.visible) {
         return;
@@ -169,14 +159,13 @@ static void cursor_restore_underlay(video_info_t* info) {
             break;
         }
 
-        uint32_t* row = fb_row_ptr(info, y);
         for (uint16_t px = 0; px < CURSOR_W; px++) {
             uint16_t x = (uint16_t)(g_cursor.x + px);
             if (x >= info->width) {
                 break;
             }
 
-            row[x] = g_cursor.saved[(py * CURSOR_W) + px];
+            fb_writepixel(info, x, y, g_cursor.saved[(py * CURSOR_W) + px]);
         }
     }
 
@@ -190,7 +179,6 @@ static void cursor_draw(video_info_t* info) {
             break;
         }
 
-        uint32_t* row = fb_row_ptr(info, y);
         for (uint16_t px = 0; px < CURSOR_W; px++) {
             uint16_t x = (uint16_t)(g_cursor.x + px);
             uint32_t* slot = &g_cursor.saved[(py * CURSOR_W) + px];
@@ -200,12 +188,12 @@ static void cursor_draw(video_info_t* info) {
                 continue;
             }
 
-            *slot = row[x];
+            *slot = fb_readpixel(info, x, y);
 
             // Простая L-образная форма курсора без альфа-смешивания.
             uint8_t on = (px == 0) || (py == 0) || (px == py && px < 8);
             if (on) {
-                row[x] = COLOR_CURSOR;
+                fb_writepixel(info, x, y, COLOR_CURSOR);
             }
         }
     }

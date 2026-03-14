@@ -121,23 +121,66 @@ void fb_init(video_info_t* info) {
 #endif
 }
 
-static inline void fb_putpixel(video_info_t* info, uint16_t x, uint16_t y, uint32_t color) {
+static inline uint8_t bytes_per_pixel(const video_info_t* info) {
+    uint8_t bytes = (uint8_t)(info->bpp / 8u);
+    return (bytes == 0u) ? 4u : bytes;
+}
+
+uint32_t fb_readpixel(video_info_t* info, uint16_t x, uint16_t y) {
+    if (x >= info->width || y >= info->height) {
+        return 0;
+    }
+
+    uint8_t* base = fb_target_base(info);
+    uint8_t* px = base + ((uint64_t)y * info->pitch) + ((uint64_t)x * bytes_per_pixel(info));
+
+    switch (bytes_per_pixel(info)) {
+        case 2: {
+            uint16_t packed = *(uint16_t*)px;
+            uint8_t r = (uint8_t)(((packed >> 11) & 0x1Fu) << 3);
+            uint8_t g = (uint8_t)(((packed >> 5) & 0x3Fu) << 2);
+            uint8_t b = (uint8_t)((packed & 0x1Fu) << 3);
+            return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+        }
+        case 3:
+            return ((uint32_t)px[2] << 16) | ((uint32_t)px[1] << 8) | px[0];
+        default:
+            return *(uint32_t*)px & 0x00FFFFFFu;
+    }
+}
+
+void fb_writepixel(video_info_t* info, uint16_t x, uint16_t y, uint32_t color) {
     if (x >= info->width || y >= info->height) {
         return;
     }
 
     uint8_t* base = fb_target_base(info);
-    uint32_t* row = (uint32_t*)(base + ((uint64_t)y * info->pitch));
-    row[x] = color;
+    uint8_t* px = base + ((uint64_t)y * info->pitch) + ((uint64_t)x * bytes_per_pixel(info));
+
+    switch (bytes_per_pixel(info)) {
+        case 2: {
+            uint8_t r = (uint8_t)((color >> 16) & 0xFFu);
+            uint8_t g = (uint8_t)((color >> 8) & 0xFFu);
+            uint8_t b = (uint8_t)(color & 0xFFu);
+            uint16_t packed = (uint16_t)(((uint16_t)(r >> 3) << 11) | ((uint16_t)(g >> 2) << 5) | (uint16_t)(b >> 3));
+            *(uint16_t*)px = packed;
+            break;
+        }
+        case 3:
+            px[0] = (uint8_t)(color & 0xFFu);
+            px[1] = (uint8_t)((color >> 8) & 0xFFu);
+            px[2] = (uint8_t)((color >> 16) & 0xFFu);
+            break;
+        default:
+            *(uint32_t*)px = color & 0x00FFFFFFu;
+            break;
+    }
 }
 
 void fb_fill(video_info_t* info, uint32_t color) {
-    uint8_t* base = fb_target_base(info);
-
     for (uint16_t y = 0; y < info->height; y++) {
-        uint32_t* row = (uint32_t*)(base + ((uint64_t)y * info->pitch));
         for (uint16_t x = 0; x < info->width; x++) {
-            row[x] = color;
+            fb_writepixel(info, x, y, color);
         }
     }
 }
@@ -145,12 +188,10 @@ void fb_fill(video_info_t* info, uint32_t color) {
 void fb_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint32_t color) {
     uint16_t x_end = clamp_u16((uint16_t)(x + w), info->width);
     uint16_t y_end = clamp_u16((uint16_t)(y + h), info->height);
-    uint8_t* base = fb_target_base(info);
 
     for (uint16_t py = y; py < y_end; py++) {
-        uint32_t* row = (uint32_t*)(base + ((uint64_t)py * info->pitch));
         for (uint16_t px = x; px < x_end; px++) {
-            row[px] = color;
+            fb_writepixel(info, px, py, color);
         }
     }
 }
@@ -177,7 +218,7 @@ void fb_draw_char(video_info_t* info, uint16_t x, uint16_t y, char c, uint32_t c
         for (uint16_t gx = 0; gx < FONT_W; gx++) {
             uint8_t bit = (uint8_t)(0x80u >> gx);
             uint32_t px_color = (row & bit) ? color : bg_color;
-            fb_putpixel(info, (uint16_t)(x + gx), (uint16_t)(y + gy), px_color);
+            fb_writepixel(info, (uint16_t)(x + gx), (uint16_t)(y + gy), px_color);
         }
     }
 }
@@ -201,12 +242,12 @@ void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uin
     uint16_t x_end = clamp_u16(rect_end(x, w), info->width);
     uint16_t y_end = clamp_u16(rect_end(y, h), info->height);
     uint16_t copy_width = (uint16_t)(x_end - x);
-    uint16_t row_len = (uint16_t)(copy_width * sizeof(uint32_t));
+    uint16_t row_len = (uint16_t)(copy_width * bytes_per_pixel(info));
     uint8_t* front = (uint8_t*)(uint64_t)info->framebuffer;
 
     for (uint16_t py = y; py < y_end; py++) {
-        uint8_t* src = g_backbuffer + ((uint64_t)py * info->pitch) + ((uint64_t)x * sizeof(uint32_t));
-        uint8_t* dst = front + ((uint64_t)py * info->pitch) + ((uint64_t)x * sizeof(uint32_t));
+        uint8_t* src = g_backbuffer + ((uint64_t)py * info->pitch) + ((uint64_t)x * bytes_per_pixel(info));
+        uint8_t* dst = front + ((uint64_t)py * info->pitch) + ((uint64_t)x * bytes_per_pixel(info));
         mem_copy(dst, src, row_len);
     }
 #else
