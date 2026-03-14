@@ -20,39 +20,15 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
 
-      - name: Verify PR approval exists
-        id: approval
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { owner, repo } = context.repo;
-            const pull_number = context.payload.pull_request.number;
-            const reviews = await github.paginate(
-              github.rest.pulls.listReviews,
-              { owner, repo, pull_number, per_page: 100 }
-            );
-            const hasApproval = reviews.some((review) => review.state === 'APPROVED');
-            core.info(`Reviews fetched: ${reviews.length}, has approval: ${hasApproval}`);
-            core.setOutput('approved', hasApproval ? 'true' : 'false');
-
-      - name: Stop if PR has no approvals
-        if: ${{ steps.approval.outputs.approved != 'true' }}
-        run: |
-          echo "PR #${{ github.event.pull_request.number }} merged without approval. Release skipped."
-          exit 0
-
       - name: Install build tools
-        if: ${{ steps.approval.outputs.approved == 'true' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y nasm xorriso
 
       - name: Build os.img
-        if: ${{ steps.approval.outputs.approved == 'true' }}
         run: make os.img
 
       - name: Resolve version and tag
-        if: ${{ steps.approval.outputs.approved == 'true' }}
         id: version
         run: |
           VERSION="$(cat VERSION)"
@@ -61,7 +37,6 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Ensure tag does not exist
-        if: ${{ steps.approval.outputs.approved == 'true' }}
         run: |
           if git ls-remote --exit-code --tags origin "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
             echo "Tag ${{ steps.version.outputs.tag }} already exists."
@@ -69,7 +44,6 @@ jobs:
           fi
 
       - name: Build release notes from changelog
-        if: ${{ steps.approval.outputs.approved == 'true' }}
         id: notes
         run: |
           NOTES_FILE="release_notes.md"
@@ -77,7 +51,7 @@ jobs:
           {
             echo "# WoOS ${VERSION}"
             echo
-            echo "Автоматический релиз после merge одобренного PR #${{ github.event.pull_request.number }}."
+            echo "Автоматический релиз после merge PR #${{ github.event.pull_request.number }}."
             echo
             echo "## Изменения"
             bash .github/scripts/extract_changelog.sh "$VERSION"
@@ -86,12 +60,10 @@ jobs:
 
 
       - name: Verify release payload
-        if: ${{ steps.approval.outputs.approved == 'true' }}
         run: |
           test -f os.img
           test -s "${{ steps.notes.outputs.notes_path }}"
       - name: Publish GitHub Release
-        if: ${{ steps.approval.outputs.approved == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
