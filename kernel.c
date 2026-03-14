@@ -6,6 +6,8 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "fb.h"
 #include "input.h"
 #include "ui.h"
+#include "idt.h"
+#include "timer.h"
 
 typedef enum init_stage {
     INIT_EARLY = 0,
@@ -42,9 +44,11 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             break;
         case INIT_PLATFORM:
             fb_init(video);
+            idt_init();
             break;
         case INIT_DRIVERS:
             input_init();
+            timer_init(5u);
             break;
         case INIT_UI:
             ui_render_desktop(video);
@@ -61,6 +65,7 @@ static void dispatch_input_event(video_info_t* video, const input_event_t* event
             ui_handle_mouse_button(video, event->buttons);
             break;
         case INPUT_EVENT_TIMER_TICK:
+            ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
             break;
     }
 }
@@ -70,6 +75,7 @@ void kmain(video_info_t* video) {
     run_stage(video, INIT_PLATFORM);
     run_stage(video, INIT_DRIVERS);
     run_stage(video, INIT_UI);
+    ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);
     uint16_t cursor_y = (uint16_t)(video->height / 2);
@@ -78,14 +84,12 @@ void kmain(video_info_t* video) {
     uint16_t max_x = (video->width > 12) ? (uint16_t)(video->width - 12) : 0;
     uint16_t max_y = (video->height > 18) ? (uint16_t)(video->height - 18) : 0;
 
-    uint32_t tick = 0;
 
     while (1) {
         for (volatile uint32_t delay = 0; delay < 2500000u; delay++) {
             __asm__ __volatile__("pause");
         }
 
-        tick++;
 
         if (cursor_x <= 2 || cursor_x >= max_x) {
             dx = (int16_t)-dx;
@@ -102,12 +106,15 @@ void kmain(video_info_t* video) {
         input_event_t move_event = {INPUT_EVENT_MOUSE_MOVE, cursor_x, cursor_y, 0};
         input_event_t button_event = {INPUT_EVENT_MOUSE_BUTTON, cursor_x, cursor_y, 0};
 
-        if ((tick % 24u) >= 18u) {
+        if ((timer_ticks() % 24u) >= 18u) {
             button_event.buttons = 0x1u;
             move_event.buttons = 0x1u;
         }
 
-        input_push(&tick_event);
+        if (timer_poll_tick()) {
+            input_push(&tick_event);
+        }
+
         input_push(&move_event);
         input_push(&button_event);
 

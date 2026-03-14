@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0
+- Добавлен модуль `idt` (`idt.c/.h`, `idt_asm.asm`): формирование и загрузка IDT на 256 векторов с безопасным default ISR-stub (`iretq`) как базовый каркас подсистемы прерываний.
+- Добавлен модуль `timer` (`timer.c/.h`) с heartbeat-счётчиком в polling-режиме и генерацией `INPUT_EVENT_TIMER_TICK` через существующую очередь событий.
+- В `kernel.c` platform/drivers init расширен инициализацией `idt_init()` и `timer_init()`, а обработка `timer tick` теперь публикует диагностику в UI.
+- В UI добавлен индикатор состояния IDT (`STATUS: IDT READY/IDT BAD`) и счётчик `HEARTBEAT` в footer для базовой runtime-диагностики.
+- Обновлены `README.md` и `DEVELOPMENT_PLAN.md` в соответствии с прогрессом этапа C.1.
+
 ## 1.6.0
 - Добавлена подсистема input/event с фиксированной ring-buffer очередью (`input_push`, `input_pop`) и типами событий `mouse move`, `mouse button`, `timer tick`.
 - В `kmain` реализован базовый event dispatcher: события теперь проходят через очередь и централизованно обрабатываются UI-слоем.

@@ -11,6 +11,8 @@
 - Реализованы UI-handlers для hover/click по верхней панели (интерактивная подсветка и статус в footer).
 - Текстовый bitmap-рендер для отображения статуса и версий, плюс счётчик dirty-областей как профилировочная метка кадра.
 - Базовый init-flow ядра по стадиям: `early -> platform -> drivers -> ui`.
+- Добавлен IDT skeleton (`idt`) с загрузкой таблицы дескрипторов и безопасным default-обработчиком для базовой платформенной инициализации.
+- Добавлен модуль heartbeat-таймера (`timer`) и вывод его состояния в UI (строка `HEARTBEAT` в footer).
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
 
 ## Быстрый старт
@@ -36,6 +38,8 @@ make os.img DBL_BUFFER=1
 - `fb.c/.h` — примитивы framebuffer-рендера.
 - `ui.c/.h` — отрисовка оболочки и обработка базовых UI-событий.
 - `input.c/.h` — очередь событий и input dispatcher contract.
+- `idt.c/.h`, `idt_asm.asm` — каркас подсистемы прерываний (IDT load + default stub).
+- `timer.c/.h` — программный heartbeat-таймер для событий `timer tick`.
 - `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
 
 ## Процесс разработки

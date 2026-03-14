@@ -82,8 +82,8 @@
 **Цель:** сформировать системный каркас для будущих сервисов ядра.
 
 ### C.1 Interrupt Subsystem
-- [ ] IDT + базовые ISR-обработчики исключений.
-- [ ] Таймер (PIT/APIC минимальный режим) для heartbeat.
+- [x] IDT skeleton с базовым default ISR-stub (этап 1 для подсистемы прерываний).
+- [x] Базовый heartbeat-таймер (polling mode) с интеграцией в event loop и UI-диагностику.
 - [ ] Обвязка IRQ для клавиатуры/мыши.
 
 ### C.2 Memory Subsystem
@@ -159,6 +159,6 @@
 ## 6) Ближайшие 3 PR (рекомендуемая последовательность)
 1. **PR-1:** стабилизация input path (PS/2 + cursor state + debug overlay).
 2. **PR-2:** ring buffer событий + UI handlers (hover/click). ✅ Выполнено.
-3. **PR-3:** IDT skeleton + timer tick + базовые panic diagnostics.
+3. **PR-3:** IDT skeleton + timer tick + базовые panic diagnostics. ✅ Выполнено (IRQ keyboard/mouse остаётся в C.1).
 
 Такой порядок минимизирует риск, даёт быстрый визуальный результат и подготавливает основу для более глубоких системных задач.
