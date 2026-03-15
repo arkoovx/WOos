@@ -9,6 +9,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "idt.h"
 #include "timer.h"
 #include "mouse.h"
+#include "keyboard.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
 
 typedef enum init_stage {
@@ -55,6 +56,7 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
         case INIT_DRIVERS:
             virtio_gpu_renderer_init(video);
             input_init();
+            keyboard_init();
             // Heartbeat обновляется заметно медленнее кадрового цикла,
             // чтобы UI оставался отзывчивым, а счётчик не «улетал» слишком быстро.
             timer_init(120u);
@@ -76,7 +78,19 @@ static void dispatch_input_event(video_info_t* video, const input_event_t* event
         case INPUT_EVENT_TIMER_TICK:
             ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
             break;
+        case INPUT_EVENT_KEY_PRESS:
+            // Пока отображаем только факт жизни IRQ-пути клавиатуры через heartbeat refresh.
+            ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
+            break;
     }
+}
+
+static void irq_keyboard_handler(void) {
+    keyboard_handle_irq();
+}
+
+static void irq_mouse_handler(void) {
+    mouse_handle_irq();
 }
 
 void kmain(video_info_t* video) {
@@ -90,18 +104,21 @@ void kmain(video_info_t* video) {
     uint16_t cursor_y = (uint16_t)(video->height / 2);
     mouse_init(cursor_x, cursor_y);
 
+    idt_set_irq_handler(1u, irq_keyboard_handler);
+    idt_set_irq_handler(12u, irq_mouse_handler);
 
     while (1) {
         for (volatile uint32_t delay = 0; delay < KERNEL_MAIN_LOOP_PAUSE; delay++) {
             __asm__ __volatile__("pause");
         }
 
-        input_event_t tick_event = {INPUT_EVENT_TIMER_TICK, 0, 0, 0};
+        input_event_t tick_event = {INPUT_EVENT_TIMER_TICK, 0u, 0u, 0u, 0u};
 
         if (timer_poll_tick()) {
             input_push(&tick_event);
         }
 
+        // Fallback: polling остаётся как защитный путь для окружений с нестабильной IRQ-маршрутизацией.
         mouse_poll();
 
         input_event_t next_event;

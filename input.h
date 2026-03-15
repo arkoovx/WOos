@@ -7,6 +7,7 @@ typedef enum input_event_type {
     INPUT_EVENT_MOUSE_MOVE = 0,
     INPUT_EVENT_MOUSE_BUTTON,
     INPUT_EVENT_TIMER_TICK,
+    INPUT_EVENT_KEY_PRESS,
 } input_event_type_t;
 
 typedef struct input_event {
@@ -14,6 +15,7 @@ typedef struct input_event {
     uint16_t x;
     uint16_t y;
     uint8_t buttons;
+    uint8_t keycode;
 } input_event_t;
 
 void input_init(void);
