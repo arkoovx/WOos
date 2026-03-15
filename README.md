@@ -14,6 +14,7 @@
 - Базовый init-flow ядра по стадиям: `early -> platform -> drivers -> ui`.
 - Добавлен IDT skeleton (`idt`) с загрузкой таблицы дескрипторов и безопасным default-обработчиком для базовой платформенной инициализации.
 - Добавлен модуль heartbeat-таймера (`timer`) и вывод его состояния в UI (строка `HEARTBEAT` в footer).
+- Добавлен базовый probing-драйвер `virtio-gpu` (PCI detect) для режима QEMU `-vga virtio` с безопасным fallback на текущий framebuffer path.
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
 - Исправлен рендер под разные framebuffer-форматы (`16/24/32 bpp`), убраны визуальные полосы на фоне и артефакты курсора.
 
@@ -33,10 +34,37 @@ make os.img DBL_BUFFER=1
 - `make verify-layout` — быстрый дамп и проверка расположения загрузочного/ядерного кода в образе.
 - `make clean` — очистка артефактов.
 
-Запуск в QEMU (рекомендуется):
+Запуск в QEMU (рекомендуется, базовый режим):
 ```bash
-qemu-system-x86_64 -drive format=raw,file=os.img -m 1024 -machine accel=kvm:tcg
+qemu-system-x86_64 \
+  -drive format=raw,file=os.img \
+  -m 1024 \
+  -smp 4 \
+  -enable-kvm \
+  -cpu host \
+  -vga virtio \
+  -display sdl,gl=on \
+  -usb -device usb-mouse -device usb-kbd \
+  -net nic -net user \
+  -monitor stdio
 ```
+
+Если у вас `virtio-vga` с virgl не поднимается через `-vga virtio`, используйте более явный вариант:
+```bash
+qemu-system-x86_64 \
+  -drive format=raw,file=os.img \
+  -m 1024 \
+  -smp 4 \
+  -enable-kvm \
+  -cpu host \
+  -device virtio-vga-gl \
+  -display sdl,gl=on \
+  -usb -device usb-mouse -device usb-kbd \
+  -net nic -net user \
+  -monitor stdio
+```
+
+Важно: в текущем состоянии WoOS использует framebuffer, подготовленный загрузчиком (stage2), а не полноценный 3D stack (virtqueue + virgl userspace). Поэтому код совместим с `-vga virtio`, но 3D-ускорение на уровне guest API пока не реализовано.
 
 Если в гостевой системе всё «как 1 FPS», чаще всего проблема в медленной эмуляции (TCG без аппаратного ускорения) и/или слишком больших задержках в основном цикле ядра.
 
@@ -50,6 +78,8 @@ qemu-system-x86_64 -drive format=raw,file=os.img -m 1024 -machine accel=kvm:tcg
 - `idt.c/.h`, `idt_asm.asm` — каркас подсистемы прерываний (IDT load + default stub).
 - `timer.c/.h` — программный heartbeat-таймер для событий `timer tick`.
 - `mouse.c/.h` — polling-драйвер PS/2-мыши и трансляция пакетов в очередь input.
+- `pci.c/.h` — минимальный доступ к PCI config space и поиск устройств.
+- `virtio_gpu.c/.h` — базовый probing-драйвер virtio-gpu для совместимости с QEMU `-vga virtio`.
 - `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
 
 ## Процесс разработки

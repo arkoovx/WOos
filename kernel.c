@@ -9,6 +9,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "idt.h"
 #include "timer.h"
 #include "mouse.h"
+#include "virtio_gpu.h"
 
 typedef enum init_stage {
     INIT_EARLY = 0,
@@ -52,6 +53,7 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             idt_init();
             break;
         case INIT_DRIVERS:
+            virtio_gpu_init(video);
             input_init();
             // Heartbeat обновляется заметно медленнее кадрового цикла,
             // чтобы UI оставался отзывчивым, а счётчик не «улетал» слишком быстро.

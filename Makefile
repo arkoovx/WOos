@@ -6,7 +6,7 @@ OBJDUMP   := objdump
 
 CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra
 LDFLAGS   := -m elf_x86_64 -T linker.ld
-KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o mouse.o
+KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o mouse.o pci.o virtio_gpu.o
 
 DBL_BUFFER ?= 0
 FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)
@@ -39,6 +39,13 @@ fb.o: fb.c fb.h kernel.h
 
 ui.o: ui.c ui.h fb.h kernel.h
 	$(CC) $(CFLAGS) -c ui.c -o ui.o
+
+
+pci.o: pci.c pci.h kernel.h
+	$(CC) $(CFLAGS) -c pci.c -o pci.o
+
+virtio_gpu.o: virtio_gpu.c virtio_gpu.h pci.h kernel.h
+	$(CC) $(CFLAGS) -c virtio_gpu.c -o virtio_gpu.o
 
 kernel.elf: $(KERNEL_OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(KERNEL_OBJS) -o kernel.elf
