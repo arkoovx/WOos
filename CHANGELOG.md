@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.12.0
+- Добавлен модуль `pmm` (stack-based allocator страниц) с API `pmm_init/pmm_alloc_page/pmm_free_page` и диагностикой состояния пула (`pmm_total_pages`, `pmm_free_pages`, `pmm_is_ready`).
+- Для baseline PMM выделен внутренний выровненный пул на 1024 страницы по 4 KiB с free-stack и защитой от дублирующего `free` в пределах пула.
+- Инициализация PMM встроена в `INIT_PLATFORM` (`kmain`), чтобы подсистема памяти была готова до старта драйверов и UI.
+- Обновлены `README.md`, roadmap (`DEVELOPMENT_PLAN.md`) и UI-баннер до версии `1.12.0`.
+
 ## 1.11.0
 - В `idt` добавлена базовая IRQ-инфраструктура: remap 8259 PIC на векторы `32..47`, unmask только нужных линий (`IRQ1`, `IRQ2`, `IRQ12`), C-dispatcher IRQ и EOI после обработки.
 - Добавлены отдельные IDT-stub для `IRQ1` (клавиатура) и `IRQ12` (мышь) с передачей вектора в `idt_dispatch_irq`.

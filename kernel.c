@@ -10,6 +10,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "timer.h"
 #include "mouse.h"
 #include "keyboard.h"
+#include "pmm.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
 
 typedef enum init_stage {
@@ -52,6 +53,7 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
         case INIT_PLATFORM:
             fb_init(video);
             idt_init();
+            pmm_init();
             break;
         case INIT_DRIVERS:
             virtio_gpu_renderer_init(video);
