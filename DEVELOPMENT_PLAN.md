@@ -89,7 +89,7 @@
 - [x] Обвязка IRQ для клавиатуры/мыши.
 
 ### C.2 Memory Subsystem
-- [ ] PMM (bitmap или stack-based allocator для физических страниц).
+- [x] PMM (stack-based baseline allocator для физических страниц ядра на внутреннем пуле).
 - [ ] Базовый heap allocator ядра (рантайм-аллокатор для внутренних структур).
 - [ ] План миграции к VMM (карта памяти, page tables, kernel mapping policy).
 
