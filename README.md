@@ -53,6 +53,26 @@ qemu-system-x86_64 \
   -monitor stdio
 ```
 
+
+Если QEMU показывает в окне только `Display output is not active`, это обычно означает,
+что VBE-режим не был установлен (BIOS не дал выбранный mode) или выбран
+нерекомендованный видеодевайс. Для WoOS сначала проверьте базовый VGA-совместимый
+путь:
+```bash
+qemu-system-x86_64 \
+  -drive format=raw,file=os.img \
+  -m 1024 \
+  -smp 4 \
+  -enable-kvm \
+  -cpu host \
+  -vga virtio \
+  -display sdl,gl=on \
+  -usb -device usb-mouse -device usb-kbd \
+  -net nic -net user \
+  -rtc base=utc \
+  -monitor stdio
+```
+
 Если у вас `virtio-vga` с virgl не поднимается через `-vga virtio`, используйте более явный вариант:
 ```bash
 qemu-system-x86_64 \
