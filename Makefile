@@ -6,7 +6,7 @@ OBJDUMP   := objdump
 
 CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra
 LDFLAGS   := -m elf_x86_64 -T linker.ld
-KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o mouse.o pci.o virtio_gpu.o
+KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o mouse.o pci.o drivers/virtio_gpu_renderer/virtio_gpu_renderer.o
 
 DBL_BUFFER ?= 0
 FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)
@@ -19,7 +19,7 @@ boot.bin: kernel.bin boot.asm
 stage2.o: stage2.asm
 	$(NASM) -f elf64 stage2.asm -o stage2.o
 
-kernel.o: kernel.c kernel.h ui.h input.h idt.h timer.h mouse.h
+kernel.o: kernel.c kernel.h ui.h input.h idt.h timer.h mouse.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
 	$(CC) $(CFLAGS) -c kernel.c -o kernel.o
 
 idt_asm.o: idt_asm.asm
@@ -34,7 +34,7 @@ timer.o: timer.c timer.h kernel.h
 input.o: input.c input.h kernel.h
 	$(CC) $(CFLAGS) -c input.c -o input.o
 
-fb.o: fb.c fb.h kernel.h
+fb.o: fb.c fb.h kernel.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
 	$(CC) $(CFLAGS) $(FB_CPPFLAGS) -c fb.c -o fb.o
 
 ui.o: ui.c ui.h fb.h kernel.h
@@ -44,8 +44,8 @@ ui.o: ui.c ui.h fb.h kernel.h
 pci.o: pci.c pci.h kernel.h
 	$(CC) $(CFLAGS) -c pci.c -o pci.o
 
-virtio_gpu.o: virtio_gpu.c virtio_gpu.h pci.h kernel.h
-	$(CC) $(CFLAGS) -c virtio_gpu.c -o virtio_gpu.o
+drivers/virtio_gpu_renderer/virtio_gpu_renderer.o: drivers/virtio_gpu_renderer/virtio_gpu_renderer.c drivers/virtio_gpu_renderer/virtio_gpu_renderer.h pci.h kernel.h
+	$(CC) $(CFLAGS) -c drivers/virtio_gpu_renderer/virtio_gpu_renderer.c -o drivers/virtio_gpu_renderer/virtio_gpu_renderer.o
 
 kernel.elf: $(KERNEL_OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(KERNEL_OBJS) -o kernel.elf

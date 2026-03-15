@@ -1,4 +1,5 @@
 #include "fb.h"
+#include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
 
 #define FONT_W 8
 #define FONT_H 8
@@ -236,6 +237,7 @@ void fb_draw_text(video_info_t* info, uint16_t x, uint16_t y, const char* text, 
 void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
 #if WOOS_ENABLE_DBL_BUFFER
     if (!g_backbuffer_enabled || w == 0 || h == 0) {
+        virtio_gpu_renderer_present_rect(info, x, y, w, h);
         return;
     }
 
@@ -250,11 +252,9 @@ void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uin
         uint8_t* dst = front + ((uint64_t)py * info->pitch) + ((uint64_t)x * bytes_per_pixel(info));
         mem_copy(dst, src, row_len);
     }
+
+    virtio_gpu_renderer_present_rect(info, x, y, w, h);
 #else
-    (void)info;
-    (void)x;
-    (void)y;
-    (void)w;
-    (void)h;
+    virtio_gpu_renderer_present_rect(info, x, y, w, h);
 #endif
 }
