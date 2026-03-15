@@ -8,9 +8,10 @@ ORG 0x7C00
 %define KERNEL_SECTORS 64
 %endif
 
-%define LOAD_SEGMENT 0x0000
-%define LOAD_OFFSET  0x8000
+%define LOAD_SEGMENT 0x0800      ; 0x0800:0x0000 == физический адрес 0x8000
+%define LOAD_OFFSET  0x0000
 %define RESET_RETRIES 5
+%define MAX_DAP_SECTORS 127
 
 start:
     cli
@@ -34,19 +35,49 @@ start:
     jmp disk_error
 
 .read_payload:
-    mov ax, LOAD_SEGMENT
-    mov es, ax
-    mov bx, LOAD_OFFSET
+    ; Важный нюанс: ряд BIOS/эмуляторов плохо работает, если один вызов AH=42h
+    ; пишет буфер через границу 64 KiB. Поэтому читаем payload порциями,
+    ; каждая из которых гарантированно помещается в один 64 KiB-сегмент.
+    mov word [dap_sector_count], KERNEL_SECTORS
+    mov word [dap_dest_segment], LOAD_SEGMENT
+    mov dword [dap_lba_low], 1
+    mov dword [dap_lba_high], 0
 
-    ; INT 13h extensions (AH=42h) are used so large payloads load reliably
-    ; regardless of disk geometry.
+.read_payload_loop:
+    cmp word [dap_sector_count], 0
+    je .boot_kernel
+
+    mov ax, [dap_sector_count]
+    cmp ax, MAX_DAP_SECTORS
+    jbe .chunk_ready
+    mov ax, MAX_DAP_SECTORS
+.chunk_ready:
+    mov [dap_chunk_count], ax
+
+    ; INT 13h extensions (AH=42h) — чтение из LBA в заданный буфер.
     mov si, disk_address_packet
     mov ah, 0x42
     mov dl, [boot_drive]
     int 0x13
     jc disk_error
 
-    jmp LOAD_SEGMENT:LOAD_OFFSET
+    ; remaining -= chunk
+    sub word [dap_sector_count], ax
+
+    ; segment += chunk * 32 paragraphs (512 байт = 32 параграфа)
+    mov bx, ax
+    shl bx, 5
+    add word [dap_dest_segment], bx
+
+    ; lba += chunk
+    movzx eax, ax
+    add dword [dap_lba_low], eax
+    adc dword [dap_lba_high], 0
+
+    jmp .read_payload_loop
+
+.boot_kernel:
+    jmp 0x0000:0x8000
 
 disk_error:
     mov si, disk_error_msg
@@ -73,10 +104,18 @@ retry_count:    db 0
 disk_address_packet:
     db 0x10                 ; size of DAP
     db 0x00                 ; reserved
-    dw KERNEL_SECTORS       ; number of sectors to read
+dap_chunk_count:
+    dw 0                    ; chunk sectors (заполняется перед int13h)
     dw LOAD_OFFSET          ; destination offset
-    dw LOAD_SEGMENT         ; destination segment
-    dq 1                    ; start LBA
+dap_dest_segment:
+    dw LOAD_SEGMENT         ; destination segment (обновляется по мере чтения)
+dap_lba_low:
+    dd 1                    ; start LBA (low dword)
+dap_lba_high:
+    dd 0                    ; start LBA (high dword)
+
+; Переменная цикла чтения payload.
+dap_sector_count: dw 0
 
 disk_error_msg: db 'Disk Error', 0
 
