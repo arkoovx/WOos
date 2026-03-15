@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.11.0
+- В `idt` добавлена базовая IRQ-инфраструктура: remap 8259 PIC на векторы `32..47`, unmask только нужных линий (`IRQ1`, `IRQ2`, `IRQ12`), C-dispatcher IRQ и EOI после обработки.
+- Добавлены отдельные IDT-stub для `IRQ1` (клавиатура) и `IRQ12` (мышь) с передачей вектора в `idt_dispatch_irq`.
+- Добавлен модуль `keyboard` с обработкой PS/2 scancode по IRQ и публикацией `INPUT_EVENT_KEY_PRESS` в существующую очередь input.
+- Модуль `mouse` расширен до hybrid режима (IRQ + polling fallback): обработка байтов AUX вынесена в общий путь, подключен `mouse_handle_irq`.
+- В `kernel` зарегистрированы IRQ-обработчики для клавиатуры/мыши через `idt_set_irq_handler`, а roadmap-пункт C.1 «Обвязка IRQ для клавиатуры/мыши» отмечен выполненным.
+- Добавлен `.github/PULL_REQUEST_TEMPLATE.md` с обязательным чеклистом (версия/changelog/docs/валидация/rollback), пункт roadmap по PR template отмечен выполненным.
+
 ## 1.10.1
 - Убрано заметное мерцание UI в стандартной сборке: в `Makefile` двойная буферизация (`DBL_BUFFER`) теперь включена по умолчанию (`1`), поэтому `fb_present_rect` публикует только dirty-области из backbuffer без промежуточных артефактов.
 - Обновлены `README.md`, `VERSION` и UI-баннер под версию `1.10.1`.

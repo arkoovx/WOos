@@ -188,16 +188,42 @@ static void handle_mouse_packet(const uint8_t packet[MOUSE_PACKET_SIZE]) {
         g_mouse.x = (uint16_t)next_x;
         g_mouse.y = (uint16_t)next_y;
 
-        input_event_t move_event = {INPUT_EVENT_MOUSE_MOVE, g_mouse.x, g_mouse.y, g_mouse.buttons};
+        input_event_t move_event = {INPUT_EVENT_MOUSE_MOVE, g_mouse.x, g_mouse.y, g_mouse.buttons, 0u};
         input_push(&move_event);
     }
 
     uint8_t next_buttons = (uint8_t)(packet[0] & 0x07u);
     if (next_buttons != g_mouse.buttons) {
         g_mouse.buttons = next_buttons;
-        input_event_t button_event = {INPUT_EVENT_MOUSE_BUTTON, g_mouse.x, g_mouse.y, g_mouse.buttons};
+        input_event_t button_event = {INPUT_EVENT_MOUSE_BUTTON, g_mouse.x, g_mouse.y, g_mouse.buttons, 0u};
         input_push(&button_event);
     }
+}
+
+static void mouse_consume_byte(uint8_t data) {
+    if (g_mouse.packet_index == 0u && (data & 0x08u) == 0u) {
+        return;
+    }
+
+    g_mouse.packet[g_mouse.packet_index++] = data;
+
+    if (g_mouse.packet_index == MOUSE_PACKET_SIZE) {
+        handle_mouse_packet(g_mouse.packet);
+        g_mouse.packet_index = 0u;
+    }
+}
+
+void mouse_handle_irq(void) {
+    if (!g_mouse.ready) {
+        return;
+    }
+
+    uint8_t status = inb(PS2_STATUS_PORT);
+    if ((status & PS2_STATUS_OUTPUT_FULL) == 0u || (status & PS2_STATUS_AUX_DATA) == 0u) {
+        return;
+    }
+
+    mouse_consume_byte(inb(PS2_DATA_PORT));
 }
 
 // Polling-путь: вычитываем доступные байты из 8042 и собираем полные пакеты мыши.
@@ -218,15 +244,6 @@ void mouse_poll(void) {
             continue;
         }
 
-        if (g_mouse.packet_index == 0u && (data & 0x08u) == 0u) {
-            continue;
-        }
-
-        g_mouse.packet[g_mouse.packet_index++] = data;
-
-        if (g_mouse.packet_index == MOUSE_PACKET_SIZE) {
-            handle_mouse_packet(g_mouse.packet);
-            g_mouse.packet_index = 0u;
-        }
+        mouse_consume_byte(data);
     }
 }

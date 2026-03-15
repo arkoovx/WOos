@@ -13,6 +13,7 @@
 - Текстовый bitmap-рендер для отображения статуса и версий, плюс счётчик dirty-областей как профилировочная метка кадра.
 - Базовый init-flow ядра по стадиям: `early -> platform -> drivers -> ui`.
 - Добавлен IDT skeleton (`idt`) с загрузкой таблицы дескрипторов и безопасным default-обработчиком для базовой платформенной инициализации.
+- Добавлена IRQ-обвязка PS/2 для `keyboard` и `mouse`: PIC remap, выделенные IDT-векторы IRQ1/IRQ12, C-dispatcher и базовый поток keyboard scancode в input-очередь.
 - Добавлен модуль heartbeat-таймера (`timer`) и вывод его состояния в UI (строка `HEARTBEAT` в footer).
 - Добавлен модуль `drivers/virtio_gpu_renderer`: renderer-path для `virtio-gpu` с draw-командами (`fill/rect/glyph`), отдельной RAM draw-surface и публикацией dirty-rect через virtqueue (`TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`) с безопасным fallback на software framebuffer.
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
@@ -79,7 +80,8 @@ qemu-system-x86_64 \
 - `input.c/.h` — очередь событий и input dispatcher contract.
 - `idt.c/.h`, `idt_asm.asm` — каркас подсистемы прерываний (IDT load + default stub).
 - `timer.c/.h` — программный heartbeat-таймер для событий `timer tick`.
-- `mouse.c/.h` — polling-драйвер PS/2-мыши и трансляция пакетов в очередь input.
+- `mouse.c/.h` — polling/IRQ-драйвер PS/2-мыши и трансляция пакетов в очередь input.
+- `keyboard.c/.h` — базовый IRQ-драйвер PS/2-клавиатуры (получение scancode и публикация key-события).
 - `pci.c/.h` — минимальный доступ к PCI config space и поиск устройств.
 - `drivers/virtio_gpu_renderer/virtio_gpu_renderer.c/.h` — renderer-драйвер virtio-gpu с command-oriented draw API, virtqueue-flush dirty-rect и fallback на stage2 framebuffer.
 - `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
