@@ -31,7 +31,6 @@
 
 #define VIRTIO_GPU_CMD_GET_DISPLAY_INFO 0x0100u
 #define VIRTIO_GPU_CMD_RESOURCE_CREATE_2D 0x0101u
-#define VIRTIO_GPU_CMD_RESOURCE_UNREF 0x0102u
 #define VIRTIO_GPU_CMD_SET_SCANOUT 0x0103u
 #define VIRTIO_GPU_CMD_RESOURCE_FLUSH 0x0104u
 #define VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D 0x0105u
@@ -41,6 +40,12 @@
 #define VIRTIO_GPU_RESP_OK_DISPLAY_INFO 0x1101u
 
 #define VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM 2u
+
+// VIRTIO_GPU_F_VIRGL: позволяет хосту принимать virgl-совместимый командный поток.
+#define VIRTIO_GPU_F_VIRGL (1u << 0)
+
+#define VIRTIO_GPU_DRAW_SURFACE_BASE 0x01800000ull
+#define VIRTIO_GPU_DRAW_SURFACE_CAPACITY (8u * 1024u * 1024u)
 
 typedef struct virtq_desc {
     uint64_t addr;
@@ -199,7 +204,7 @@ typedef struct virtio_gpu_transport {
 } virtio_gpu_transport_t;
 
 static virtio_gpu_renderer_status_t g_renderer = {
-    0u, 0u, 0u, 0u,
+    0u, 0u, 0u, 0u, 0u,
     0u, 0u, 0u,
     0u, 0u,
     0ull, 0ull
@@ -207,6 +212,8 @@ static virtio_gpu_renderer_status_t g_renderer = {
 
 static virtio_gpu_transport_t g_transport = {0};
 static virtio_gpu_queue_buffers_t g_queue;
+static uint8_t* const g_draw_surface = (uint8_t*)(uint64_t)VIRTIO_GPU_DRAW_SURFACE_BASE;
+static uint8_t g_draw_surface_enabled = 0u;
 
 static virtio_gpu_req_get_display_info_t g_req_display_info;
 static virtio_gpu_resp_header_t g_resp_display_info;
@@ -233,6 +240,11 @@ static inline uint32_t io_inl(uint16_t port) {
 
 static inline void io_fence(void) {
     __asm__ __volatile__("" ::: "memory");
+}
+
+static inline uint8_t bytes_per_pixel(const video_info_t* info) {
+    uint8_t bytes = (uint8_t)(info->bpp / 8u);
+    return (bytes == 0u) ? 4u : bytes;
 }
 
 static uint32_t pci_config_read_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
@@ -276,8 +288,6 @@ static void apply_device_info(const pci_device_info_t* dev) {
 }
 
 static uint8_t virtio_gpu_locate_capabilities(void) {
-    // Для modern virtio устройства конфигурационные регионы публикуются
-    // через vendor-specific PCI capabilities.
     uint8_t bus = g_renderer.pci_bus;
     uint8_t slot = g_renderer.pci_slot;
     uint8_t func = g_renderer.pci_func;
@@ -337,16 +347,11 @@ static void virtio_gpu_set_failed(void) {
 }
 
 static uint8_t virtio_gpu_setup_queue(void) {
-    // Поднимаем split virtqueue #0 (controlq), в которой идут все 2D-команды GPU.
     volatile virtio_pci_common_cfg_t* common = g_transport.common;
 
     common->queue_select = VIRTIO_GPU_CONTROL_QUEUE;
 
-    if (common->queue_size == 0u) {
-        return 0u;
-    }
-
-    if (common->queue_size < VIRTIO_GPU_QUEUE_SIZE) {
+    if (common->queue_size == 0u || common->queue_size < VIRTIO_GPU_QUEUE_SIZE) {
         return 0u;
     }
 
@@ -377,7 +382,6 @@ static void virtio_gpu_notify_queue(void) {
 }
 
 static uint8_t virtio_gpu_submit_request(void* req, uint32_t req_len, void* resp, uint32_t resp_len) {
-    // Синхронная отправка одной цепочки descriptor'ов: request(out) + response(in).
     if (!g_transport.ready) {
         return 0u;
     }
@@ -421,7 +425,6 @@ static uint8_t virtio_gpu_submit_request(void* req, uint32_t req_len, void* resp
 }
 
 static uint8_t virtio_gpu_initialize_pipe(video_info_t* info) {
-    // Инициализируем базовый графический пайплайн: resource -> backing -> scanout.
     g_req_display_info.req.type = VIRTIO_GPU_CMD_GET_DISPLAY_INFO;
     g_req_display_info.req.flags = 0u;
     g_req_display_info.req.fence_id = 0u;
@@ -453,7 +456,7 @@ static uint8_t virtio_gpu_initialize_pipe(video_info_t* info) {
     g_req_attach.req.hdr.padding = 0u;
     g_req_attach.req.resource_id = VIRTIO_GPU_RESOURCE_ID;
     g_req_attach.req.nr_entries = 1u;
-    g_req_attach.entry.addr = info->framebuffer;
+    g_req_attach.entry.addr = g_renderer.active_framebuffer;
     g_req_attach.entry.length = (uint32_t)info->pitch * (uint32_t)info->height;
     g_req_attach.entry.padding = 0u;
 
@@ -480,6 +483,112 @@ static uint8_t virtio_gpu_initialize_pipe(video_info_t* info) {
     return 1u;
 }
 
+static uint16_t clip_end(uint16_t start, uint16_t len, uint16_t limit) {
+    uint16_t end = (uint16_t)(start + len);
+    return (end > limit) ? limit : end;
+}
+
+static inline uint8_t* renderer_base(video_info_t* info) {
+    if (g_renderer.active && g_draw_surface_enabled) {
+        (void)info;
+        return g_draw_surface;
+    }
+
+    return (uint8_t*)(uint64_t)info->framebuffer;
+}
+
+uint32_t virtio_gpu_renderer_readpixel(video_info_t* info, uint16_t x, uint16_t y) {
+    if (x >= info->width || y >= info->height) {
+        return 0u;
+    }
+
+    uint8_t bpp = bytes_per_pixel(info);
+    uint8_t* px = renderer_base(info) + ((uint64_t)y * info->pitch) + ((uint64_t)x * bpp);
+
+    if (bpp == 2u) {
+        uint16_t packed = *(uint16_t*)px;
+        uint8_t r = (uint8_t)(((packed >> 11) & 0x1Fu) << 3);
+        uint8_t g = (uint8_t)(((packed >> 5) & 0x3Fu) << 2);
+        uint8_t b = (uint8_t)((packed & 0x1Fu) << 3);
+        return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+    }
+
+    if (bpp == 3u) {
+        return ((uint32_t)px[2] << 16) | ((uint32_t)px[1] << 8) | px[0];
+    }
+
+    return *(uint32_t*)px & 0x00FFFFFFu;
+}
+
+void virtio_gpu_renderer_writepixel(video_info_t* info, uint16_t x, uint16_t y, uint32_t color) {
+    if (x >= info->width || y >= info->height) {
+        return;
+    }
+
+    uint8_t bpp = bytes_per_pixel(info);
+    uint8_t* px = renderer_base(info) + ((uint64_t)y * info->pitch) + ((uint64_t)x * bpp);
+
+    if (bpp == 2u) {
+        uint8_t r = (uint8_t)((color >> 16) & 0xFFu);
+        uint8_t g = (uint8_t)((color >> 8) & 0xFFu);
+        uint8_t b = (uint8_t)(color & 0xFFu);
+        *(uint16_t*)px = (uint16_t)(((uint16_t)(r >> 3) << 11) | ((uint16_t)(g >> 2) << 5) | (uint16_t)(b >> 3));
+        return;
+    }
+
+    if (bpp == 3u) {
+        px[0] = (uint8_t)(color & 0xFFu);
+        px[1] = (uint8_t)((color >> 8) & 0xFFu);
+        px[2] = (uint8_t)((color >> 16) & 0xFFu);
+        return;
+    }
+
+    *(uint32_t*)px = color & 0x00FFFFFFu;
+}
+
+void virtio_gpu_renderer_fill(video_info_t* info, uint32_t color) {
+    virtio_gpu_renderer_rect(info, 0, 0, info->width, info->height, color);
+}
+
+void virtio_gpu_renderer_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint32_t color) {
+    if (w == 0u || h == 0u || x >= info->width || y >= info->height) {
+        return;
+    }
+
+    uint16_t x_end = clip_end(x, w, info->width);
+    uint16_t y_end = clip_end(y, h, info->height);
+
+    for (uint16_t py = y; py < y_end; py++) {
+        for (uint16_t px = x; px < x_end; px++) {
+            virtio_gpu_renderer_writepixel(info, px, py, color);
+        }
+    }
+}
+
+void virtio_gpu_renderer_draw_glyph(
+    video_info_t* info,
+    uint16_t x,
+    uint16_t y,
+    const uint8_t* glyph,
+    uint8_t glyph_w,
+    uint8_t glyph_h,
+    uint32_t color,
+    uint32_t bg_color
+) {
+    if (glyph == 0) {
+        return;
+    }
+
+    for (uint8_t gy = 0; gy < glyph_h; gy++) {
+        uint8_t row = glyph[gy];
+        for (uint8_t gx = 0; gx < glyph_w; gx++) {
+            uint8_t bit = (uint8_t)(0x80u >> gx);
+            uint32_t px_color = (row & bit) ? color : bg_color;
+            virtio_gpu_renderer_writepixel(info, (uint16_t)(x + gx), (uint16_t)(y + gy), px_color);
+        }
+    }
+}
+
 void virtio_gpu_renderer_init(video_info_t* info) {
     pci_device_info_t dev;
     g_renderer.fallback_framebuffer = info->framebuffer;
@@ -499,6 +608,12 @@ void virtio_gpu_renderer_init(video_info_t* info) {
         return;
     }
 
+    uint32_t required = (uint32_t)info->pitch * (uint32_t)info->height;
+    g_draw_surface_enabled = (required <= VIRTIO_GPU_DRAW_SURFACE_CAPACITY) ? 1u : 0u;
+    if (g_draw_surface_enabled) {
+        g_renderer.active_framebuffer = VIRTIO_GPU_DRAW_SURFACE_BASE;
+    }
+
     if (!virtio_gpu_locate_capabilities()) {
         return;
     }
@@ -507,8 +622,19 @@ void virtio_gpu_renderer_init(video_info_t* info) {
     g_transport.common->device_status = VIRTIO_STATUS_ACKNOWLEDGE;
     g_transport.common->device_status |= VIRTIO_STATUS_DRIVER;
 
+    g_transport.common->device_feature_select = 0u;
+    uint32_t dev_features = g_transport.common->device_feature;
+    uint32_t driver_features = 0u;
+
+    if ((dev_features & VIRTIO_GPU_F_VIRGL) != 0u) {
+        driver_features |= VIRTIO_GPU_F_VIRGL;
+        g_renderer.virgl_enabled = 1u;
+    }
+
+    g_transport.common->driver_feature_select = 0u;
+    g_transport.common->driver_feature = driver_features;
     g_transport.common->driver_feature_select = 1u;
-    g_transport.common->driver_feature = 1u;
+    g_transport.common->driver_feature = 0u;
 
     g_transport.common->device_status |= VIRTIO_STATUS_FEATURES_OK;
     if ((g_transport.common->device_status & VIRTIO_STATUS_FEATURES_OK) == 0u) {
@@ -533,7 +659,6 @@ void virtio_gpu_renderer_init(video_info_t* info) {
 }
 
 void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
-    // Dirty-rect update: сначала перенос пикселей в host resource, затем flush в scanout.
     if (!g_transport.ready || w == 0u || h == 0u) {
         return;
     }
@@ -542,15 +667,8 @@ void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y
         return;
     }
 
-    uint16_t end_x = (uint16_t)(x + w);
-    uint16_t end_y = (uint16_t)(y + h);
-    if (end_x > info->width) {
-        end_x = info->width;
-    }
-    if (end_y > info->height) {
-        end_y = info->height;
-    }
-
+    uint16_t end_x = clip_end(x, w, info->width);
+    uint16_t end_y = clip_end(y, h, info->height);
     uint16_t clipped_w = (uint16_t)(end_x - x);
     uint16_t clipped_h = (uint16_t)(end_y - y);
 
@@ -558,6 +676,7 @@ void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y
         return;
     }
 
+    // Dirty rectangle отправляем в control virtqueue: transfer + flush.
     g_req_transfer.req.hdr.type = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
     g_req_transfer.req.hdr.flags = 0u;
     g_req_transfer.req.hdr.fence_id = 0u;
@@ -567,7 +686,7 @@ void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y
     g_req_transfer.req.rect.y = y;
     g_req_transfer.req.rect.width = clipped_w;
     g_req_transfer.req.rect.height = clipped_h;
-    g_req_transfer.req.offset = (uint64_t)y * (uint64_t)info->pitch + (uint64_t)x * 4ull;
+    g_req_transfer.req.offset = (uint64_t)y * (uint64_t)info->pitch + (uint64_t)x * (uint64_t)bytes_per_pixel(info);
     g_req_transfer.req.resource_id = VIRTIO_GPU_RESOURCE_ID;
     g_req_transfer.req.padding = 0u;
 
