@@ -156,8 +156,12 @@ void idt_init(void) {
     idtr.base = (uint64_t)&g_idt[0];
 
     idt_load(&idtr);
-    __asm__ __volatile__("sti");
     g_idt_ready = 1u;
+}
+
+void idt_enable_interrupts(void) {
+    // Разрешаем IRQ только после полной регистрации обработчиков в kmain.
+    __asm__ __volatile__("sti");
 }
 
 uint8_t idt_is_ready(void) {

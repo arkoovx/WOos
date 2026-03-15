@@ -129,6 +129,7 @@ void kmain(video_info_t* video) {
 
     idt_set_irq_handler(1u, irq_keyboard_handler);
     idt_set_irq_handler(12u, irq_mouse_handler);
+    idt_enable_interrupts();
 
     while (1) {
         for (volatile uint32_t delay = 0; delay < KERNEL_MAIN_LOOP_PAUSE; delay++) {
