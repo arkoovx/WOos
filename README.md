@@ -84,9 +84,11 @@ qemu-system-x86_64 \
 - `mouse.c/.h` — polling/IRQ-драйвер PS/2-мыши и трансляция пакетов в очередь input.
 - `keyboard.c/.h` — базовый IRQ-драйвер PS/2-клавиатуры (получение scancode и публикация key-события).
 - `pmm.c/.h` — stack-based менеджер страниц (baseline физического аллокатора ядра).
+- `kheap.c/.h` — базовый runtime heap-аллокатор ядра (`kmalloc/kfree`) поверх PMM-страниц для внутренних структур.
 - `pci.c/.h` — минимальный доступ к PCI config space и поиск устройств.
 - `drivers/virtio_gpu_renderer/virtio_gpu_renderer.c/.h` — renderer-драйвер virtio-gpu с command-oriented draw API, virtqueue-flush dirty-rect и fallback на stage2 framebuffer.
 - `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
+- `docs/VMM_MIGRATION_PLAN.md` — поэтапный план миграции к полноценному VMM (карта памяти, page tables, mapping policy).
 
 ## Процесс разработки
 В репозитории действует правило: **каждый PR = новая версия**.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.13.0
+- Добавлен модуль `kheap` с базовым runtime allocator (`kheap_init`, `kmalloc`, `kfree`) поверх PMM-страниц: first-fit, split/merge блоков, выравнивание 16 байт и диагностические метрики (`kheap_total_bytes`, `kheap_free_bytes`, `kheap_largest_free_block`).
+- Инициализация heap встроена в `INIT_PLATFORM`, а в `kmain` добавлен ранний smoke-тест (`kmalloc/kfree`) с интеграцией в существующий индикатор готовности ядра.
+- Подготовлен документ `docs/VMM_MIGRATION_PLAN.md` с целевой картой памяти, этапами внедрения page tables и первичной kernel mapping policy для перехода к VMM.
+- В roadmap (`DEVELOPMENT_PLAN.md`) закрыт блок C.2 (heap allocator + план миграции к VMM), обновлены `README.md`, `Makefile` и UI-баннер до версии `1.13.0`.
+
 ## 1.12.0
 - Добавлен модуль `pmm` (stack-based allocator страниц) с API `pmm_init/pmm_alloc_page/pmm_free_page` и диагностикой состояния пула (`pmm_total_pages`, `pmm_free_pages`, `pmm_is_ready`).
 - Для baseline PMM выделен внутренний выровненный пул на 1024 страницы по 4 KiB с free-stack и защитой от дублирующего `free` в пределах пула.

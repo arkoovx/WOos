@@ -11,6 +11,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "mouse.h"
 #include "keyboard.h"
 #include "pmm.h"
+#include "kheap.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
 
 typedef enum init_stage {
@@ -23,6 +24,8 @@ typedef enum init_stage {
 // Пауза в основном цикле: нужна, чтобы не загружать CPU на 100%,
 // но без «тормозов» интерфейса в эмуляторе.
 #define KERNEL_MAIN_LOOP_PAUSE 20000u
+
+static uint8_t g_kernel_ready = 0u;
 
 static void sanitize_boot_info(video_info_t* video) {
     if (video->magic != BOOT_INFO_MAGIC_EXPECTED) {
@@ -54,6 +57,7 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             fb_init(video);
             idt_init();
             pmm_init();
+            kheap_init();
             break;
         case INIT_DRIVERS:
             virtio_gpu_renderer_init(video);
@@ -78,11 +82,11 @@ static void dispatch_input_event(video_info_t* video, const input_event_t* event
             ui_handle_mouse_button(video, event->buttons);
             break;
         case INPUT_EVENT_TIMER_TICK:
-            ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
+            ui_set_kernel_health(video, g_kernel_ready, timer_ticks());
             break;
         case INPUT_EVENT_KEY_PRESS:
             // Пока отображаем только факт жизни IRQ-пути клавиатуры через heartbeat refresh.
-            ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
+            ui_set_kernel_health(video, g_kernel_ready, timer_ticks());
             break;
     }
 }
@@ -95,12 +99,29 @@ static void irq_mouse_handler(void) {
     mouse_handle_irq();
 }
 
+static uint8_t kheap_smoke_test(void) {
+    void* a = kmalloc(64u);
+    void* b = kmalloc(128u);
+
+    if (a == (void*)0 || b == (void*)0 || a == b) {
+        return 0u;
+    }
+
+    kfree(a);
+    kfree(b);
+    return 1u;
+}
+
 void kmain(video_info_t* video) {
     run_stage(video, INIT_EARLY);
     run_stage(video, INIT_PLATFORM);
     run_stage(video, INIT_DRIVERS);
     run_stage(video, INIT_UI);
-    ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
+
+    // Базовая проверка heap в рантайме: должна пройти до входа в event loop.
+    uint8_t heap_ok = kheap_is_ready() && kheap_smoke_test();
+    g_kernel_ready = (uint8_t)(idt_is_ready() && heap_ok);
+    ui_set_kernel_health(video, g_kernel_ready, timer_ticks());
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);
     uint16_t cursor_y = (uint16_t)(video->height / 2);

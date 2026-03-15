@@ -90,8 +90,8 @@
 
 ### C.2 Memory Subsystem
 - [x] PMM (stack-based baseline allocator для физических страниц ядра на внутреннем пуле).
-- [ ] Базовый heap allocator ядра (рантайм-аллокатор для внутренних структур).
-- [ ] План миграции к VMM (карта памяти, page tables, kernel mapping policy).
+- [x] Базовый heap allocator ядра (рантайм-аллокатор для внутренних структур).
+- [x] План миграции к VMM (карта памяти, page tables, kernel mapping policy).
 
 **DoD этапа C:**
 - Прерывания стабильны, panic path информативен.
@@ -145,6 +145,7 @@
 
 ### Документация
 - [ ] Добавить `docs/ARCHITECTURE.md` (слои, init flow, контракты).
+- [x] Добавить `docs/VMM_MIGRATION_PLAN.md` (карта памяти, page tables, kernel mapping policy для перехода к VMM).
 - [ ] Добавить `docs/DEBUGGING.md` (типовые проблемы boot/kernel).
 - [ ] Добавить `docs/RELEASES.md` (как выпускать теги и что генерируется автоматически).
 
