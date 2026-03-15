@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.10.1
+- Убрано заметное мерцание UI в стандартной сборке: в `Makefile` двойная буферизация (`DBL_BUFFER`) теперь включена по умолчанию (`1`), поэтому `fb_present_rect` публикует только dirty-области из backbuffer без промежуточных артефактов.
+- Обновлены `README.md`, `VERSION` и UI-баннер под версию `1.10.1`.
+
 ## 1.10.0
 - В `drivers/virtio_gpu_renderer` добавлен command-oriented рендер-пайплайн: `fb`/UI теперь отправляют draw-команды (`fill/rect/glyph`) в renderer, а не пишут пиксели напрямую в stage2 framebuffer при активном `virtio-gpu`.
 - Добавлена отдельная draw-surface в RAM для GPU-пути: ресурс `virtio-gpu` получает backing на этой поверхности, после чего dirty-области публикуются через virtqueue (`TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`).
