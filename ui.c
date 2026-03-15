@@ -169,7 +169,6 @@ static void cursor_restore_underlay(video_info_t* info) {
         }
     }
 
-    fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
 }
 
 static void cursor_draw(video_info_t* info) {
@@ -199,7 +198,18 @@ static void cursor_draw(video_info_t* info) {
     }
 
     g_cursor.visible = 1;
-    fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
+}
+
+static void present_cursor_delta(video_info_t* info, uint16_t old_x, uint16_t old_y, uint8_t had_visible) {
+    if (!had_visible) {
+        fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
+        return;
+    }
+
+    ui_dirty_rect_t old_rect = {old_x, old_y, CURSOR_W, CURSOR_H};
+    ui_dirty_rect_t new_rect = {g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H};
+    ui_dirty_rect_t union_rect = rect_union(&old_rect, &new_rect);
+    fb_present_rect(info, union_rect.x, union_rect.y, union_rect.w, union_rect.h);
 }
 
 void ui_set_cursor(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons) {
@@ -214,11 +224,18 @@ void ui_set_cursor(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons) 
         y = max_y;
     }
 
+    uint16_t old_x = g_cursor.x;
+    uint16_t old_y = g_cursor.y;
+    uint8_t had_visible = g_cursor.visible;
+
     cursor_restore_underlay(info);
     g_cursor.x = x;
     g_cursor.y = y;
     g_cursor.buttons = buttons;
     cursor_draw(info);
+    // Публикуем старую и новую область курсора одним прямоугольником,
+    // чтобы не было «мигания» из-за двух последовательных flush-операций.
+    present_cursor_delta(info, old_x, old_y, had_visible);
 }
 
 void ui_mark_dirty(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
@@ -279,6 +296,7 @@ void ui_render_dirty(video_info_t* info) {
 
     if (g_cursor.visible) {
         cursor_draw(info);
+        fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
     }
 }
 
