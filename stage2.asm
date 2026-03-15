@@ -3,6 +3,8 @@
 BITS 16
 GLOBAL _start
 EXTERN kmain
+EXTERN __bss_start
+EXTERN __bss_end
 
 %define VBE_MODE_1024x768x32 0x118
 %define VBE_SET_LINEAR      0x4000
@@ -147,6 +149,14 @@ long_mode_start:
     ; loaded at 0x8000.
     mov rsp, LONG_MODE_STACK_TOP
     mov rbp, rsp
+
+    ; .bss теперь не хранится в образе, поэтому явно обнуляем секцию
+    ; перед передачей управления C-коду ядра.
+    lea rdi, [rel __bss_start]
+    lea rcx, [rel __bss_end]
+    sub rcx, rdi
+    xor eax, eax
+    rep stosb
 
     lea rdi, [rel boot_info]
     call kmain

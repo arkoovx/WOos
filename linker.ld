@@ -25,12 +25,6 @@ SECTIONS
         *(.data .data.*)
     }
 
-    .bss : ALIGN(16)
-    {
-        *(.bss .bss.*)
-        *(COMMON)
-    }
-
     .paging : ALIGN(4096)
     {
         *(.paging)
@@ -40,5 +34,13 @@ SECTIONS
     .pad :
     {
         BYTE(0)
+    }
+
+    .bss (NOLOAD) : ALIGN(16)
+    {
+        __bss_start = .;
+        *(.bss .bss.*)
+        *(COMMON)
+        __bss_end = .;
     }
 }
