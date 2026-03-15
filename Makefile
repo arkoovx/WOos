@@ -8,7 +8,9 @@ CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protect
 LDFLAGS   := -m elf_x86_64 -T linker.ld
 KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o mouse.o pci.o drivers/virtio_gpu_renderer/virtio_gpu_renderer.o
 
-DBL_BUFFER ?= 0
+# По умолчанию держим двойную буферизацию включённой,
+# чтобы убрать заметное мерцание UI при частых dirty-update.
+DBL_BUFFER ?= 1
 FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)
 
 all: os.img
