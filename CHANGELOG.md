@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.0
+- В `drivers/virtio_gpu_renderer` добавлен command-oriented рендер-пайплайн: `fb`/UI теперь отправляют draw-команды (`fill/rect/glyph`) в renderer, а не пишут пиксели напрямую в stage2 framebuffer при активном `virtio-gpu`.
+- Добавлена отдельная draw-surface в RAM для GPU-пути: ресурс `virtio-gpu` получает backing на этой поверхности, после чего dirty-области публикуются через virtqueue (`TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`).
+- Добавлена negotiated-поддержка `VIRTIO_GPU_F_VIRGL` (virgl capability bit) с безопасным fallback, если функция недоступна на устройстве.
+- Сохранены текущие init-flow (`early -> platform -> drivers -> ui`), driver-layer разделение и существующий `fb/ui` API; software framebuffer fallback остаётся рабочим для non-virtio/legacy-path.
+
 ## 1.9.0
 - Добавлен модуль `drivers/virtio_gpu_renderer`, который в driver-stage определяет `virtio-gpu` по PCI и при валидном MMIO BAR переключает `video->framebuffer` на framebuffer устройства.
 - Сохранён текущий init-flow (`early -> platform -> drivers -> ui`): инициализация рендера virtio встроена в `INIT_DRIVERS` без изменений API UI/fb.

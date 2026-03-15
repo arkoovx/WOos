@@ -127,7 +127,15 @@ static inline uint8_t bytes_per_pixel(const video_info_t* info) {
     return (bytes == 0u) ? 4u : bytes;
 }
 
+static inline uint8_t use_gpu_draw_commands(void) {
+    return virtio_gpu_renderer_is_active();
+}
+
 uint32_t fb_readpixel(video_info_t* info, uint16_t x, uint16_t y) {
+    if (use_gpu_draw_commands()) {
+        return virtio_gpu_renderer_readpixel(info, x, y);
+    }
+
     if (x >= info->width || y >= info->height) {
         return 0;
     }
@@ -151,6 +159,11 @@ uint32_t fb_readpixel(video_info_t* info, uint16_t x, uint16_t y) {
 }
 
 void fb_writepixel(video_info_t* info, uint16_t x, uint16_t y, uint32_t color) {
+    if (use_gpu_draw_commands()) {
+        virtio_gpu_renderer_writepixel(info, x, y, color);
+        return;
+    }
+
     if (x >= info->width || y >= info->height) {
         return;
     }
@@ -179,6 +192,11 @@ void fb_writepixel(video_info_t* info, uint16_t x, uint16_t y, uint32_t color) {
 }
 
 void fb_fill(video_info_t* info, uint32_t color) {
+    if (use_gpu_draw_commands()) {
+        virtio_gpu_renderer_fill(info, color);
+        return;
+    }
+
     for (uint16_t y = 0; y < info->height; y++) {
         for (uint16_t x = 0; x < info->width; x++) {
             fb_writepixel(info, x, y, color);
@@ -187,6 +205,11 @@ void fb_fill(video_info_t* info, uint32_t color) {
 }
 
 void fb_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint32_t color) {
+    if (use_gpu_draw_commands()) {
+        virtio_gpu_renderer_rect(info, x, y, w, h, color);
+        return;
+    }
+
     uint16_t x_end = clamp_u16((uint16_t)(x + w), info->width);
     uint16_t y_end = clamp_u16((uint16_t)(y + h), info->height);
 
@@ -214,6 +237,11 @@ void fb_frame(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h
 void fb_draw_char(video_info_t* info, uint16_t x, uint16_t y, char c, uint32_t color, uint32_t bg_color) {
     const uint8_t* glyph = glyph_for_char(c);
 
+    if (use_gpu_draw_commands()) {
+        virtio_gpu_renderer_draw_glyph(info, x, y, glyph, FONT_W, FONT_H, color, bg_color);
+        return;
+    }
+
     for (uint16_t gy = 0; gy < FONT_H; gy++) {
         uint8_t row = glyph[gy];
         for (uint16_t gx = 0; gx < FONT_W; gx++) {
@@ -236,7 +264,7 @@ void fb_draw_text(video_info_t* info, uint16_t x, uint16_t y, const char* text, 
 
 void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
 #if WOOS_ENABLE_DBL_BUFFER
-    if (!g_backbuffer_enabled || w == 0 || h == 0) {
+    if (use_gpu_draw_commands() || !g_backbuffer_enabled || w == 0 || h == 0) {
         virtio_gpu_renderer_present_rect(info, x, y, w, h);
         return;
     }

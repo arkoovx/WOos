@@ -14,7 +14,7 @@
 - Базовый init-flow ядра по стадиям: `early -> platform -> drivers -> ui`.
 - Добавлен IDT skeleton (`idt`) с загрузкой таблицы дескрипторов и безопасным default-обработчиком для базовой платформенной инициализации.
 - Добавлен модуль heartbeat-таймера (`timer`) и вывод его состояния в UI (строка `HEARTBEAT` в footer).
-- Добавлен модуль `drivers/virtio_gpu_renderer`: базовый renderer-path для `virtio-gpu` с выбором framebuffer через PCI BAR и безопасным fallback на исходный RAM framebuffer.
+- Добавлен модуль `drivers/virtio_gpu_renderer`: renderer-path для `virtio-gpu` с draw-командами (`fill/rect/glyph`), отдельной RAM draw-surface и публикацией dirty-rect через virtqueue (`TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`) с безопасным fallback на software framebuffer.
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
 - Исправлен рендер под разные framebuffer-форматы (`16/24/32 bpp`), убраны визуальные полосы на фоне и артефакты курсора.
 
@@ -64,7 +64,7 @@ qemu-system-x86_64 \
   -monitor stdio
 ```
 
-Важно: в текущем состоянии WoOS использует 2D framebuffer-path без 3D stack (virtqueue + virgl userspace). При наличии `virtio-gpu` ядро переключает active framebuffer на BAR-область устройства; при недоступности BAR сохраняется fallback на framebuffer от `stage2`.
+Важно: в текущем состоянии WoOS использует 2D command/render-path поверх `virtio-gpu` (без полноценного userspace 3D stack). UI отправляет draw-команды в renderer, который обновляет backing resource и отправляет dirty-rect в virtqueue. Если `virtio-gpu`/modern transport недоступен, автоматически остаётся software framebuffer-path от `stage2`.
 
 Если в гостевой системе всё «как 1 FPS», чаще всего проблема в медленной эмуляции (TCG без аппаратного ускорения) и/или слишком больших задержках в основном цикле ядра.
 
@@ -79,7 +79,7 @@ qemu-system-x86_64 \
 - `timer.c/.h` — программный heartbeat-таймер для событий `timer tick`.
 - `mouse.c/.h` — polling-драйвер PS/2-мыши и трансляция пакетов в очередь input.
 - `pci.c/.h` — минимальный доступ к PCI config space и поиск устройств.
-- `drivers/virtio_gpu_renderer/virtio_gpu_renderer.c/.h` — базовый renderer-драйвер virtio-gpu с fallback на stage2 framebuffer и hook под будущий `RESOURCE_FLUSH`.
+- `drivers/virtio_gpu_renderer/virtio_gpu_renderer.c/.h` — renderer-драйвер virtio-gpu с command-oriented draw API, virtqueue-flush dirty-rect и fallback на stage2 framebuffer.
 - `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
 
 ## Процесс разработки
