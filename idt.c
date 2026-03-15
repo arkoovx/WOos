@@ -156,8 +156,13 @@ void idt_init(void) {
     idtr.base = (uint64_t)&g_idt[0];
 
     idt_load(&idtr);
-    __asm__ __volatile__("sti");
     g_idt_ready = 1u;
+}
+
+void idt_enable_interrupts(void) {
+    // Включаем прерывания отдельно от idt_init: так мы сначала успеваем
+    // зарегистрировать IRQ-handlers, и только потом разрешаем внешние IRQ.
+    __asm__ __volatile__("sti");
 }
 
 uint8_t idt_is_ready(void) {

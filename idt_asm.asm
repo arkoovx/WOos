@@ -16,18 +16,48 @@ idt_load:
 idt_stub_ignore:
     iretq
 
-idt_irq1_stub:
+%macro IRQ_STUB 2
+%1:
+    ; IRQ приходит асинхронно к любому C-коду, поэтому сохраняем все GPR,
+    ; чтобы гарантированно не повредить состояние прерванного потока.
     push rax
-    mov dil, 33
-    call idt_dispatch_irq
-    pop rax
-    iretq
+    push rcx
+    push rdx
+    push rbx
+    push rbp
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
 
-idt_irq12_stub:
-    push rax
-    mov dil, 44
+    mov dil, %2
     call idt_dispatch_irq
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rbp
+    pop rbx
+    pop rdx
+    pop rcx
     pop rax
     iretq
+%endmacro
+
+IRQ_STUB idt_irq1_stub, 33
+IRQ_STUB idt_irq12_stub, 44
 
 section .note.GNU-stack noalloc noexec nowrite progbits
