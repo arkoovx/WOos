@@ -6,7 +6,6 @@ EXTERN kmain
 EXTERN __bss_start
 EXTERN __bss_end
 
-%define VBE_MODE_1024x768x32 0x118
 %define VBE_SET_LINEAR      0x4000
 %define LONG_MODE_STACK_TOP 0x0009F000
 %define BOCHS_LFB_FALLBACK  0xE0000000
@@ -25,18 +24,30 @@ _start:
     mov word  [boot_info + 4], BOOT_INFO_VERSION
     mov word  [boot_info + 6], BOOT_INFO_SIZE
 
+    xor si, si
+.try_vbe_mode:
+    mov cx, [vbe_mode_candidates + si]
+    test cx, cx
+    jz stage2_fail
+
     mov ax, 0x4F01
-    mov cx, VBE_MODE_1024x768x32
     mov di, vbe_mode_info
     int 0x10
     cmp ax, 0x004F
-    jne stage2_fail
+    jne .next_vbe_mode
 
     mov ax, 0x4F02
-    mov bx, VBE_MODE_1024x768x32 | VBE_SET_LINEAR
+    mov bx, cx
+    or bx, VBE_SET_LINEAR
     int 0x10
     cmp ax, 0x004F
-    jne stage2_fail
+    je .vbe_mode_ready
+
+.next_vbe_mode:
+    add si, 2
+    jmp .try_vbe_mode
+
+.vbe_mode_ready:
 
     mov eax, [vbe_mode_info + 0x28]
     mov [boot_info + 8], eax
@@ -164,6 +175,16 @@ long_mode_start:
 .hang:
     hlt
     jmp .hang
+
+ALIGN 16
+vbe_mode_candidates:
+    ; На части конфигураций QEMU/virtio-vga-gl режим 0x118 может отсутствовать
+    ; в VBE-таблице. Пробуем несколько безопасных fallback-вариантов.
+    dw 0x118 ; 1024x768x32
+    dw 0x117 ; 1024x768x16
+    dw 0x115 ; 800x600x24
+    dw 0x114 ; 800x600x16
+    dw 0x0
 
 ALIGN 16
 boot_info:
