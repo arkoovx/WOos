@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.0
+- Добавлен модуль `drivers/virtio_gpu_renderer`, который в driver-stage определяет `virtio-gpu` по PCI и при валидном MMIO BAR переключает `video->framebuffer` на framebuffer устройства.
+- Сохранён текущий init-flow (`early -> platform -> drivers -> ui`): инициализация рендера virtio встроена в `INIT_DRIVERS` без изменений API UI/fb.
+- Добавлен безопасный fallback: если `virtio-gpu` не найден или BAR невалиден, ядро продолжает рендерить в framebuffer, переданный `stage2`.
+- В `fb_present_rect` добавлен backend-hook `virtio_gpu_renderer_present_rect(...)` как фундамент для следующего шага (virtqueue `TRANSFER_TO_HOST_2D` / `RESOURCE_FLUSH`) без поломки dirty-rect/double-buffer pipeline.
+- Обновлены документация и UI-баннер до версии `1.9.0`.
+
 ## 1.8.0
 - Добавлен базовый драйвер `virtio_gpu` с безопасным PCI-probing устройств `virtio-gpu` (modern/legacy) без изменения текущего framebuffer-пути, чтобы не ломать существующий kernel flow.
 - Добавлен модуль `pci` для чтения PCI config space через порты `0xCF8/0xCFC` и поиска устройств по `vendor/device` и display-классу.
