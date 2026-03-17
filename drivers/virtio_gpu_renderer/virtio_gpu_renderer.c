@@ -47,6 +47,10 @@
 #define VIRTIO_GPU_DRAW_SURFACE_BASE 0x01800000ull
 #define VIRTIO_GPU_DRAW_SURFACE_CAPACITY (8u * 1024u * 1024u)
 
+#ifndef WOOS_ENABLE_VIRTIO_GPU
+#define WOOS_ENABLE_VIRTIO_GPU 1
+#endif
+
 typedef struct virtq_desc {
     uint64_t addr;
     uint32_t len;
@@ -270,12 +274,36 @@ static uint8_t pci_config_read_byte(uint8_t bus, uint8_t slot, uint8_t func, uin
     return (uint8_t)((value >> shift) & 0xFFu);
 }
 
-static uint64_t pci_bar_to_mmio_base(uint32_t bar) {
-    if ((bar & 0x1u) != 0u) {
-        return 0ull;
+static uint8_t pci_get_mmio_bar_base(uint8_t bar_index, uint64_t* out_base) {
+    uint32_t bar = 0u;
+    uint32_t bar_next = 0u;
+
+    if (bar_index == 0u) {
+        bar = g_renderer.bar0;
+        bar_next = g_renderer.bar1;
+    } else if (bar_index == 1u) {
+        bar = g_renderer.bar1;
+    } else {
+        return 0u;
     }
 
-    return (uint64_t)(bar & ~0xFu);
+    // Используем только MMIO BAR. I/O BAR для virtio-pci modern cfg не подходит.
+    if ((bar & 0x1u) != 0u) {
+        return 0u;
+    }
+
+    uint8_t bar_type = (uint8_t)((bar >> 1u) & 0x3u);
+    uint64_t base = (uint64_t)(bar & ~0xFu);
+
+    if (bar_type == 0x2u) {
+        // 64-битный BAR: старшая половина приходит из следующего регистра BAR.
+        base |= ((uint64_t)bar_next << 32u);
+    } else if (bar_type != 0x0u) {
+        return 0u;
+    }
+
+    *out_base = base;
+    return 1u;
 }
 
 static void apply_device_info(const pci_device_info_t* dev) {
@@ -309,24 +337,25 @@ static uint8_t virtio_gpu_locate_capabilities(void) {
             uint32_t offset = pci_config_read_dword(bus, slot, func, (uint8_t)(cap_ptr + 8u));
 
             uint64_t bar_base = 0ull;
-            if (bar == 0u) {
-                bar_base = pci_bar_to_mmio_base(g_renderer.bar0);
-            } else if (bar == 1u) {
-                bar_base = pci_bar_to_mmio_base(g_renderer.bar1);
-            }
+            if (pci_get_mmio_bar_base(bar, &bar_base)) {
+                uint64_t region_addr = bar_base + (uint64_t)offset;
 
-            if (bar_base != 0ull) {
-                volatile uint8_t* region = (volatile uint8_t*)(bar_base + (uint64_t)offset);
+                // Stage2 сейчас identity-map'ит только нижние 4 ГиБ.
+                // Если MMIO-регион virtio лежит выше, доступ к нему вызовет #PF.
+                // В таком случае безопасно уходим в software-framebuffer fallback.
+                if (region_addr <= 0xFFFFFFFFull) {
+                    volatile uint8_t* region = (volatile uint8_t*)region_addr;
 
-                if (cfg_type == VIRTIO_PCI_CAP_COMMON_CFG) {
-                    g_transport.common = (volatile virtio_pci_common_cfg_t*)region;
-                } else if (cfg_type == VIRTIO_PCI_CAP_NOTIFY_CFG) {
-                    g_transport.notify_base = region;
-                    g_transport.notify_off_multiplier = pci_config_read_dword(bus, slot, func, (uint8_t)(cap_ptr + 16u));
-                } else if (cfg_type == VIRTIO_PCI_CAP_ISR_CFG) {
-                    g_transport.isr = region;
-                } else if (cfg_type == VIRTIO_PCI_CAP_DEVICE_CFG) {
-                    g_transport.device_cfg = (volatile virtio_gpu_config_t*)region;
+                    if (cfg_type == VIRTIO_PCI_CAP_COMMON_CFG) {
+                        g_transport.common = (volatile virtio_pci_common_cfg_t*)region;
+                    } else if (cfg_type == VIRTIO_PCI_CAP_NOTIFY_CFG) {
+                        g_transport.notify_base = region;
+                        g_transport.notify_off_multiplier = pci_config_read_dword(bus, slot, func, (uint8_t)(cap_ptr + 16u));
+                    } else if (cfg_type == VIRTIO_PCI_CAP_ISR_CFG) {
+                        g_transport.isr = region;
+                    } else if (cfg_type == VIRTIO_PCI_CAP_DEVICE_CFG) {
+                        g_transport.device_cfg = (volatile virtio_gpu_config_t*)region;
+                    }
                 }
             }
         }
@@ -593,6 +622,14 @@ void virtio_gpu_renderer_init(video_info_t* info) {
     pci_device_info_t dev;
     g_renderer.fallback_framebuffer = info->framebuffer;
     g_renderer.active_framebuffer = info->framebuffer;
+
+#if !WOOS_ENABLE_VIRTIO_GPU
+    // Диагностически безопасный режим по умолчанию:
+    // не трогаем virtio MMIO/queue path и работаем через
+    // стабильный software framebuffer из stage2.
+    (void)dev;
+    return;
+#endif
 
     if (pci_find_device_by_id(VIRTIO_VENDOR_ID, VIRTIO_GPU_DEVICE_ID_MODERN, &dev)) {
         apply_device_info(&dev);

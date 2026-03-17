@@ -22,6 +22,10 @@ typedef enum init_stage {
 // но без «тормозов» интерфейса в эмуляторе.
 #define KERNEL_MAIN_LOOP_PAUSE 20000u
 
+#ifndef WOOS_ENABLE_HW_INTERRUPTS
+#define WOOS_ENABLE_HW_INTERRUPTS 1
+#endif
+
 static void sanitize_boot_info(video_info_t* video) {
     if (video->magic != BOOT_INFO_MAGIC_EXPECTED) {
         video->magic = BOOT_INFO_MAGIC_EXPECTED;
@@ -91,7 +95,10 @@ void kmain(video_info_t* video) {
     uint16_t cursor_x = (uint16_t)(video->width / 2);
     uint16_t cursor_y = (uint16_t)(video->height / 2);
     mouse_init(cursor_x, cursor_y);
+
+#if WOOS_ENABLE_HW_INTERRUPTS
     idt_enable_interrupts();
+#endif
 
     while (1) {
         for (volatile uint32_t delay = 0; delay < KERNEL_MAIN_LOOP_PAUSE; delay++) {

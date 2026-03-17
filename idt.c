@@ -33,13 +33,46 @@ typedef struct idtr {
 extern void idt_load(const idtr_t* idtr);
 extern void idt_stub_ignore(void);
 extern void idt_stub_ignore_errcode(void);
+extern void idt_stub_irq0(void);
 extern void idt_stub_irq1(void);
+extern void idt_stub_irq2(void);
+extern void idt_stub_irq3(void);
+extern void idt_stub_irq4(void);
+extern void idt_stub_irq5(void);
+extern void idt_stub_irq6(void);
+extern void idt_stub_irq7(void);
+extern void idt_stub_irq8(void);
+extern void idt_stub_irq9(void);
+extern void idt_stub_irq10(void);
+extern void idt_stub_irq11(void);
 extern void idt_stub_irq12(void);
+extern void idt_stub_irq13(void);
+extern void idt_stub_irq14(void);
+extern void idt_stub_irq15(void);
 
 static idt_entry_t g_idt[256];
 static uint8_t g_idt_ready = 0;
 static uint32_t g_keyboard_irq_count = 0u;
 static uint32_t g_mouse_irq_count = 0u;
+
+static void (*const g_irq_stubs[16])(void) = {
+    idt_stub_irq0,
+    idt_stub_irq1,
+    idt_stub_irq2,
+    idt_stub_irq3,
+    idt_stub_irq4,
+    idt_stub_irq5,
+    idt_stub_irq6,
+    idt_stub_irq7,
+    idt_stub_irq8,
+    idt_stub_irq9,
+    idt_stub_irq10,
+    idt_stub_irq11,
+    idt_stub_irq12,
+    idt_stub_irq13,
+    idt_stub_irq14,
+    idt_stub_irq15,
+};
 
 static inline uint8_t inb(uint16_t port) {
     uint8_t value;
@@ -91,20 +124,6 @@ static void pic_remap(void) {
     outb(PIC2_DATA, mask_slave);
 }
 
-static void pic_set_irq_mask(uint8_t irq, uint8_t masked) {
-    uint16_t port = (irq < 8u) ? PIC1_DATA : PIC2_DATA;
-    uint8_t bit = (uint8_t)(irq % 8u);
-    uint8_t current = inb(port);
-
-    if (masked) {
-        current = (uint8_t)(current | (uint8_t)(1u << bit));
-    } else {
-        current = (uint8_t)(current & (uint8_t)~(1u << bit));
-    }
-
-    outb(port, current);
-}
-
 static void pic_send_eoi(uint8_t vector) {
     if (vector >= IRQ_VECTOR_BASE_SLAVE && vector < (IRQ_VECTOR_BASE_SLAVE + 8u)) {
         outb(PIC2_COMMAND, PIC_EOI);
@@ -139,22 +158,24 @@ void idt_init(void) {
     idt_set_gate(14u, idt_stub_ignore_errcode);  // #PF
     idt_set_gate(17u, idt_stub_ignore_errcode);  // #AC
     idt_set_gate(21u, idt_stub_ignore_errcode);  // #CP (если поддерживается CPU)
+    idt_set_gate(29u, idt_stub_ignore_errcode);  // #VC (SEV-ES)
+    idt_set_gate(30u, idt_stub_ignore_errcode);  // #SX
 
-    idt_set_gate(IRQ_KEYBOARD_VECTOR, idt_stub_irq1);
-    idt_set_gate(IRQ_MOUSE_VECTOR, idt_stub_irq12);
+    // Ставим обработчики на весь диапазон PIC-IRQ (32..47), чтобы
+    // даже неожиданные/spurious IRQ корректно завершались EOI,
+    // а не уходили в «глухой» iret без ack контроллера.
+    for (uint8_t irq = 0; irq < 16u; irq++) {
+        idt_set_gate((uint8_t)(IRQ_VECTOR_BASE_MASTER + irq), g_irq_stubs[irq]);
+    }
 
     pic_remap();
 
-    // Маскируем всё, кроме keyboard IRQ1 и cascade IRQ2 на master.
-    // IRQ12 (мышь) оставляем замаскированным: текущий драйвер мыши
-    // работает через polling и самостоятельно вычитывает 0x60.
-    // При включённом IRQ12 контроллер может засыпать CPU «пустыми» IRQ,
-    // если байт не разобран в IRQ-контексте, что в некоторых VM выглядит
-    // как циклическая перезагрузка/нестабильный boot.
+    // Для стабильного boot в текущем runtime оставляем все линии PIC
+    // замаскированными. Мышь/heartbeat уже работают через polling,
+    // поэтому IRQ-линии здесь не обязательны и не должны провоцировать
+    // спорадические прерывания на отдельных VM-конфигурациях.
     outb(PIC1_DATA, 0xFFu);
     outb(PIC2_DATA, 0xFFu);
-    pic_set_irq_mask(1u, 0u);
-    pic_set_irq_mask(2u, 0u);
 
     idtr_t idtr;
     idtr.limit = (uint16_t)(sizeof(g_idt) - 1u);
@@ -170,7 +191,11 @@ void idt_enable_interrupts(void) {
 
 void idt_handle_irq(uint32_t vector) {
     if (vector == IRQ_KEYBOARD_VECTOR) {
-        (void)ps2_data();
+        // Для спорадического IRQ1 читаем data-порт только если контроллер
+        // действительно сообщает о готовом байте.
+        if (ps2_status() & 0x01u) {
+            (void)ps2_data();
+        }
         g_keyboard_irq_count++;
     } else if (vector == IRQ_MOUSE_VECTOR) {
         // Даже при маскировании IRQ12 оставляем корректный drain порта,
