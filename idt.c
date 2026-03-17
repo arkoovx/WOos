@@ -32,6 +32,7 @@ typedef struct idtr {
 
 extern void idt_load(const idtr_t* idtr);
 extern void idt_stub_ignore(void);
+extern void idt_stub_ignore_errcode(void);
 extern void idt_stub_irq1(void);
 extern void idt_stub_irq12(void);
 
@@ -119,6 +120,17 @@ void idt_init(void) {
     for (uint16_t i = 0; i < 256; i++) {
         idt_set_gate((uint8_t)i, idt_stub_ignore);
     }
+
+    // Для этих исключений CPU автоматически кладёт error code на стек.
+    // Им нужен отдельный stub, который снимет error code перед iretq.
+    idt_set_gate(8u, idt_stub_ignore_errcode);   // #DF
+    idt_set_gate(10u, idt_stub_ignore_errcode);  // #TS
+    idt_set_gate(11u, idt_stub_ignore_errcode);  // #NP
+    idt_set_gate(12u, idt_stub_ignore_errcode);  // #SS
+    idt_set_gate(13u, idt_stub_ignore_errcode);  // #GP
+    idt_set_gate(14u, idt_stub_ignore_errcode);  // #PF
+    idt_set_gate(17u, idt_stub_ignore_errcode);  // #AC
+    idt_set_gate(21u, idt_stub_ignore_errcode);  // #CP (если поддерживается CPU)
 
     idt_set_gate(IRQ_KEYBOARD_VECTOR, idt_stub_irq1);
     idt_set_gate(IRQ_MOUSE_VECTOR, idt_stub_irq12);
