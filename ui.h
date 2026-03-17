@@ -18,5 +18,6 @@ void ui_set_cursor(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons);
 void ui_handle_mouse_move(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons);
 void ui_handle_mouse_button(video_info_t* info, uint8_t buttons);
 void ui_set_kernel_health(video_info_t* info, uint8_t idt_ready, uint32_t heartbeat);
+void ui_set_irq_stats(video_info_t* info, uint32_t keyboard_irq, uint32_t mouse_irq);
 
 #endif

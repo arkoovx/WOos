@@ -86,7 +86,7 @@
 - [x] IDT skeleton с базовым default ISR-stub (этап 1 для подсистемы прерываний).
 - [x] Базовый heartbeat-таймер (polling mode) с интеграцией в event loop и UI-диагностику.
 - [x] Базовый `virtio-gpu` renderer-path: PCI-probing + переключение active framebuffer на BAR с fallback на stage2 framebuffer.
-- [ ] Обвязка IRQ для клавиатуры/мыши.
+- [x] Обвязка IRQ для клавиатуры/мыши.
 
 ### C.2 Memory Subsystem
 - [ ] PMM (bitmap или stack-based allocator для физических страниц).
