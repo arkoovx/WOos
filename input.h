@@ -20,5 +20,6 @@ void input_init(void);
 uint8_t input_push(const input_event_t* event);
 uint8_t input_pop(input_event_t* out_event);
 uint16_t input_dropped_events(void);
+uint8_t input_uses_heap_queue(void);
 
 #endif
