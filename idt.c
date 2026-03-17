@@ -51,6 +51,14 @@ static inline void outb(uint16_t port, uint8_t value) {
     __asm__ __volatile__("outb %0, %1" : : "a"(value), "Nd"(port));
 }
 
+static inline uint8_t ps2_status(void) {
+    return inb(0x64u);
+}
+
+static inline uint8_t ps2_data(void) {
+    return inb(0x60u);
+}
+
 static inline void io_wait(void) {
     __asm__ __volatile__("outb %%al, $0x80" : : "a"(0u));
 }
@@ -137,13 +145,16 @@ void idt_init(void) {
 
     pic_remap();
 
-    // Маскируем всё, кроме keyboard IRQ1 и cascade IRQ2 на master,
-    // а на slave оставляем только mouse IRQ12.
+    // Маскируем всё, кроме keyboard IRQ1 и cascade IRQ2 на master.
+    // IRQ12 (мышь) оставляем замаскированным: текущий драйвер мыши
+    // работает через polling и самостоятельно вычитывает 0x60.
+    // При включённом IRQ12 контроллер может засыпать CPU «пустыми» IRQ,
+    // если байт не разобран в IRQ-контексте, что в некоторых VM выглядит
+    // как циклическая перезагрузка/нестабильный boot.
     outb(PIC1_DATA, 0xFFu);
     outb(PIC2_DATA, 0xFFu);
     pic_set_irq_mask(1u, 0u);
     pic_set_irq_mask(2u, 0u);
-    pic_set_irq_mask(12u, 0u);
 
     idtr_t idtr;
     idtr.limit = (uint16_t)(sizeof(g_idt) - 1u);
@@ -159,9 +170,14 @@ void idt_enable_interrupts(void) {
 
 void idt_handle_irq(uint32_t vector) {
     if (vector == IRQ_KEYBOARD_VECTOR) {
-        (void)inb(0x60u);
+        (void)ps2_data();
         g_keyboard_irq_count++;
     } else if (vector == IRQ_MOUSE_VECTOR) {
+        // Даже при маскировании IRQ12 оставляем корректный drain порта,
+        // чтобы handler был безопасен на случай будущего unmask.
+        if (ps2_status() & 0x01u) {
+            (void)ps2_data();
+        }
         g_mouse_irq_count++;
     }
 
