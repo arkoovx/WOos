@@ -23,7 +23,7 @@ typedef enum init_stage {
 #define KERNEL_MAIN_LOOP_PAUSE 20000u
 
 #ifndef WOOS_ENABLE_HW_INTERRUPTS
-#define WOOS_ENABLE_HW_INTERRUPTS 0
+#define WOOS_ENABLE_HW_INTERRUPTS 1
 #endif
 
 static void sanitize_boot_info(video_info_t* video) {

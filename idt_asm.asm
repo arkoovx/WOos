@@ -73,6 +73,9 @@ idt_load:
     ; иначе возможен #GP внутри пролога и дальнейший triple fault.
     mov r15, rsp
     and rsp, -16
+    ; Для SysV ABI перед call нужно состояние rsp % 16 == 8,
+    ; чтобы в теле C-функции стек был выровнен на 16 байт.
+    sub rsp, 8
     mov edi, %2
     call idt_handle_irq
     mov rsp, r15
