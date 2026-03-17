@@ -48,7 +48,7 @@
 #define VIRTIO_GPU_DRAW_SURFACE_CAPACITY (8u * 1024u * 1024u)
 
 #ifndef WOOS_ENABLE_VIRTIO_GPU
-#define WOOS_ENABLE_VIRTIO_GPU 0
+#define WOOS_ENABLE_VIRTIO_GPU 1
 #endif
 
 typedef struct virtq_desc {

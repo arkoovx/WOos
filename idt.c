@@ -124,20 +124,6 @@ static void pic_remap(void) {
     outb(PIC2_DATA, mask_slave);
 }
 
-static void pic_set_irq_mask(uint8_t irq, uint8_t masked) {
-    uint16_t port = (irq < 8u) ? PIC1_DATA : PIC2_DATA;
-    uint8_t bit = (uint8_t)(irq % 8u);
-    uint8_t current = inb(port);
-
-    if (masked) {
-        current = (uint8_t)(current | (uint8_t)(1u << bit));
-    } else {
-        current = (uint8_t)(current & (uint8_t)~(1u << bit));
-    }
-
-    outb(port, current);
-}
-
 static void pic_send_eoi(uint8_t vector) {
     if (vector >= IRQ_VECTOR_BASE_SLAVE && vector < (IRQ_VECTOR_BASE_SLAVE + 8u)) {
         outb(PIC2_COMMAND, PIC_EOI);
@@ -184,13 +170,12 @@ void idt_init(void) {
 
     pic_remap();
 
-    // Маскируем всё, кроме keyboard IRQ1 на master.
-    // IRQ2 (cascade) тоже держим замаскированным, потому что в текущей
-    // конфигурации slave-IRQ не используются (IRQ12 мыши работает через polling).
-    // Это убирает лишний источник спорадических IRQ в проблемных VM.
+    // Для стабильного boot в текущем runtime оставляем все линии PIC
+    // замаскированными. Мышь/heartbeat уже работают через polling,
+    // поэтому IRQ-линии здесь не обязательны и не должны провоцировать
+    // спорадические прерывания на отдельных VM-конфигурациях.
     outb(PIC1_DATA, 0xFFu);
     outb(PIC2_DATA, 0xFFu);
-    pic_set_irq_mask(1u, 0u);
 
     idtr_t idtr;
     idtr.limit = (uint16_t)(sizeof(g_idt) - 1u);
@@ -206,7 +191,11 @@ void idt_enable_interrupts(void) {
 
 void idt_handle_irq(uint32_t vector) {
     if (vector == IRQ_KEYBOARD_VECTOR) {
-        (void)ps2_data();
+        // Для спорадического IRQ1 читаем data-порт только если контроллер
+        // действительно сообщает о готовом байте.
+        if (ps2_status() & 0x01u) {
+            (void)ps2_data();
+        }
         g_keyboard_irq_count++;
     } else if (vector == IRQ_MOUSE_VECTOR) {
         // Даже при маскировании IRQ12 оставляем корректный drain порта,

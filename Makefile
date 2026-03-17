@@ -16,12 +16,12 @@ FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)
 # По умолчанию оставляем virtio-gpu renderer выключенным: это
 # даёт максимально стабильный fallback на stage2 framebuffer на
 # проблемных конфигурациях эмулятора/видеобэкенда.
-VIRTIO_GPU ?= 0
+VIRTIO_GPU ?= 1
 RENDERER_CPPFLAGS := -DWOOS_ENABLE_VIRTIO_GPU=$(VIRTIO_GPU)
 
 # Аппаратные IRQ по умолчанию выключены для максимальной
 # стабильности boot (polling-путь уже покрывает mouse/timer).
-HW_INTERRUPTS ?= 0
+HW_INTERRUPTS ?= 1
 KERNEL_CPPFLAGS := -DWOOS_ENABLE_HW_INTERRUPTS=$(HW_INTERRUPTS)
 
 all: os.img
