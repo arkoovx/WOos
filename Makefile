@@ -19,6 +19,11 @@ FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)
 VIRTIO_GPU ?= 0
 RENDERER_CPPFLAGS := -DWOOS_ENABLE_VIRTIO_GPU=$(VIRTIO_GPU)
 
+# Аппаратные IRQ по умолчанию выключены для максимальной
+# стабильности boot (polling-путь уже покрывает mouse/timer).
+HW_INTERRUPTS ?= 0
+KERNEL_CPPFLAGS := -DWOOS_ENABLE_HW_INTERRUPTS=$(HW_INTERRUPTS)
+
 all: os.img
 
 boot.bin: kernel.bin boot.asm
@@ -28,7 +33,7 @@ stage2.o: stage2.asm
 	$(NASM) -f elf64 stage2.asm -o stage2.o
 
 kernel.o: kernel.c kernel.h ui.h input.h idt.h timer.h mouse.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
-	$(CC) $(CFLAGS) -c kernel.c -o kernel.o
+	$(CC) $(CFLAGS) $(KERNEL_CPPFLAGS) -c kernel.c -o kernel.o
 
 idt_asm.o: idt_asm.asm
 	$(NASM) -f elf64 idt_asm.asm -o idt_asm.o
