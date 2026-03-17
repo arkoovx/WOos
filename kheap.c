@@ -7,10 +7,12 @@ typedef struct kheap_block {
     uint64_t size;
     struct kheap_block* next;
     uint8_t used;
-    uint8_t _pad[7];
+    // Делаем заголовок кратным 16 байтам, чтобы payload каждого блока
+    // начинался с адреса, совместимого с KHEAP_ALIGN.
+    uint8_t _pad[15];
 } kheap_block_t;
 
-static uint8_t g_kheap_arena[KHEAP_ARENA_SIZE];
+static uint8_t g_kheap_arena[KHEAP_ARENA_SIZE] __attribute__((aligned(KHEAP_ALIGN)));
 static kheap_block_t* g_kheap_head = 0;
 static uint64_t g_kheap_used = 0;
 
@@ -19,7 +21,7 @@ static uint64_t align_up(uint64_t value, uint64_t align) {
 }
 
 static uint8_t* block_payload(kheap_block_t* block) {
-    return (uint8_t*)(block + 1);
+    return (uint8_t*)((uint8_t*)block + sizeof(kheap_block_t));
 }
 
 static uint64_t block_payload_size(const kheap_block_t* block) {
@@ -61,7 +63,9 @@ void* kheap_alloc(uint64_t size) {
             uint8_t* split_addr = block_payload(block) + need;
             kheap_block_t* split = (kheap_block_t*)split_addr;
 
-            split->size = (uint64_t)sizeof(kheap_block_t) + remain_payload;
+            // remain_payload уже включает место под заголовок split-блока,
+            // поэтому добавлять sizeof(kheap_block_t) повторно нельзя.
+            split->size = remain_payload;
             split->next = block->next;
             split->used = 0;
 
