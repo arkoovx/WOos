@@ -21,7 +21,7 @@ RENDERER_CPPFLAGS := -DWOOS_ENABLE_VIRTIO_GPU=$(VIRTIO_GPU)
 
 # Аппаратные IRQ по умолчанию выключены для максимальной
 # стабильности boot (polling-путь уже покрывает mouse/timer).
-HW_INTERRUPTS ?= 1
+HW_INTERRUPTS ?= 0
 KERNEL_CPPFLAGS := -DWOOS_ENABLE_HW_INTERRUPTS=$(HW_INTERRUPTS)
 
 all: os.img

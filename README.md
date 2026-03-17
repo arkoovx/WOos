@@ -19,7 +19,7 @@
 - Добавлен модуль `drivers/virtio_gpu_renderer`: renderer-path для `virtio-gpu` с draw-командами (`fill/rect/glyph`), отдельной RAM draw-surface и публикацией dirty-rect через virtqueue (`TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`) с безопасным fallback на software framebuffer.
 - В `virtio_gpu_renderer` добавлена защита от MMIO-адресов выше 4 ГиБ (вне текущего identity-map): в таком случае драйвер автоматически остаётся на software framebuffer fallback, чтобы избежать page fault и циклического reset.
 - `virtio-gpu` путь теперь включается отдельно (через `VIRTIO_GPU=1` при сборке), а штатный режим использует software framebuffer для стабильного boot на проблемных VM-конфигурациях.
-- После фикса выравнивания стека в IRQ-stub аппаратные IRQ снова включены по умолчанию; флаг `HW_INTERRUPTS` сохранён для целевой диагностики (`0/1`).
+- Аппаратные IRQ-path остаются под явным флагом `HW_INTERRUPTS` (`0/1`): дефолтный режим использует polling для стабильного boot, а IRQ-режим включается вручную для диагностики.
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
 - Исправлен рендер под разные framebuffer-форматы (`16/24/32 bpp`), убраны визуальные полосы на фоне и артефакты курсора.
 - Исправлена причина циклической перезагрузки при исключениях: добавлен отдельный IDT-stub для векторов с аппаратным `error code`, чтобы корректно возвращаться через `iretq` без каскада `#GP/#DF`.
@@ -37,11 +37,11 @@ make clean
 make os.img VIRTIO_GPU=1
 ```
 
-Аппаратные IRQ (`sti`) снова включены в стандартной сборке.
-Для диагностики можно принудительно выключить IRQ-path:
+Аппаратные IRQ (`sti`) в стандартной сборке снова отключены для стабильности.
+Для целевой проверки IRQ-path можно включить его вручную:
 ```bash
 make clean
-make os.img HW_INTERRUPTS=0
+make os.img HW_INTERRUPTS=1
 ```
 
 Двойная буферизация теперь включена по умолчанию (чтобы снизить мерцание UI).
