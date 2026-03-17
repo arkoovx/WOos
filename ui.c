@@ -41,9 +41,11 @@ static ui_interaction_state_t g_ui_state = {0, 0};
 typedef struct ui_kernel_health_state {
     uint8_t idt_ready;
     uint32_t heartbeat;
+    uint32_t keyboard_irq;
+    uint32_t mouse_irq;
 } ui_kernel_health_state_t;
 
-static ui_kernel_health_state_t g_kernel_health = {0u, 0u};
+static ui_kernel_health_state_t g_kernel_health = {0u, 0u, 0u, 0u};
 
 #define PANEL_BTN_X 12u
 #define PANEL_BTN_Y 8u
@@ -99,7 +101,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
 
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
-    fb_draw_text(info, 18, 13, "WOOS 1.10.1", COLOR_TEXT_LIGHT, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.11.0", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -137,7 +139,22 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
         value /= 10u;
     }
 
+    char irq_text[19] = "IRQ K:0000 M:0000";
+    uint32_t keyboard = g_kernel_health.keyboard_irq % 10000u;
+    uint32_t mouse = g_kernel_health.mouse_irq % 10000u;
+
+    for (int i = 10; i >= 7; i--) {
+        irq_text[i] = (char)('0' + (keyboard % 10u));
+        keyboard /= 10u;
+    }
+
+    for (int i = 17; i >= 14; i--) {
+        irq_text[i] = (char)('0' + (mouse % 10u));
+        mouse /= 10u;
+    }
+
     fb_draw_text(info, 16, (uint16_t)(info->height - 20), status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(info->height - 20), irq_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, (uint16_t)(info->width - 142), (uint16_t)(info->height - 20), heartbeat_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
 }
 
@@ -352,3 +369,15 @@ void ui_set_kernel_health(video_info_t* info, uint8_t idt_ready, uint32_t heartb
     ui_mark_dirty(win_x, 56, win_w, 22);
     ui_mark_dirty((uint16_t)(info->width - 150), (uint16_t)(info->height - 24), 150, 24);
 }
+
+void ui_set_irq_stats(video_info_t* info, uint32_t keyboard_irq, uint32_t mouse_irq) {
+    if (g_kernel_health.keyboard_irq == keyboard_irq && g_kernel_health.mouse_irq == mouse_irq) {
+        return;
+    }
+
+    g_kernel_health.keyboard_irq = keyboard_irq;
+    g_kernel_health.mouse_irq = mouse_irq;
+
+    ui_mark_dirty((uint16_t)(info->width - 310), (uint16_t)(info->height - 24), 170, 24);
+}
+

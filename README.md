@@ -14,6 +14,7 @@
 - Базовый init-flow ядра по стадиям: `early -> platform -> drivers -> ui`.
 - Добавлен IDT skeleton (`idt`) с загрузкой таблицы дескрипторов и безопасным default-обработчиком для базовой платформенной инициализации.
 - Добавлен модуль heartbeat-таймера (`timer`) и вывод его состояния в UI (строка `HEARTBEAT` в footer).
+- Добавлена базовая IRQ-обвязка для клавиатуры и мыши: remap PIC, отдельные обработчики `IRQ1`/`IRQ12` и счётчики прерываний в footer UI.
 - Добавлен модуль `drivers/virtio_gpu_renderer`: renderer-path для `virtio-gpu` с draw-командами (`fill/rect/glyph`), отдельной RAM draw-surface и публикацией dirty-rect через virtqueue (`TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`) с безопасным fallback на software framebuffer.
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
 - Исправлен рендер под разные framebuffer-форматы (`16/24/32 bpp`), убраны визуальные полосы на фоне и артефакты курсора.
@@ -77,7 +78,7 @@ qemu-system-x86_64 \
 - `fb.c/.h` — примитивы framebuffer-рендера.
 - `ui.c/.h` — отрисовка оболочки и обработка базовых UI-событий.
 - `input.c/.h` — очередь событий и input dispatcher contract.
-- `idt.c/.h`, `idt_asm.asm` — каркас подсистемы прерываний (IDT load + default stub).
+- `idt.c/.h`, `idt_asm.asm` — каркас подсистемы прерываний (IDT load + IRQ stubs для keyboard/mouse).
 - `timer.c/.h` — программный heartbeat-таймер для событий `timer tick`.
 - `mouse.c/.h` — polling-драйвер PS/2-мыши и трансляция пакетов в очередь input.
 - `pci.c/.h` — минимальный доступ к PCI config space и поиск устройств.

@@ -75,6 +75,7 @@ static void dispatch_input_event(video_info_t* video, const input_event_t* event
             break;
         case INPUT_EVENT_TIMER_TICK:
             ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
+            ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
             break;
     }
 }
@@ -85,11 +86,12 @@ void kmain(video_info_t* video) {
     run_stage(video, INIT_DRIVERS);
     run_stage(video, INIT_UI);
     ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
+    ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);
     uint16_t cursor_y = (uint16_t)(video->height / 2);
     mouse_init(cursor_x, cursor_y);
-
+    idt_enable_interrupts();
 
     while (1) {
         for (volatile uint32_t delay = 0; delay < KERNEL_MAIN_LOOP_PAUSE; delay++) {
