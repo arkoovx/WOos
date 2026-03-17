@@ -101,7 +101,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
 
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
-    fb_draw_text(info, 18, 13, "WOOS 1.11.0", COLOR_TEXT_LIGHT, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.11.1", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -380,4 +380,3 @@ void ui_set_irq_stats(video_info_t* info, uint32_t keyboard_irq, uint32_t mouse_
 
     ui_mark_dirty((uint16_t)(info->width - 310), (uint16_t)(info->height - 24), 170, 24);
 }
-
