@@ -2,6 +2,7 @@ BITS 64
 
 global idt_load
 global idt_stub_ignore
+global idt_stub_ignore_errcode
 global idt_stub_irq1
 global idt_stub_irq12
 
@@ -66,6 +67,13 @@ idt_load:
 %endmacro
 
 idt_stub_ignore:
+    iretq
+
+; Для исключений, где CPU автоматически кладёт error code на стек,
+; перед iretq нужно снять этот слот. Иначе iretq прочитает error code
+; как RIP и спровоцирует каскад #GP/#DF до triple fault (циклический reset).
+idt_stub_ignore_errcode:
+    add rsp, 8
     iretq
 
 IRQ_STUB idt_stub_irq1, 33
