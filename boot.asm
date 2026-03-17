@@ -78,8 +78,11 @@ start:
     sub ax, [sectors_this_read]
     mov [remaining_sectors], ax
 
+    ; Важно: sectors_this_read хранится как word, поэтому
+    ; инкремент LBA делаем через zero-extend, без чтения лишних байтов.
+    movzx ebx, word [sectors_this_read]
     mov eax, [current_lba]
-    add eax, dword [sectors_this_read]
+    add eax, ebx
     mov [current_lba], eax
 
     mov ax, [sectors_this_read]
