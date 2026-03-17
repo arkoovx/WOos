@@ -52,8 +52,15 @@ idt_load:
 %macro IRQ_STUB 2
 %1:
     PUSH_GPRS
+    ; IRQ может прийти в любой точке C-кода, поэтому текущий RSP
+    ; не обязан соответствовать SysV ABI для вызова функции.
+    ; Выравниваем стек вручную перед вызовом C-обработчика,
+    ; иначе возможен #GP внутри пролога и дальнейший triple fault.
+    mov r15, rsp
+    and rsp, -16
     mov edi, %2
     call idt_handle_irq
+    mov rsp, r15
     POP_GPRS
     iretq
 %endmacro
