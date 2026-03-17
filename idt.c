@@ -33,13 +33,46 @@ typedef struct idtr {
 extern void idt_load(const idtr_t* idtr);
 extern void idt_stub_ignore(void);
 extern void idt_stub_ignore_errcode(void);
+extern void idt_stub_irq0(void);
 extern void idt_stub_irq1(void);
+extern void idt_stub_irq2(void);
+extern void idt_stub_irq3(void);
+extern void idt_stub_irq4(void);
+extern void idt_stub_irq5(void);
+extern void idt_stub_irq6(void);
+extern void idt_stub_irq7(void);
+extern void idt_stub_irq8(void);
+extern void idt_stub_irq9(void);
+extern void idt_stub_irq10(void);
+extern void idt_stub_irq11(void);
 extern void idt_stub_irq12(void);
+extern void idt_stub_irq13(void);
+extern void idt_stub_irq14(void);
+extern void idt_stub_irq15(void);
 
 static idt_entry_t g_idt[256];
 static uint8_t g_idt_ready = 0;
 static uint32_t g_keyboard_irq_count = 0u;
 static uint32_t g_mouse_irq_count = 0u;
+
+static void (*const g_irq_stubs[16])(void) = {
+    idt_stub_irq0,
+    idt_stub_irq1,
+    idt_stub_irq2,
+    idt_stub_irq3,
+    idt_stub_irq4,
+    idt_stub_irq5,
+    idt_stub_irq6,
+    idt_stub_irq7,
+    idt_stub_irq8,
+    idt_stub_irq9,
+    idt_stub_irq10,
+    idt_stub_irq11,
+    idt_stub_irq12,
+    idt_stub_irq13,
+    idt_stub_irq14,
+    idt_stub_irq15,
+};
 
 static inline uint8_t inb(uint16_t port) {
     uint8_t value;
@@ -139,9 +172,15 @@ void idt_init(void) {
     idt_set_gate(14u, idt_stub_ignore_errcode);  // #PF
     idt_set_gate(17u, idt_stub_ignore_errcode);  // #AC
     idt_set_gate(21u, idt_stub_ignore_errcode);  // #CP (если поддерживается CPU)
+    idt_set_gate(29u, idt_stub_ignore_errcode);  // #VC (SEV-ES)
+    idt_set_gate(30u, idt_stub_ignore_errcode);  // #SX
 
-    idt_set_gate(IRQ_KEYBOARD_VECTOR, idt_stub_irq1);
-    idt_set_gate(IRQ_MOUSE_VECTOR, idt_stub_irq12);
+    // Ставим обработчики на весь диапазон PIC-IRQ (32..47), чтобы
+    // даже неожиданные/spurious IRQ корректно завершались EOI,
+    // а не уходили в «глухой» iret без ack контроллера.
+    for (uint8_t irq = 0; irq < 16u; irq++) {
+        idt_set_gate((uint8_t)(IRQ_VECTOR_BASE_MASTER + irq), g_irq_stubs[irq]);
+    }
 
     pic_remap();
 

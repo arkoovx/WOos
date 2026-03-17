@@ -15,6 +15,7 @@
 - Добавлен IDT skeleton (`idt`) с загрузкой таблицы дескрипторов и безопасным default-обработчиком для базовой платформенной инициализации.
 - Добавлен модуль heartbeat-таймера (`timer`) и вывод его состояния в UI (строка `HEARTBEAT` в footer).
 - Добавлена базовая IRQ-обвязка для клавиатуры и мыши: remap PIC, отдельные обработчики `IRQ1`/`IRQ12` и счётчики прерываний в footer UI (в текущей стабильной конфигурации размаскирован только `IRQ1`, а `IRQ12` оставлен под polling-путь драйвера мыши).
+- IDT теперь содержит IRQ-stub'ы для всего диапазона PIC (`32..47`), чтобы spurious/неожиданные IRQ корректно подтверждались через `EOI` и не провоцировали нестабильный boot.
 - Добавлен модуль `drivers/virtio_gpu_renderer`: renderer-path для `virtio-gpu` с draw-командами (`fill/rect/glyph`), отдельной RAM draw-surface и публикацией dirty-rect через virtqueue (`TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`) с безопасным fallback на software framebuffer.
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
 - Исправлен рендер под разные framebuffer-форматы (`16/24/32 bpp`), убраны визуальные полосы на фоне и артефакты курсора.
