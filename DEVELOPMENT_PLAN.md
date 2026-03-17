@@ -90,7 +90,7 @@
 
 ### C.2 Memory Subsystem
 - [ ] PMM (bitmap или stack-based allocator для физических страниц).
-- [ ] Базовый heap allocator ядра (рантайм-аллокатор для внутренних структур).
+- [x] Базовый heap allocator ядра (рантайм-аллокатор для внутренних структур).
 - [ ] План миграции к VMM (карта памяти, page tables, kernel mapping policy).
 
 **DoD этапа C:**

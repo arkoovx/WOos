@@ -24,6 +24,10 @@
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
 - Исправлен рендер под разные framebuffer-форматы (`16/24/32 bpp`), убраны визуальные полосы на фоне и артефакты курсора.
 - Исправлена причина циклической перезагрузки при исключениях: добавлен отдельный IDT-stub для векторов с аппаратным `error code`, чтобы корректно возвращаться через `iretq` без каскада `#GP/#DF`.
+- Добавлен базовый heap-аллокатор ядра (`kheap`) и перевод очереди input-событий на runtime-буфер с fallback на статический путь.
+- В `kheap` исправлены расчёт split-блока и гарантия 16-байтного выравнивания payload-указателей.
+- Исправлен bootloader: чтение payload из диска теперь выполняется chunked-подходом (до 127 секторов за INT13 call), что устраняет `Disk error` на части BIOS/QEMU-конфигураций при росте ядра.
+- Уточнён boot-fix: исправлён расчёт следующего LBA при chunked-чтении (исключено чтение «лишних» байтов из структуры состояния), что убирает повторный `Disk error`.
 
 ## Быстрый старт
 ```bash
@@ -97,9 +101,10 @@ qemu-system-x86_64 \
 - `kernel.c` — вход и orchestration базовых подсистем.
 - `fb.c/.h` — примитивы framebuffer-рендера.
 - `ui.c/.h` — отрисовка оболочки и обработка базовых UI-событий.
-- `input.c/.h` — очередь событий и input dispatcher contract.
+- `input.c/.h` — очередь событий и input dispatcher contract (с runtime-размещением буфера через `kheap`).
 - `idt.c/.h`, `idt_asm.asm` — каркас подсистемы прерываний (IDT load + IRQ stubs для keyboard/mouse).
 - `timer.c/.h` — программный heartbeat-таймер для событий `timer tick`.
+- `kheap.c/.h` — базовый heap-аллокатор ядра для внутренних runtime-структур.
 - `mouse.c/.h` — polling-драйвер PS/2-мыши и трансляция пакетов в очередь input.
 - `pci.c/.h` — минимальный доступ к PCI config space и поиск устройств.
 - `drivers/virtio_gpu_renderer/virtio_gpu_renderer.c/.h` — renderer-драйвер virtio-gpu с command-oriented draw API, virtqueue-flush dirty-rect и fallback на stage2 framebuffer.

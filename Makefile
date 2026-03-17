@@ -6,7 +6,7 @@ OBJDUMP   := objdump
 
 CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra
 LDFLAGS   := -m elf_x86_64 -T linker.ld
-KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o mouse.o pci.o drivers/virtio_gpu_renderer/virtio_gpu_renderer.o
+KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o mouse.o pci.o kheap.o drivers/virtio_gpu_renderer/virtio_gpu_renderer.o
 
 # По умолчанию держим двойную буферизацию включённой,
 # чтобы убрать заметное мерцание UI при частых dirty-update.
@@ -32,7 +32,7 @@ boot.bin: kernel.bin boot.asm
 stage2.o: stage2.asm
 	$(NASM) -f elf64 stage2.asm -o stage2.o
 
-kernel.o: kernel.c kernel.h ui.h input.h idt.h timer.h mouse.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
+kernel.o: kernel.c kernel.h ui.h input.h idt.h timer.h mouse.h kheap.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
 	$(CC) $(CFLAGS) $(KERNEL_CPPFLAGS) -c kernel.c -o kernel.o
 
 idt_asm.o: idt_asm.asm
@@ -44,11 +44,14 @@ idt.o: idt.c idt.h kernel.h
 timer.o: timer.c timer.h kernel.h
 	$(CC) $(CFLAGS) -c timer.c -o timer.o
 
-input.o: input.c input.h kernel.h
+input.o: input.c input.h kheap.h kernel.h
 	$(CC) $(CFLAGS) -c input.c -o input.o
 
 fb.o: fb.c fb.h kernel.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
 	$(CC) $(CFLAGS) $(FB_CPPFLAGS) -c fb.c -o fb.o
+
+kheap.o: kheap.c kheap.h kernel.h
+	$(CC) $(CFLAGS) -c kheap.c -o kheap.o
 
 ui.o: ui.c ui.h fb.h kernel.h
 	$(CC) $(CFLAGS) -c ui.c -o ui.o

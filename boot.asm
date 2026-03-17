@@ -11,6 +11,7 @@ ORG 0x7C00
 %define LOAD_SEGMENT 0x0000
 %define LOAD_OFFSET  0x8000
 %define RESET_RETRIES 5
+%define MAX_SECTORS_PER_READ 127
 
 start:
     cli
@@ -34,9 +35,34 @@ start:
     jmp disk_error
 
 .read_payload:
-    mov ax, LOAD_SEGMENT
-    mov es, ax
-    mov bx, LOAD_OFFSET
+    mov word [remaining_sectors], KERNEL_SECTORS
+    mov word [dest_offset], LOAD_OFFSET
+    mov word [dest_segment], LOAD_SEGMENT
+    mov dword [current_lba], 1
+
+.read_chunk:
+    cmp word [remaining_sectors], 0
+    je .payload_loaded
+
+    mov ax, [remaining_sectors]
+    cmp ax, MAX_SECTORS_PER_READ
+    jbe .set_chunk
+    mov ax, MAX_SECTORS_PER_READ
+
+.set_chunk:
+    mov [sectors_this_read], ax
+
+    mov ax, [dest_segment]
+    mov [disk_address_packet + 6], ax
+    mov ax, [dest_offset]
+    mov [disk_address_packet + 4], ax
+
+    mov ax, [sectors_this_read]
+    mov [disk_address_packet + 2], ax
+
+    mov eax, [current_lba]
+    mov [disk_address_packet + 8], eax
+    mov dword [disk_address_packet + 12], 0
 
     ; INT 13h extensions (AH=42h) are used so large payloads load reliably
     ; regardless of disk geometry.
@@ -46,6 +72,28 @@ start:
     int 0x13
     jc disk_error
 
+    ; Переходим к следующему куску загрузки:
+    ; двигаем LBA, адрес назначения и остаток секторов.
+    mov ax, [remaining_sectors]
+    sub ax, [sectors_this_read]
+    mov [remaining_sectors], ax
+
+    ; Важно: sectors_this_read хранится как word, поэтому
+    ; инкремент LBA делаем через zero-extend, без чтения лишних байтов.
+    movzx ebx, word [sectors_this_read]
+    mov eax, [current_lba]
+    add eax, ebx
+    mov [current_lba], eax
+
+    mov ax, [sectors_this_read]
+    mov bx, 512
+    mul bx
+    add word [dest_offset], ax
+    jnc .read_chunk
+    add word [dest_segment], 0x1000
+    jmp .read_chunk
+
+.payload_loaded:
     jmp LOAD_SEGMENT:LOAD_OFFSET
 
 disk_error:
@@ -65,18 +113,23 @@ disk_error:
     hlt
     jmp .hang
 
-boot_drive:     db 0
-retry_count:    db 0
+boot_drive:        db 0
+retry_count:       db 0
+remaining_sectors: dw 0
+sectors_this_read: dw 0
+dest_offset:       dw 0
+dest_segment:      dw 0
+current_lba:       dd 0
 
 ; Disk Address Packet for INT 13h extensions.
 ; LBA starts at 1 (sector right after the boot sector).
 disk_address_packet:
     db 0x10                 ; size of DAP
     db 0x00                 ; reserved
-    dw KERNEL_SECTORS       ; number of sectors to read
-    dw LOAD_OFFSET          ; destination offset
-    dw LOAD_SEGMENT         ; destination segment
-    dq 1                    ; start LBA
+    dw 0                    ; number of sectors to read (runtime)
+    dw 0                    ; destination offset (runtime)
+    dw 0                    ; destination segment (runtime)
+    dq 0                    ; start LBA (runtime)
 
 disk_error_msg: db 'Disk Error', 0
 
