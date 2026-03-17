@@ -18,6 +18,7 @@
 - IDT теперь содержит IRQ-stub'ы для всего диапазона PIC (`32..47`), чтобы spurious/неожиданные IRQ корректно подтверждались через `EOI` и не провоцировали нестабильный boot.
 - Добавлен модуль `drivers/virtio_gpu_renderer`: renderer-path для `virtio-gpu` с draw-командами (`fill/rect/glyph`), отдельной RAM draw-surface и публикацией dirty-rect через virtqueue (`TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`) с безопасным fallback на software framebuffer.
 - В `virtio_gpu_renderer` добавлена защита от MMIO-адресов выше 4 ГиБ (вне текущего identity-map): в таком случае драйвер автоматически остаётся на software framebuffer fallback, чтобы избежать page fault и циклического reset.
+- `virtio-gpu` путь теперь включается отдельно (через `VIRTIO_GPU=1` при сборке), а штатный режим использует software framebuffer для стабильного boot на проблемных VM-конфигурациях.
 - Версионированный boot ABI между `stage2` и `kernel` с sanity-check в `kmain`.
 - Исправлен рендер под разные framebuffer-форматы (`16/24/32 bpp`), убраны визуальные полосы на фоне и артефакты курсора.
 - Исправлена причина циклической перезагрузки при исключениях: добавлен отдельный IDT-stub для векторов с аппаратным `error code`, чтобы корректно возвращаться через `iretq` без каскада `#GP/#DF`.
@@ -26,6 +27,13 @@
 ```bash
 make clean
 make os.img
+```
+
+По умолчанию `virtio-gpu` renderer отключён для максимальной стабильности boot.
+Для целевой диагностики/проверки можно включить его вручную:
+```bash
+make clean
+make os.img VIRTIO_GPU=1
 ```
 
 Двойная буферизация теперь включена по умолчанию (чтобы снизить мерцание UI).

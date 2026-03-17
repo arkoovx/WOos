@@ -47,6 +47,10 @@
 #define VIRTIO_GPU_DRAW_SURFACE_BASE 0x01800000ull
 #define VIRTIO_GPU_DRAW_SURFACE_CAPACITY (8u * 1024u * 1024u)
 
+#ifndef WOOS_ENABLE_VIRTIO_GPU
+#define WOOS_ENABLE_VIRTIO_GPU 0
+#endif
+
 typedef struct virtq_desc {
     uint64_t addr;
     uint32_t len;
@@ -618,6 +622,14 @@ void virtio_gpu_renderer_init(video_info_t* info) {
     pci_device_info_t dev;
     g_renderer.fallback_framebuffer = info->framebuffer;
     g_renderer.active_framebuffer = info->framebuffer;
+
+#if !WOOS_ENABLE_VIRTIO_GPU
+    // Диагностически безопасный режим по умолчанию:
+    // не трогаем virtio MMIO/queue path и работаем через
+    // стабильный software framebuffer из stage2.
+    (void)dev;
+    return;
+#endif
 
     if (pci_find_device_by_id(VIRTIO_VENDOR_ID, VIRTIO_GPU_DEVICE_ID_MODERN, &dev)) {
         apply_device_info(&dev);

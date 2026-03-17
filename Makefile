@@ -13,6 +13,12 @@ KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o mouse
 DBL_BUFFER ?= 1
 FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)
 
+# По умолчанию оставляем virtio-gpu renderer выключенным: это
+# даёт максимально стабильный fallback на stage2 framebuffer на
+# проблемных конфигурациях эмулятора/видеобэкенда.
+VIRTIO_GPU ?= 0
+RENDERER_CPPFLAGS := -DWOOS_ENABLE_VIRTIO_GPU=$(VIRTIO_GPU)
+
 all: os.img
 
 boot.bin: kernel.bin boot.asm
@@ -47,7 +53,7 @@ pci.o: pci.c pci.h kernel.h
 	$(CC) $(CFLAGS) -c pci.c -o pci.o
 
 drivers/virtio_gpu_renderer/virtio_gpu_renderer.o: drivers/virtio_gpu_renderer/virtio_gpu_renderer.c drivers/virtio_gpu_renderer/virtio_gpu_renderer.h pci.h kernel.h
-	$(CC) $(CFLAGS) -c drivers/virtio_gpu_renderer/virtio_gpu_renderer.c -o drivers/virtio_gpu_renderer/virtio_gpu_renderer.o
+	$(CC) $(CFLAGS) $(RENDERER_CPPFLAGS) -c drivers/virtio_gpu_renderer/virtio_gpu_renderer.c -o drivers/virtio_gpu_renderer/virtio_gpu_renderer.o
 
 kernel.elf: $(KERNEL_OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(KERNEL_OBJS) -o kernel.elf
@@ -66,7 +72,7 @@ verify-layout: os.img
 	$(OBJDUMP) -D -b binary -m i386 --start-address=512 --stop-address=640 os.img
 
 clean:
-	rm -f *.o *.bin *.elf *.img
+	rm -f *.o *.bin *.elf *.img drivers/virtio_gpu_renderer/*.o
 
 .PHONY: all clean verify-layout
 
