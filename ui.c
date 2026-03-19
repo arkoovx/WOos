@@ -40,6 +40,7 @@ static ui_interaction_state_t g_ui_state = {0, 0};
 
 typedef struct ui_runtime_stats_state {
     uint8_t idt_ready;
+    uint8_t virtio_detected;
     uint8_t virtio_active;
     uint32_t heartbeat;
     uint32_t keyboard_irq;
@@ -112,7 +113,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
 
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
-    fb_draw_text(info, 18, 13, "WOOS 1.18.0", COLOR_TEXT_LIGHT, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.18.1", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -170,7 +171,14 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
     char storage_lba_text[19] = "DISK LBA: 000000";
     write_decimal_padded(storage_lba_text, 15, g_runtime_stats.storage_last_lba % 1000000u, 6);
 
-    const char* video_text = g_runtime_stats.virtio_active ? "VIDEO: VIRTIO" : "VIDEO: VBE";
+    const char* video_text = "VIDEO: VBE";
+    if (g_runtime_stats.virtio_active) {
+        video_text = "VIDEO: VIRTIO";
+    } else if (g_runtime_stats.virtio_detected) {
+        // Устройство virtio-vga/virtio-gpu найдено,
+        // но активным остаётся безопасный VBE fallback.
+        video_text = "VIDEO: VBE (VIRTIO PCI)";
+    }
     const char* pmm_status = g_runtime_stats.pmm_ready ? "PMM READY" : "PMM WAIT";
     const char* storage_status = g_runtime_stats.storage_ready
         ? (g_runtime_stats.boot_signature_valid ? "DISK READY SIG OK" : "DISK READY SIG BAD")
@@ -425,10 +433,18 @@ void ui_set_memory_stats(video_info_t* info, uint8_t pmm_ready, uint64_t total_p
     ui_mark_dirty(0, (uint16_t)(info->height - 48), info->width, 48);
 }
 
-void ui_set_runtime_stats(video_info_t* info, uint16_t dirty_count, uint64_t heap_used, uint64_t heap_free, uint8_t virtio_active) {
+void ui_set_runtime_stats(
+    video_info_t* info,
+    uint16_t dirty_count,
+    uint64_t heap_used,
+    uint64_t heap_free,
+    uint8_t virtio_detected,
+    uint8_t virtio_active
+) {
     if (g_runtime_stats.dirty_count == dirty_count
         && g_runtime_stats.heap_used == heap_used
         && g_runtime_stats.heap_free == heap_free
+        && g_runtime_stats.virtio_detected == virtio_detected
         && g_runtime_stats.virtio_active == virtio_active) {
         return;
     }
@@ -436,6 +452,7 @@ void ui_set_runtime_stats(video_info_t* info, uint16_t dirty_count, uint64_t hea
     g_runtime_stats.dirty_count = dirty_count;
     g_runtime_stats.heap_used = heap_used;
     g_runtime_stats.heap_free = heap_free;
+    g_runtime_stats.virtio_detected = virtio_detected;
     g_runtime_stats.virtio_active = virtio_active;
 
     ui_mark_dirty(0, (uint16_t)(info->height - 48), info->width, 48);

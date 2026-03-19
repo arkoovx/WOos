@@ -109,6 +109,18 @@ static void dispatch_input_event(video_info_t* video, const input_event_t* event
     }
 }
 
+static void refresh_runtime_stats(video_info_t* video) {
+    const virtio_gpu_renderer_status_t* renderer = virtio_gpu_renderer_status();
+    ui_set_runtime_stats(
+        video,
+        ui_last_dirty_count(),
+        kheap_used_bytes(),
+        kheap_free_bytes(),
+        renderer->detected,
+        renderer->active
+    );
+}
+
 void kmain(video_info_t* video) {
     run_stage(video, INIT_EARLY);
     run_stage(video, INIT_PLATFORM);
@@ -118,7 +130,7 @@ void kmain(video_info_t* video) {
     ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
     ui_set_memory_stats(video, pmm_is_ready(), pmm_total_pages(), pmm_free_pages());
     ui_set_storage_stats(video, storage_is_ready(), storage_last_read_ok(), storage_last_lba(), storage_boot_signature_valid());
-    ui_set_runtime_stats(video, ui_last_dirty_count(), kheap_used_bytes(), kheap_free_bytes(), virtio_gpu_renderer_is_active());
+    refresh_runtime_stats(video);
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);
     uint16_t cursor_y = (uint16_t)(video->height / 2);
@@ -146,7 +158,7 @@ void kmain(video_info_t* video) {
             dispatch_input_event(video, &next_event);
         }
 
-        ui_set_runtime_stats(video, ui_last_dirty_count(), kheap_used_bytes(), kheap_free_bytes(), virtio_gpu_renderer_is_active());
+        refresh_runtime_stats(video);
         ui_render_dirty(video);
     }
 }

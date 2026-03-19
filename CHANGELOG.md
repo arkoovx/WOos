@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.18.1
+- Улучшена runtime-диагностика видео: footer UI теперь различает состояния `VIDEO: VIRTIO` и `VIDEO: VBE (VIRTIO PCI)`, чтобы было видно разницу между активным virtio-render path и безопасным framebuffer fallback.
+- README больше не рекомендует запуск QEMU с `-usb -device usb-mouse -device usb-kbd`, потому что WoOS пока поддерживает только PS/2-мышь через 8042 и не содержит USB HID-драйверов.
+- `docs/DEBUGGING.md` дополнен пояснениями по интерпретации video-path и по ограничению input-пути PS/2-устройствами.
+
 ## 1.18.0
 - Добавлен модуль `storage` с минимальным ATA PIO transport-layer API (`storage_init`, `storage_read_sectors`) для чтения LBA-секторов через единый блочный контракт внутри ядра.
 - В driver-stage ядро теперь выполняет тестовое чтение фиксированного сектора `LBA 0`, проверяет сигнатуру загрузочного сектора `0x55AA` и публикует результат как runtime-диагностику.
