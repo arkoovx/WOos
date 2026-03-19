@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.18.7
+- Снижена latency курсора на `virtio-gpu`: перемещение курсора больше не вызывает немедленный sync flush внутри `ui_set_cursor`, а публикуется обычным кадром через dirty-region batching.
+- Увеличен timeout ожидания ответа virtqueue в `virtio_gpu_renderer`, чтобы уменьшить вероятность ложного `device failed`/чёрного старта на более «медленных» конфигурациях QEMU вроде запуска с `-monitor stdio`.
+- README дополнен пояснением, что рывки курсора на `VIDEO: VIRTIO` чаще связаны с частотой flush dirty-областей, а не с самим PS/2 input-path.
+
 ## 1.18.6
 - Исправлено несоответствие между boot video mode и форматом `virtio-gpu`: `stage2` использует VBE mode `0x118` (`1024x768x24bpp`), а ресурс `virtio-gpu` создаётся как `B8G8R8X8_UNORM` (`32bpp`), поэтому renderer теперь считает backing/offset для virtio-path всегда из `4 bytes/pixel`.
 - Это убирает ещё одну причину ошибок QEMU `IOV data size exceeds resource capacity` и битых артефактов: драйвер больше не смешивает `24bpp` boot framebuffer с `32bpp` virtio resource layout.

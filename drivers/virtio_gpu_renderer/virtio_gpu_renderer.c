@@ -447,7 +447,11 @@ static uint8_t virtio_gpu_submit_request(void* req, uint32_t req_len, void* resp
     uint32_t spin = 0u;
     while (g_queue.used.idx == g_transport.last_used_idx) {
         spin++;
-        if (spin > 10000000u) {
+        // На части конфигураций QEMU (`-monitor stdio`, другая SDL/GL нагрузка,
+        // менее удачный scheduling хоста) ответ от virtqueue может приходить
+        // заметно позже базового happy-path. Слишком маленький timeout здесь
+        // даёт ложный "device failed" и визуально проявляется как чёрный экран.
+        if (spin > 100000000u) {
             return 0u;
         }
         __asm__ __volatile__("pause");
