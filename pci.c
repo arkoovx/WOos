@@ -42,8 +42,10 @@ static void pci_fill_device_info(uint8_t bus, uint8_t slot, uint8_t func, pci_de
     out->subclass = (uint8_t)((class_reg >> 16) & 0xFFu);
     out->class_code = (uint8_t)((class_reg >> 24) & 0xFFu);
     out->header_type = (uint8_t)((header_reg >> 16) & 0xFFu);
-    out->bar0 = pci_read_config_dword(bus, slot, func, 0x10u);
-    out->bar1 = pci_read_config_dword(bus, slot, func, 0x14u);
+
+    for (uint8_t bar = 0; bar < 6; bar++) {
+        out->bars[bar] = pci_read_config_dword(bus, slot, func, (uint8_t)(0x10u + (bar * 4u)));
+    }
 }
 
 uint8_t pci_find_device_by_id(uint16_t vendor_id, uint16_t device_id, pci_device_info_t* out) {

@@ -40,9 +40,11 @@
 #define VIRTIO_GPU_RESP_OK_DISPLAY_INFO 0x1101u
 
 #define VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM 2u
+#define VIRTIO_GPU_RESOURCE_BPP 4u
 
 // VIRTIO_GPU_F_VIRGL: позволяет хосту принимать virgl-совместимый командный поток.
 #define VIRTIO_GPU_F_VIRGL (1u << 0)
+#define VIRTIO_F_VERSION_1 32u
 
 #define VIRTIO_GPU_DRAW_SURFACE_BASE 0x01800000ull
 #define VIRTIO_GPU_DRAW_SURFACE_CAPACITY (8u * 1024u * 1024u)
@@ -207,12 +209,7 @@ typedef struct virtio_gpu_transport {
     uint8_t ready;
 } virtio_gpu_transport_t;
 
-static virtio_gpu_renderer_status_t g_renderer = {
-    0u, 0u, 0u, 0u, 0u,
-    0u, 0u, 0u,
-    0u, 0u,
-    0ull, 0ull
-};
+static virtio_gpu_renderer_status_t g_renderer = {0};
 
 static virtio_gpu_transport_t g_transport = {0};
 static virtio_gpu_queue_buffers_t g_queue;
@@ -251,6 +248,23 @@ static inline uint8_t bytes_per_pixel(const video_info_t* info) {
     return (bytes == 0u) ? 4u : bytes;
 }
 
+static inline uint8_t renderer_bytes_per_pixel(const video_info_t* info) {
+    if (g_renderer.active && g_draw_surface_enabled) {
+        (void)info;
+        return VIRTIO_GPU_RESOURCE_BPP;
+    }
+
+    return bytes_per_pixel(info);
+}
+
+static inline uint32_t renderer_pitch(const video_info_t* info) {
+    if (g_renderer.active && g_draw_surface_enabled && g_renderer.surface_pitch != 0u) {
+        return g_renderer.surface_pitch;
+    }
+
+    return info->pitch;
+}
+
 static uint32_t pci_config_read_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address = 0x80000000u
         | ((uint32_t)bus << 16)
@@ -275,17 +289,12 @@ static uint8_t pci_config_read_byte(uint8_t bus, uint8_t slot, uint8_t func, uin
 }
 
 static uint8_t pci_get_mmio_bar_base(uint8_t bar_index, uint64_t* out_base) {
-    uint32_t bar = 0u;
-    uint32_t bar_next = 0u;
-
-    if (bar_index == 0u) {
-        bar = g_renderer.bar0;
-        bar_next = g_renderer.bar1;
-    } else if (bar_index == 1u) {
-        bar = g_renderer.bar1;
-    } else {
+    if (bar_index >= 6u) {
         return 0u;
     }
+
+    uint32_t bar = g_renderer.pci_bars[bar_index];
+    uint32_t bar_next = (bar_index + 1u < 6u) ? g_renderer.pci_bars[bar_index + 1u] : 0u;
 
     // Используем только MMIO BAR. I/O BAR для virtio-pci modern cfg не подходит.
     if ((bar & 0x1u) != 0u) {
@@ -311,8 +320,9 @@ static void apply_device_info(const pci_device_info_t* dev) {
     g_renderer.pci_bus = dev->bus;
     g_renderer.pci_slot = dev->slot;
     g_renderer.pci_func = dev->func;
-    g_renderer.bar0 = dev->bar0;
-    g_renderer.bar1 = dev->bar1;
+    for (uint8_t bar = 0; bar < 6u; bar++) {
+        g_renderer.pci_bars[bar] = dev->bars[bar];
+    }
 }
 
 static uint8_t virtio_gpu_locate_capabilities(void) {
@@ -437,7 +447,11 @@ static uint8_t virtio_gpu_submit_request(void* req, uint32_t req_len, void* resp
     uint32_t spin = 0u;
     while (g_queue.used.idx == g_transport.last_used_idx) {
         spin++;
-        if (spin > 10000000u) {
+        // На части конфигураций QEMU (`-monitor stdio`, другая SDL/GL нагрузка,
+        // менее удачный scheduling хоста) ответ от virtqueue может приходить
+        // заметно позже базового happy-path. Слишком маленький timeout здесь
+        // даёт ложный "device failed" и визуально проявляется как чёрный экран.
+        if (spin > 100000000u) {
             return 0u;
         }
         __asm__ __volatile__("pause");
@@ -486,7 +500,7 @@ static uint8_t virtio_gpu_initialize_pipe(video_info_t* info) {
     g_req_attach.req.resource_id = VIRTIO_GPU_RESOURCE_ID;
     g_req_attach.req.nr_entries = 1u;
     g_req_attach.entry.addr = g_renderer.active_framebuffer;
-    g_req_attach.entry.length = (uint32_t)info->pitch * (uint32_t)info->height;
+    g_req_attach.entry.length = g_renderer.surface_pitch * (uint32_t)info->height;
     g_req_attach.entry.padding = 0u;
 
     if (!virtio_gpu_submit_request(&g_req_attach, sizeof(g_req_attach), &g_resp_attach, sizeof(g_resp_attach))) {
@@ -531,10 +545,10 @@ uint32_t virtio_gpu_renderer_readpixel(video_info_t* info, uint16_t x, uint16_t 
         return 0u;
     }
 
-    uint8_t bpp = bytes_per_pixel(info);
-    uint8_t* px = renderer_base(info) + ((uint64_t)y * info->pitch) + ((uint64_t)x * bpp);
+    uint8_t bpp = renderer_bytes_per_pixel(info);
+    uint8_t* px = renderer_base(info) + ((uint64_t)y * renderer_pitch(info)) + ((uint64_t)x * bpp);
 
-    if (bpp == 2u) {
+    if (!g_renderer.active && bpp == 2u) {
         uint16_t packed = *(uint16_t*)px;
         uint8_t r = (uint8_t)(((packed >> 11) & 0x1Fu) << 3);
         uint8_t g = (uint8_t)(((packed >> 5) & 0x3Fu) << 2);
@@ -542,7 +556,7 @@ uint32_t virtio_gpu_renderer_readpixel(video_info_t* info, uint16_t x, uint16_t 
         return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
     }
 
-    if (bpp == 3u) {
+    if (!g_renderer.active && bpp == 3u) {
         return ((uint32_t)px[2] << 16) | ((uint32_t)px[1] << 8) | px[0];
     }
 
@@ -554,10 +568,10 @@ void virtio_gpu_renderer_writepixel(video_info_t* info, uint16_t x, uint16_t y, 
         return;
     }
 
-    uint8_t bpp = bytes_per_pixel(info);
-    uint8_t* px = renderer_base(info) + ((uint64_t)y * info->pitch) + ((uint64_t)x * bpp);
+    uint8_t bpp = renderer_bytes_per_pixel(info);
+    uint8_t* px = renderer_base(info) + ((uint64_t)y * renderer_pitch(info)) + ((uint64_t)x * bpp);
 
-    if (bpp == 2u) {
+    if (!g_renderer.active && bpp == 2u) {
         uint8_t r = (uint8_t)((color >> 16) & 0xFFu);
         uint8_t g = (uint8_t)((color >> 8) & 0xFFu);
         uint8_t b = (uint8_t)(color & 0xFFu);
@@ -565,7 +579,7 @@ void virtio_gpu_renderer_writepixel(video_info_t* info, uint16_t x, uint16_t y, 
         return;
     }
 
-    if (bpp == 3u) {
+    if (!g_renderer.active && bpp == 3u) {
         px[0] = (uint8_t)(color & 0xFFu);
         px[1] = (uint8_t)((color >> 8) & 0xFFu);
         px[2] = (uint8_t)((color >> 16) & 0xFFu);
@@ -645,7 +659,10 @@ void virtio_gpu_renderer_init(video_info_t* info) {
         return;
     }
 
-    uint32_t required = (uint32_t)info->pitch * (uint32_t)info->height;
+    // Ресурс virtio-gpu создаётся как B8G8R8X8_UNORM, то есть всегда 4 байта
+    // на пиксель, независимо от того, в каком VBE-формате stage2 получил boot-fb.
+    g_renderer.surface_pitch = (uint32_t)info->width * VIRTIO_GPU_RESOURCE_BPP;
+    uint32_t required = g_renderer.surface_pitch * (uint32_t)info->height;
     g_draw_surface_enabled = (required <= VIRTIO_GPU_DRAW_SURFACE_CAPACITY) ? 1u : 0u;
     if (g_draw_surface_enabled) {
         g_renderer.active_framebuffer = VIRTIO_GPU_DRAW_SURFACE_BASE;
@@ -660,18 +677,32 @@ void virtio_gpu_renderer_init(video_info_t* info) {
     g_transport.common->device_status |= VIRTIO_STATUS_DRIVER;
 
     g_transport.common->device_feature_select = 0u;
-    uint32_t dev_features = g_transport.common->device_feature;
-    uint32_t driver_features = 0u;
+    uint32_t dev_features_lo = g_transport.common->device_feature;
+    g_transport.common->device_feature_select = 1u;
+    uint32_t dev_features_hi = g_transport.common->device_feature;
+    uint32_t driver_features_lo = 0u;
+    uint32_t driver_features_hi = 0u;
 
-    if ((dev_features & VIRTIO_GPU_F_VIRGL) != 0u) {
-        driver_features |= VIRTIO_GPU_F_VIRGL;
+    if ((dev_features_lo & VIRTIO_GPU_F_VIRGL) != 0u) {
+        // Хост умеет virgl, но текущий драйвер использует только 2D control-path.
+        // Фичу специально НЕ подтверждаем, чтобы не обещать 3D/virgl-контракт,
+        // который ядро ещё не реализует.
         g_renderer.virgl_enabled = 1u;
     }
 
+    if ((dev_features_hi & (1u << (VIRTIO_F_VERSION_1 - 32u))) == 0u) {
+        virtio_gpu_set_failed();
+        return;
+    }
+
+    // Для modern virtio-pci подтверждение VERSION_1 обязательно, иначе
+    // устройство законно сбрасывает FEATURES_OK и драйвер остаётся на fallback.
+    driver_features_hi |= (1u << (VIRTIO_F_VERSION_1 - 32u));
+
     g_transport.common->driver_feature_select = 0u;
-    g_transport.common->driver_feature = driver_features;
+    g_transport.common->driver_feature = driver_features_lo;
     g_transport.common->driver_feature_select = 1u;
-    g_transport.common->driver_feature = 0u;
+    g_transport.common->driver_feature = driver_features_hi;
 
     g_transport.common->device_status |= VIRTIO_STATUS_FEATURES_OK;
     if ((g_transport.common->device_status & VIRTIO_STATUS_FEATURES_OK) == 0u) {
@@ -723,7 +754,7 @@ void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y
     g_req_transfer.req.rect.y = y;
     g_req_transfer.req.rect.width = clipped_w;
     g_req_transfer.req.rect.height = clipped_h;
-    g_req_transfer.req.offset = (uint64_t)y * (uint64_t)info->pitch + (uint64_t)x * (uint64_t)bytes_per_pixel(info);
+    g_req_transfer.req.offset = (uint64_t)y * (uint64_t)renderer_pitch(info) + (uint64_t)x * (uint64_t)renderer_bytes_per_pixel(info);
     g_req_transfer.req.resource_id = VIRTIO_GPU_RESOURCE_ID;
     g_req_transfer.req.padding = 0u;
 

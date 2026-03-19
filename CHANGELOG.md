@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.18.7
+- Снижена latency курсора на `virtio-gpu`: перемещение курсора больше не вызывает немедленный sync flush внутри `ui_set_cursor`, а публикуется обычным кадром через dirty-region batching.
+- Увеличен timeout ожидания ответа virtqueue в `virtio_gpu_renderer`, чтобы уменьшить вероятность ложного `device failed`/чёрного старта на более «медленных» конфигурациях QEMU вроде запуска с `-monitor stdio`.
+- README дополнен пояснением, что рывки курсора на `VIDEO: VIRTIO` чаще связаны с частотой flush dirty-областей, а не с самим PS/2 input-path.
+
+## 1.18.6
+- Исправлено несоответствие между boot video mode и форматом `virtio-gpu`: `stage2` использует VBE mode `0x118` (`1024x768x24bpp`), а ресурс `virtio-gpu` создаётся как `B8G8R8X8_UNORM` (`32bpp`), поэтому renderer теперь считает backing/offset для virtio-path всегда из `4 bytes/pixel`.
+- Это убирает ещё одну причину ошибок QEMU `IOV data size exceeds resource capacity` и битых артефактов: драйвер больше не смешивает `24bpp` boot framebuffer с `32bpp` virtio resource layout.
+- README дополнен пояснением про различие между VBE mode `0x118` и внутренним форматом ресурса `virtio-gpu`.
+
+## 1.18.5
+- Исправлен stride/resource-size контракт в `virtio_gpu_renderer`: backing resource и `TRANSFER_TO_HOST_2D` offsets теперь считаются по packed surface stride (`width * bytes_per_pixel`), а не по BIOS/VBE `pitch`.
+- Устранена причина ошибок QEMU вида `IOV data size exceeds resource capacity` и связанных визуальных артефактов при работе через `virtio-vga-gl`.
+- README дополнен пояснением о различии между packed virtio resource stride и VBE framebuffer pitch.
+
+## 1.18.4
+- Исправлен PCI BAR probing для `virtio-vga`/`virtio-vga-gl`: WoOS теперь читает все шесть PCI BAR, а не только `BAR0/BAR1`, поэтому renderer может найти modern virtio capability-регионы, которые QEMU размещает в старших BAR.
+- В `virtio_gpu_renderer` BAR lookup обобщён на `BAR0..BAR5`, чтобы `COMMON_CFG`/`NOTIFY_CFG`/`DEVICE_CFG` корректно находились не только в простейшей раскладке PCI-регистров.
+- README дополнен пояснением, почему устройство могло определяться на PCI, но всё равно оставаться в `VIDEO: VBE (VIRTIO PCI)`.
+
+## 1.18.3
+- Исправлена modern virtio feature-negotiation в `drivers/virtio_gpu_renderer`: драйвер теперь подтверждает обязательную фичу `VIRTIO_F_VERSION_1`, без которой QEMU `virtio-vga`/`virtio-vga-gl` мог законно сбрасывать `FEATURES_OK` и оставлять систему на `VIDEO: VBE (VIRTIO PCI)`.
+- Уточнено поведение `virtio-vga-gl`: текущий WoOS использует только 2D virtio-gpu path и специально не подтверждает virgl-фичу, чтобы не заявлять неподдержанный 3D-контракт.
+- README дополнен явным пояснением, что для штатной сборки на `virtio-vga-gl` строка `VIDEO: VBE (VIRTIO PCI)` теперь означает ошибку инициализации, а не нормальный режим.
+
 ## 1.18.2
 - Исправлен bitmap-шрифт framebuffer: добавлены отсутствовавшие английские буквы, включая проблемные строчные `m` и `n`, из-за которых часть текста ранее отображалась пустыми пробелами.
 - Таблица глифов расширена до полного набора печатных ASCII-символов (`0x20..0x7E`), чтобы UI и будущие системные сообщения могли корректно показывать взрослый набор латиницы, цифр и знаков пунктуации.

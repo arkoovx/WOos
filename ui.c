@@ -113,7 +113,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
 
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
-    fb_draw_text(info, 18, 13, "WOOS 1.18.2", COLOR_TEXT_LIGHT, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.18.7", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -256,15 +256,20 @@ static void cursor_draw(video_info_t* info) {
 }
 
 static void present_cursor_delta(video_info_t* info, uint16_t old_x, uint16_t old_y, uint8_t had_visible) {
+    (void)info;
+
     if (!had_visible) {
-        fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
+        ui_mark_dirty(g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
         return;
     }
 
     ui_dirty_rect_t old_rect = {old_x, old_y, CURSOR_W, CURSOR_H};
     ui_dirty_rect_t new_rect = {g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H};
     ui_dirty_rect_t union_rect = rect_union(&old_rect, &new_rect);
-    fb_present_rect(info, union_rect.x, union_rect.y, union_rect.w, union_rect.h);
+    // Для virtio-path немедленный sync flush на каждое движение курсора заметно
+    // увеличивает latency. Вместо этого объединяем старую/новую область и
+    // публикуем её штатно через ближайший ui_render_dirty() кадр.
+    ui_mark_dirty(union_rect.x, union_rect.y, union_rect.w, union_rect.h);
 }
 
 void ui_set_cursor(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons) {

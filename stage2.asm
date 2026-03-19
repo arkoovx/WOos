@@ -4,7 +4,7 @@ BITS 16
 GLOBAL _start
 EXTERN kmain
 
-%define VBE_MODE_1024x768x32 0x118
+%define VBE_MODE_1024x768x24 0x118
 %define VBE_SET_LINEAR      0x4000
 %define LONG_MODE_STACK_TOP 0x0009F000
 %define BOCHS_LFB_FALLBACK  0xE0000000
@@ -30,14 +30,14 @@ _start:
     call collect_e820_map
 
     mov ax, 0x4F01
-    mov cx, VBE_MODE_1024x768x32
+    mov cx, VBE_MODE_1024x768x24
     mov di, vbe_mode_info
     int 0x10
     cmp ax, 0x004F
     jne stage2_fail
 
     mov ax, 0x4F02
-    mov bx, VBE_MODE_1024x768x32 | VBE_SET_LINEAR
+    mov bx, VBE_MODE_1024x768x24 | VBE_SET_LINEAR
     int 0x10
     cmp ax, 0x004F
     jne stage2_fail
