@@ -43,6 +43,9 @@ make os.img
 а не просто наличие PCI-адаптера `virtio-vga`. Если virtio-устройство найдено,
 но ядро осталось на безопасном framebuffer fallback, UI показывает
 `VIDEO: VBE (VIRTIO PCI)`.
+Если вы запускаете QEMU с `-device virtio-vga-gl`, строка `VIDEO: VBE (VIRTIO PCI)`
+уже не считается «нормой»: это признак, что драйвер обнаружил PCI-устройство,
+но не смог завершить modern virtio feature-negotiation и потому остался на VBE fallback.
 Для диагностики можно собрать безопасный fallback-профиль:
 ```bash
 make clean
@@ -102,6 +105,10 @@ qemu-system-x86_64 \
 Для текущих сборок используйте стандартные PS/2-устройства QEMU.
 
 Важно: в текущем состоянии WoOS использует 2D command/render-path поверх `virtio-gpu` (без полноценного userspace 3D stack). UI отправляет draw-команды в renderer, который обновляет backing resource и отправляет dirty-rect в virtqueue. Если `virtio-gpu`/modern transport недоступен, автоматически остаётся software framebuffer-path от `stage2`.
+
+Дополнение по `virtio-vga-gl`: WoOS сейчас использует только 2D virtio-gpu команды.
+Даже если хост предлагает virgl/GL-возможности, драйвер не подтверждает эту фичу
+и обязан работать как обычный modern virtio-gpu renderer. Это ожидаемое поведение.
 
 Если в гостевой системе всё «как 1 FPS», чаще всего проблема в медленной эмуляции (TCG без аппаратного ускорения) и/или слишком больших задержках в основном цикле ядра.
 

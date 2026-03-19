@@ -43,6 +43,7 @@
 
 // VIRTIO_GPU_F_VIRGL: позволяет хосту принимать virgl-совместимый командный поток.
 #define VIRTIO_GPU_F_VIRGL (1u << 0)
+#define VIRTIO_F_VERSION_1 32u
 
 #define VIRTIO_GPU_DRAW_SURFACE_BASE 0x01800000ull
 #define VIRTIO_GPU_DRAW_SURFACE_CAPACITY (8u * 1024u * 1024u)
@@ -660,18 +661,32 @@ void virtio_gpu_renderer_init(video_info_t* info) {
     g_transport.common->device_status |= VIRTIO_STATUS_DRIVER;
 
     g_transport.common->device_feature_select = 0u;
-    uint32_t dev_features = g_transport.common->device_feature;
-    uint32_t driver_features = 0u;
+    uint32_t dev_features_lo = g_transport.common->device_feature;
+    g_transport.common->device_feature_select = 1u;
+    uint32_t dev_features_hi = g_transport.common->device_feature;
+    uint32_t driver_features_lo = 0u;
+    uint32_t driver_features_hi = 0u;
 
-    if ((dev_features & VIRTIO_GPU_F_VIRGL) != 0u) {
-        driver_features |= VIRTIO_GPU_F_VIRGL;
+    if ((dev_features_lo & VIRTIO_GPU_F_VIRGL) != 0u) {
+        // Хост умеет virgl, но текущий драйвер использует только 2D control-path.
+        // Фичу специально НЕ подтверждаем, чтобы не обещать 3D/virgl-контракт,
+        // который ядро ещё не реализует.
         g_renderer.virgl_enabled = 1u;
     }
 
+    if ((dev_features_hi & (1u << (VIRTIO_F_VERSION_1 - 32u))) == 0u) {
+        virtio_gpu_set_failed();
+        return;
+    }
+
+    // Для modern virtio-pci подтверждение VERSION_1 обязательно, иначе
+    // устройство законно сбрасывает FEATURES_OK и драйвер остаётся на fallback.
+    driver_features_hi |= (1u << (VIRTIO_F_VERSION_1 - 32u));
+
     g_transport.common->driver_feature_select = 0u;
-    g_transport.common->driver_feature = driver_features;
+    g_transport.common->driver_feature = driver_features_lo;
     g_transport.common->driver_feature_select = 1u;
-    g_transport.common->driver_feature = 0u;
+    g_transport.common->driver_feature = driver_features_hi;
 
     g_transport.common->device_status |= VIRTIO_STATUS_FEATURES_OK;
     if ((g_transport.common->device_status & VIRTIO_STATUS_FEATURES_OK) == 0u) {
