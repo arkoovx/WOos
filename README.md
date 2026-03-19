@@ -39,6 +39,10 @@ make os.img
 ```
 
 По умолчанию `virtio-gpu` renderer включён (`VIRTIO_GPU=1`).
+Надпись `VIDEO: VIRTIO` в UI означает именно активный accelerated render-path,
+а не просто наличие PCI-адаптера `virtio-vga`. Если virtio-устройство найдено,
+но ядро осталось на безопасном framebuffer fallback, UI показывает
+`VIDEO: VBE (VIRTIO PCI)`.
 Для диагностики можно собрать безопасный fallback-профиль:
 ```bash
 make clean
@@ -74,7 +78,6 @@ qemu-system-x86_64 \
   -cpu host \
   -vga virtio \
   -display sdl,gl=on \
-  -usb -device usb-mouse -device usb-kbd \
   -net nic -net user \
   -monitor stdio
 ```
@@ -89,10 +92,14 @@ qemu-system-x86_64 \
   -cpu host \
   -device virtio-vga-gl \
   -display sdl,gl=on \
-  -usb -device usb-mouse -device usb-kbd \
   -net nic -net user \
   -monitor stdio
 ```
+
+Важно: в текущем состоянии WoOS не содержит USB HID-драйверов. Поддерживается
+только PS/2-мышь через контроллер 8042 (`mouse.c`), поэтому добавление
+`-usb -device usb-mouse -device usb-kbd` не даёт гостю рабочий ввод.
+Для текущих сборок используйте стандартные PS/2-устройства QEMU.
 
 Важно: в текущем состоянии WoOS использует 2D command/render-path поверх `virtio-gpu` (без полноценного userspace 3D stack). UI отправляет draw-команды в renderer, который обновляет backing resource и отправляет dirty-rect в virtqueue. Если `virtio-gpu`/modern transport недоступен, автоматически остаётся software framebuffer-path от `stage2`.
 
