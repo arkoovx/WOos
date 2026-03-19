@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.18.4
+- Исправлен PCI BAR probing для `virtio-vga`/`virtio-vga-gl`: WoOS теперь читает все шесть PCI BAR, а не только `BAR0/BAR1`, поэтому renderer может найти modern virtio capability-регионы, которые QEMU размещает в старших BAR.
+- В `virtio_gpu_renderer` BAR lookup обобщён на `BAR0..BAR5`, чтобы `COMMON_CFG`/`NOTIFY_CFG`/`DEVICE_CFG` корректно находились не только в простейшей раскладке PCI-регистров.
+- README дополнен пояснением, почему устройство могло определяться на PCI, но всё равно оставаться в `VIDEO: VBE (VIRTIO PCI)`.
+
 ## 1.18.3
 - Исправлена modern virtio feature-negotiation в `drivers/virtio_gpu_renderer`: драйвер теперь подтверждает обязательную фичу `VIRTIO_F_VERSION_1`, без которой QEMU `virtio-vga`/`virtio-vga-gl` мог законно сбрасывать `FEATURES_OK` и оставлять систему на `VIDEO: VBE (VIRTIO PCI)`.
 - Уточнено поведение `virtio-vga-gl`: текущий WoOS использует только 2D virtio-gpu path и специально не подтверждает virgl-фичу, чтобы не заявлять неподдержанный 3D-контракт.

@@ -13,8 +13,7 @@ typedef struct pci_device_info {
     uint8_t subclass;
     uint8_t prog_if;
     uint8_t header_type;
-    uint32_t bar0;
-    uint32_t bar1;
+    uint32_t bars[6];
 } pci_device_info_t;
 
 uint8_t pci_find_device_by_id(uint16_t vendor_id, uint16_t device_id, pci_device_info_t* out);

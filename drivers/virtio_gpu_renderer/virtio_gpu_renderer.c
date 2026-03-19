@@ -208,12 +208,7 @@ typedef struct virtio_gpu_transport {
     uint8_t ready;
 } virtio_gpu_transport_t;
 
-static virtio_gpu_renderer_status_t g_renderer = {
-    0u, 0u, 0u, 0u, 0u,
-    0u, 0u, 0u,
-    0u, 0u,
-    0ull, 0ull
-};
+static virtio_gpu_renderer_status_t g_renderer = {0};
 
 static virtio_gpu_transport_t g_transport = {0};
 static virtio_gpu_queue_buffers_t g_queue;
@@ -276,17 +271,12 @@ static uint8_t pci_config_read_byte(uint8_t bus, uint8_t slot, uint8_t func, uin
 }
 
 static uint8_t pci_get_mmio_bar_base(uint8_t bar_index, uint64_t* out_base) {
-    uint32_t bar = 0u;
-    uint32_t bar_next = 0u;
-
-    if (bar_index == 0u) {
-        bar = g_renderer.bar0;
-        bar_next = g_renderer.bar1;
-    } else if (bar_index == 1u) {
-        bar = g_renderer.bar1;
-    } else {
+    if (bar_index >= 6u) {
         return 0u;
     }
+
+    uint32_t bar = g_renderer.pci_bars[bar_index];
+    uint32_t bar_next = (bar_index + 1u < 6u) ? g_renderer.pci_bars[bar_index + 1u] : 0u;
 
     // Используем только MMIO BAR. I/O BAR для virtio-pci modern cfg не подходит.
     if ((bar & 0x1u) != 0u) {
@@ -312,8 +302,9 @@ static void apply_device_info(const pci_device_info_t* dev) {
     g_renderer.pci_bus = dev->bus;
     g_renderer.pci_slot = dev->slot;
     g_renderer.pci_func = dev->func;
-    g_renderer.bar0 = dev->bar0;
-    g_renderer.bar1 = dev->bar1;
+    for (uint8_t bar = 0; bar < 6u; bar++) {
+        g_renderer.pci_bars[bar] = dev->bars[bar];
+    }
 }
 
 static uint8_t virtio_gpu_locate_capabilities(void) {
