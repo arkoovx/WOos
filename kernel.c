@@ -80,9 +80,9 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             pmm_init(video);
             kheap_init();
             input_init();
-            // Heartbeat обновляется заметно медленнее кадрового цикла,
-            // чтобы UI оставался отзывчивым, а счётчик не «улетал» слишком быстро.
-            timer_init(120u);
+            // Heartbeat теперь идёт от аппаратного PIT, а не от числа итераций цикла,
+            // поэтому частота UI-обновлений не зависит от скорости CPU/эмулятора.
+            timer_init(20u);
             break;
         case INIT_UI:
             ui_render_desktop(video);

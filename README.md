@@ -13,7 +13,7 @@
 - Текстовый bitmap-рендер для отображения статуса и версий, плюс счётчик dirty-областей как профилировочная метка кадра.
 - Базовый init-flow ядра по стадиям: `early -> platform -> drivers -> ui`.
 - Добавлен IDT skeleton (`idt`) с загрузкой таблицы дескрипторов и безопасным default-обработчиком для базовой платформенной инициализации.
-- Добавлен модуль heartbeat-таймера (`timer`) и вывод его состояния в UI (строка `HEARTBEAT` в footer).
+- Добавлен модуль heartbeat-таймера (`timer`) на базе аппаратного PIT с polling-сэмплированием счётчика и выводом состояния в UI (строка `HEARTBEAT` в footer).
 - Добавлена базовая IRQ-обвязка для клавиатуры и мыши: remap PIC, отдельные обработчики `IRQ1`/`IRQ12` и счётчики прерываний в footer UI (в текущей штатной конфигурации линии PIC остаются замаскированными, а мышь работает через polling-путь драйвера).
 - IDT теперь содержит IRQ-stub'ы для всего диапазона PIC (`32..47`), чтобы spurious/неожиданные IRQ корректно подтверждались через `EOI` и не провоцировали нестабильный boot.
 - Добавлен модуль `drivers/virtio_gpu_renderer`: renderer-path для `virtio-gpu` с draw-командами (`fill/rect/glyph`), отдельной RAM draw-surface и публикацией dirty-rect через virtqueue (`TRANSFER_TO_HOST_2D` + `RESOURCE_FLUSH`) с безопасным fallback на software framebuffer.
@@ -105,7 +105,7 @@ qemu-system-x86_64 \
 - `ui.c/.h` — отрисовка оболочки и обработка базовых UI-событий.
 - `input.c/.h` — очередь событий и input dispatcher contract (с runtime-размещением буфера через `kheap`).
 - `idt.c/.h`, `idt_asm.asm` — каркас подсистемы прерываний (IDT load + IRQ stubs для keyboard/mouse).
-- `timer.c/.h` — программный heartbeat-таймер для событий `timer tick`.
+- `timer.c/.h` — heartbeat-таймер на базе аппаратного PIT с polling-сэмплированием счётчика для событий `timer tick`.
 - `kheap.c/.h` — базовый heap-аллокатор ядра для внутренних runtime-структур.
 - `pmm.c/.h` — базовый physical memory manager поверх BIOS E820 memory map.
 - `mouse.c/.h` — polling-драйвер PS/2-мыши и трансляция пакетов в очередь input.
