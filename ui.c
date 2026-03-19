@@ -38,14 +38,18 @@ typedef struct ui_interaction_state {
 
 static ui_interaction_state_t g_ui_state = {0, 0};
 
-typedef struct ui_kernel_health_state {
+typedef struct ui_runtime_stats_state {
     uint8_t idt_ready;
+    uint8_t virtio_active;
     uint32_t heartbeat;
     uint32_t keyboard_irq;
     uint32_t mouse_irq;
-} ui_kernel_health_state_t;
+    uint16_t dirty_count;
+    uint64_t heap_used;
+    uint64_t heap_free;
+} ui_runtime_stats_state_t;
 
-static ui_kernel_health_state_t g_kernel_health = {0u, 0u, 0u, 0u};
+static ui_runtime_stats_state_t g_runtime_stats = {0u, 0u, 0u, 0u, 0u, 0u, 0ull, 0ull};
 
 #define PANEL_BTN_X 12u
 #define PANEL_BTN_Y 8u
@@ -101,7 +105,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
 
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
-    fb_draw_text(info, 18, 13, "WOOS 1.12.3", COLOR_TEXT_LIGHT, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.13.0", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -114,11 +118,18 @@ static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip) 
 
     fb_rect(info, win_x, win_y, win_w, win_h, COLOR_WINDOW);
     fb_frame(info, win_x, win_y, win_w, win_h, 2, COLOR_BORDER);
-    uint32_t title_color = g_kernel_health.idt_ready ? COLOR_ACCENT : COLOR_ACCENT_PRESSED;
-    const char* title = g_kernel_health.idt_ready ? "STATUS: IDT READY" : "STATUS: IDT BAD";
+    uint32_t title_color = g_runtime_stats.idt_ready ? COLOR_ACCENT : COLOR_ACCENT_PRESSED;
+    const char* title = g_runtime_stats.idt_ready ? "STATUS: IDT READY" : "STATUS: IDT BAD";
 
     fb_rect(info, win_x, win_y, win_w, 22, title_color);
     fb_draw_text(info, (uint16_t)(win_x + 8), (uint16_t)(win_y + 7), title, COLOR_TEXT_LIGHT, title_color);
+}
+
+static void write_decimal_padded(char* buffer, uint16_t last_index, uint64_t value, uint16_t digits) {
+    for (uint16_t i = 0; i < digits; i++) {
+        buffer[last_index - i] = (char)('0' + (value % 10u));
+        value /= 10u;
+    }
 }
 
 static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
@@ -132,28 +143,25 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
     }
 
     char heartbeat_text[17] = "HEARTBEAT: 000000";
-    uint32_t value = g_kernel_health.heartbeat;
-
-    for (int i = 15; i >= 10; i--) {
-        heartbeat_text[i] = (char)('0' + (value % 10u));
-        value /= 10u;
-    }
+    write_decimal_padded(heartbeat_text, 15, g_runtime_stats.heartbeat, 6);
 
     char irq_text[19] = "IRQ K:0000 M:0000";
-    uint32_t keyboard = g_kernel_health.keyboard_irq % 10000u;
-    uint32_t mouse = g_kernel_health.mouse_irq % 10000u;
+    write_decimal_padded(irq_text, 10, g_runtime_stats.keyboard_irq % 10000u, 4);
+    write_decimal_padded(irq_text, 17, g_runtime_stats.mouse_irq % 10000u, 4);
 
-    for (int i = 10; i >= 7; i--) {
-        irq_text[i] = (char)('0' + (keyboard % 10u));
-        keyboard /= 10u;
-    }
+    char dirty_text[10] = "DIRTY: 00";
+    write_decimal_padded(dirty_text, 8, g_runtime_stats.dirty_count % 100u, 2);
 
-    for (int i = 17; i >= 14; i--) {
-        irq_text[i] = (char)('0' + (mouse % 10u));
-        mouse /= 10u;
-    }
+    char heap_text[24] = "HEAP U:00000 F:00000";
+    write_decimal_padded(heap_text, 12, g_runtime_stats.heap_used % 100000u, 5);
+    write_decimal_padded(heap_text, 20, g_runtime_stats.heap_free % 100000u, 5);
 
-    fb_draw_text(info, 16, (uint16_t)(info->height - 20), status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    const char* video_text = g_runtime_stats.virtio_active ? "VIDEO: VIRTIO" : "VIDEO: VBE";
+
+    fb_draw_text(info, 16, (uint16_t)(info->height - 32), status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 16, (uint16_t)(info->height - 20), dirty_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 104, (uint16_t)(info->height - 20), heap_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, (uint16_t)(info->width - 404), (uint16_t)(info->height - 32), video_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(info->height - 20), irq_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, (uint16_t)(info->width - 142), (uint16_t)(info->height - 20), heartbeat_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
 }
@@ -357,12 +365,12 @@ void ui_handle_mouse_button(video_info_t* info, uint8_t buttons) {
 }
 
 void ui_set_kernel_health(video_info_t* info, uint8_t idt_ready, uint32_t heartbeat) {
-    if (g_kernel_health.idt_ready == idt_ready && g_kernel_health.heartbeat == heartbeat) {
+    if (g_runtime_stats.idt_ready == idt_ready && g_runtime_stats.heartbeat == heartbeat) {
         return;
     }
 
-    g_kernel_health.idt_ready = idt_ready;
-    g_kernel_health.heartbeat = heartbeat;
+    g_runtime_stats.idt_ready = idt_ready;
+    g_runtime_stats.heartbeat = heartbeat;
 
     uint16_t win_w = (uint16_t)(info->width / 3);
     uint16_t win_x = (uint16_t)(info->width - win_w - 24);
@@ -371,12 +379,28 @@ void ui_set_kernel_health(video_info_t* info, uint8_t idt_ready, uint32_t heartb
 }
 
 void ui_set_irq_stats(video_info_t* info, uint32_t keyboard_irq, uint32_t mouse_irq) {
-    if (g_kernel_health.keyboard_irq == keyboard_irq && g_kernel_health.mouse_irq == mouse_irq) {
+    if (g_runtime_stats.keyboard_irq == keyboard_irq && g_runtime_stats.mouse_irq == mouse_irq) {
         return;
     }
 
-    g_kernel_health.keyboard_irq = keyboard_irq;
-    g_kernel_health.mouse_irq = mouse_irq;
+    g_runtime_stats.keyboard_irq = keyboard_irq;
+    g_runtime_stats.mouse_irq = mouse_irq;
 
     ui_mark_dirty((uint16_t)(info->width - 310), (uint16_t)(info->height - 24), 170, 24);
+}
+
+void ui_set_runtime_stats(video_info_t* info, uint16_t dirty_count, uint64_t heap_used, uint64_t heap_free, uint8_t virtio_active) {
+    if (g_runtime_stats.dirty_count == dirty_count
+        && g_runtime_stats.heap_used == heap_used
+        && g_runtime_stats.heap_free == heap_free
+        && g_runtime_stats.virtio_active == virtio_active) {
+        return;
+    }
+
+    g_runtime_stats.dirty_count = dirty_count;
+    g_runtime_stats.heap_used = heap_used;
+    g_runtime_stats.heap_free = heap_free;
+    g_runtime_stats.virtio_active = virtio_active;
+
+    ui_mark_dirty(0, (uint16_t)(info->height - 36), info->width, 36);
 }
