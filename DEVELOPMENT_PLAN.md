@@ -91,7 +91,7 @@
 ### C.2 Memory Subsystem
 - [x] PMM (stack-based allocator для физических страниц на основе BIOS E820 memory map).
 - [x] Базовый heap allocator ядра (рантайм-аллокатор для внутренних структур).
-- [ ] План миграции к VMM (карта памяти, page tables, kernel mapping policy).
+- [x] План миграции к VMM (карта памяти, page tables, kernel mapping policy).
 
 **DoD этапа C:**
 - Прерывания стабильны, panic path информативен.
@@ -139,14 +139,14 @@
   - [x] публикует GitHub Release с тегом `vX.Y.Z` и приложенным образом.
 
 ### Стандарты PR
-- [ ] PR template с чеклистом (версия, changelog, docs, тесты).
+- [x] PR template с чеклистом (версия, changelog, docs, тесты).
 - [ ] Политика именования веток и Conventional-style заголовки PR.
 - [ ] Явное описание риска и rollback-стратегии в сложных PR.
 
 ### Документация
 - [x] Добавить `docs/ARCHITECTURE.md` (слои, init flow, контракты).
-- [ ] Добавить `docs/DEBUGGING.md` (типовые проблемы boot/kernel).
-- [ ] Добавить `docs/RELEASES.md` (как выпускать теги и что генерируется автоматически).
+- [x] Добавить `docs/DEBUGGING.md` (типовые проблемы boot/kernel).
+- [x] Добавить `docs/RELEASES.md` (как выпускать теги и что генерируется автоматически).
 
 ---
 

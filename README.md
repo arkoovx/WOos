@@ -113,6 +113,9 @@ qemu-system-x86_64 \
 - `drivers/virtio_gpu_renderer/virtio_gpu_renderer.c/.h` — renderer-драйвер virtio-gpu с command-oriented draw API, virtqueue-flush dirty-rect и fallback на stage2 framebuffer.
 - `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
 - `docs/ARCHITECTURE.md` — зафиксированная архитектура слоёв, init-flow и контрактов подсистем.
+- `docs/MEMORY.md` — roadmap memory stack: переход от PMM к VMM и policy kernel mappings.
+- `docs/DEBUGGING.md` — практическая памятка по типовым boot/runtime-проблемам и безопасным диагностическим режимам.
+- `docs/RELEASES.md` — правила версионирования, подготовки PR и автоматической публикации релизов.
 
 ## Процесс разработки
 В репозитории действует правило: **каждый PR = новая версия**.
