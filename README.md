@@ -112,6 +112,7 @@ qemu-system-x86_64 \
 - `pci.c/.h` — минимальный доступ к PCI config space и поиск устройств.
 - `drivers/virtio_gpu_renderer/virtio_gpu_renderer.c/.h` — renderer-драйвер virtio-gpu с command-oriented draw API, virtqueue-flush dirty-rect и fallback на stage2 framebuffer.
 - `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
+- `docs/ARCHITECTURE.md` — зафиксированная архитектура слоёв, init-flow и контрактов подсистем.
 
 ## Процесс разработки
 В репозитории действует правило: **каждый PR = новая версия**.
