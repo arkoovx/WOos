@@ -40,6 +40,7 @@
 #define VIRTIO_GPU_RESP_OK_DISPLAY_INFO 0x1101u
 
 #define VIRTIO_GPU_FORMAT_B8G8R8X8_UNORM 2u
+#define VIRTIO_GPU_RESOURCE_BPP 4u
 
 // VIRTIO_GPU_F_VIRGL: позволяет хосту принимать virgl-совместимый командный поток.
 #define VIRTIO_GPU_F_VIRGL (1u << 0)
@@ -245,6 +246,15 @@ static inline void io_fence(void) {
 static inline uint8_t bytes_per_pixel(const video_info_t* info) {
     uint8_t bytes = (uint8_t)(info->bpp / 8u);
     return (bytes == 0u) ? 4u : bytes;
+}
+
+static inline uint8_t renderer_bytes_per_pixel(const video_info_t* info) {
+    if (g_renderer.active && g_draw_surface_enabled) {
+        (void)info;
+        return VIRTIO_GPU_RESOURCE_BPP;
+    }
+
+    return bytes_per_pixel(info);
 }
 
 static inline uint32_t renderer_pitch(const video_info_t* info) {
@@ -531,10 +541,10 @@ uint32_t virtio_gpu_renderer_readpixel(video_info_t* info, uint16_t x, uint16_t 
         return 0u;
     }
 
-    uint8_t bpp = bytes_per_pixel(info);
+    uint8_t bpp = renderer_bytes_per_pixel(info);
     uint8_t* px = renderer_base(info) + ((uint64_t)y * renderer_pitch(info)) + ((uint64_t)x * bpp);
 
-    if (bpp == 2u) {
+    if (!g_renderer.active && bpp == 2u) {
         uint16_t packed = *(uint16_t*)px;
         uint8_t r = (uint8_t)(((packed >> 11) & 0x1Fu) << 3);
         uint8_t g = (uint8_t)(((packed >> 5) & 0x3Fu) << 2);
@@ -542,7 +552,7 @@ uint32_t virtio_gpu_renderer_readpixel(video_info_t* info, uint16_t x, uint16_t 
         return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
     }
 
-    if (bpp == 3u) {
+    if (!g_renderer.active && bpp == 3u) {
         return ((uint32_t)px[2] << 16) | ((uint32_t)px[1] << 8) | px[0];
     }
 
@@ -554,10 +564,10 @@ void virtio_gpu_renderer_writepixel(video_info_t* info, uint16_t x, uint16_t y, 
         return;
     }
 
-    uint8_t bpp = bytes_per_pixel(info);
+    uint8_t bpp = renderer_bytes_per_pixel(info);
     uint8_t* px = renderer_base(info) + ((uint64_t)y * renderer_pitch(info)) + ((uint64_t)x * bpp);
 
-    if (bpp == 2u) {
+    if (!g_renderer.active && bpp == 2u) {
         uint8_t r = (uint8_t)((color >> 16) & 0xFFu);
         uint8_t g = (uint8_t)((color >> 8) & 0xFFu);
         uint8_t b = (uint8_t)(color & 0xFFu);
@@ -565,7 +575,7 @@ void virtio_gpu_renderer_writepixel(video_info_t* info, uint16_t x, uint16_t y, 
         return;
     }
 
-    if (bpp == 3u) {
+    if (!g_renderer.active && bpp == 3u) {
         px[0] = (uint8_t)(color & 0xFFu);
         px[1] = (uint8_t)((color >> 8) & 0xFFu);
         px[2] = (uint8_t)((color >> 16) & 0xFFu);
@@ -645,7 +655,9 @@ void virtio_gpu_renderer_init(video_info_t* info) {
         return;
     }
 
-    g_renderer.surface_pitch = (uint32_t)info->width * (uint32_t)bytes_per_pixel(info);
+    // Ресурс virtio-gpu создаётся как B8G8R8X8_UNORM, то есть всегда 4 байта
+    // на пиксель, независимо от того, в каком VBE-формате stage2 получил boot-fb.
+    g_renderer.surface_pitch = (uint32_t)info->width * VIRTIO_GPU_RESOURCE_BPP;
     uint32_t required = g_renderer.surface_pitch * (uint32_t)info->height;
     g_draw_surface_enabled = (required <= VIRTIO_GPU_DRAW_SURFACE_CAPACITY) ? 1u : 0u;
     if (g_draw_surface_enabled) {
@@ -738,7 +750,7 @@ void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y
     g_req_transfer.req.rect.y = y;
     g_req_transfer.req.rect.width = clipped_w;
     g_req_transfer.req.rect.height = clipped_h;
-    g_req_transfer.req.offset = (uint64_t)y * (uint64_t)renderer_pitch(info) + (uint64_t)x * (uint64_t)bytes_per_pixel(info);
+    g_req_transfer.req.offset = (uint64_t)y * (uint64_t)renderer_pitch(info) + (uint64_t)x * (uint64_t)renderer_bytes_per_pixel(info);
     g_req_transfer.req.resource_id = VIRTIO_GPU_RESOURCE_ID;
     g_req_transfer.req.padding = 0u;
 

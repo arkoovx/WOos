@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.18.6
+- Исправлено несоответствие между boot video mode и форматом `virtio-gpu`: `stage2` использует VBE mode `0x118` (`1024x768x24bpp`), а ресурс `virtio-gpu` создаётся как `B8G8R8X8_UNORM` (`32bpp`), поэтому renderer теперь считает backing/offset для virtio-path всегда из `4 bytes/pixel`.
+- Это убирает ещё одну причину ошибок QEMU `IOV data size exceeds resource capacity` и битых артефактов: драйвер больше не смешивает `24bpp` boot framebuffer с `32bpp` virtio resource layout.
+- README дополнен пояснением про различие между VBE mode `0x118` и внутренним форматом ресурса `virtio-gpu`.
+
 ## 1.18.5
 - Исправлен stride/resource-size контракт в `virtio_gpu_renderer`: backing resource и `TRANSFER_TO_HOST_2D` offsets теперь считаются по packed surface stride (`width * bytes_per_pixel`), а не по BIOS/VBE `pitch`.
 - Устранена причина ошибок QEMU вида `IOV data size exceeds resource capacity` и связанных визуальных артефактов при работе через `virtio-vga-gl`.
