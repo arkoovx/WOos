@@ -247,6 +247,14 @@ static inline uint8_t bytes_per_pixel(const video_info_t* info) {
     return (bytes == 0u) ? 4u : bytes;
 }
 
+static inline uint32_t renderer_pitch(const video_info_t* info) {
+    if (g_renderer.active && g_draw_surface_enabled && g_renderer.surface_pitch != 0u) {
+        return g_renderer.surface_pitch;
+    }
+
+    return info->pitch;
+}
+
 static uint32_t pci_config_read_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address = 0x80000000u
         | ((uint32_t)bus << 16)
@@ -478,7 +486,7 @@ static uint8_t virtio_gpu_initialize_pipe(video_info_t* info) {
     g_req_attach.req.resource_id = VIRTIO_GPU_RESOURCE_ID;
     g_req_attach.req.nr_entries = 1u;
     g_req_attach.entry.addr = g_renderer.active_framebuffer;
-    g_req_attach.entry.length = (uint32_t)info->pitch * (uint32_t)info->height;
+    g_req_attach.entry.length = g_renderer.surface_pitch * (uint32_t)info->height;
     g_req_attach.entry.padding = 0u;
 
     if (!virtio_gpu_submit_request(&g_req_attach, sizeof(g_req_attach), &g_resp_attach, sizeof(g_resp_attach))) {
@@ -524,7 +532,7 @@ uint32_t virtio_gpu_renderer_readpixel(video_info_t* info, uint16_t x, uint16_t 
     }
 
     uint8_t bpp = bytes_per_pixel(info);
-    uint8_t* px = renderer_base(info) + ((uint64_t)y * info->pitch) + ((uint64_t)x * bpp);
+    uint8_t* px = renderer_base(info) + ((uint64_t)y * renderer_pitch(info)) + ((uint64_t)x * bpp);
 
     if (bpp == 2u) {
         uint16_t packed = *(uint16_t*)px;
@@ -547,7 +555,7 @@ void virtio_gpu_renderer_writepixel(video_info_t* info, uint16_t x, uint16_t y, 
     }
 
     uint8_t bpp = bytes_per_pixel(info);
-    uint8_t* px = renderer_base(info) + ((uint64_t)y * info->pitch) + ((uint64_t)x * bpp);
+    uint8_t* px = renderer_base(info) + ((uint64_t)y * renderer_pitch(info)) + ((uint64_t)x * bpp);
 
     if (bpp == 2u) {
         uint8_t r = (uint8_t)((color >> 16) & 0xFFu);
@@ -637,7 +645,8 @@ void virtio_gpu_renderer_init(video_info_t* info) {
         return;
     }
 
-    uint32_t required = (uint32_t)info->pitch * (uint32_t)info->height;
+    g_renderer.surface_pitch = (uint32_t)info->width * (uint32_t)bytes_per_pixel(info);
+    uint32_t required = g_renderer.surface_pitch * (uint32_t)info->height;
     g_draw_surface_enabled = (required <= VIRTIO_GPU_DRAW_SURFACE_CAPACITY) ? 1u : 0u;
     if (g_draw_surface_enabled) {
         g_renderer.active_framebuffer = VIRTIO_GPU_DRAW_SURFACE_BASE;
@@ -729,7 +738,7 @@ void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y
     g_req_transfer.req.rect.y = y;
     g_req_transfer.req.rect.width = clipped_w;
     g_req_transfer.req.rect.height = clipped_h;
-    g_req_transfer.req.offset = (uint64_t)y * (uint64_t)info->pitch + (uint64_t)x * (uint64_t)bytes_per_pixel(info);
+    g_req_transfer.req.offset = (uint64_t)y * (uint64_t)renderer_pitch(info) + (uint64_t)x * (uint64_t)bytes_per_pixel(info);
     g_req_transfer.req.resource_id = VIRTIO_GPU_RESOURCE_ID;
     g_req_transfer.req.padding = 0u;
 

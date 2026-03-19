@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.18.5
+- Исправлен stride/resource-size контракт в `virtio_gpu_renderer`: backing resource и `TRANSFER_TO_HOST_2D` offsets теперь считаются по packed surface stride (`width * bytes_per_pixel`), а не по BIOS/VBE `pitch`.
+- Устранена причина ошибок QEMU вида `IOV data size exceeds resource capacity` и связанных визуальных артефактов при работе через `virtio-vga-gl`.
+- README дополнен пояснением о различии между packed virtio resource stride и VBE framebuffer pitch.
+
 ## 1.18.4
 - Исправлен PCI BAR probing для `virtio-vga`/`virtio-vga-gl`: WoOS теперь читает все шесть PCI BAR, а не только `BAR0/BAR1`, поэтому renderer может найти modern virtio capability-регионы, которые QEMU размещает в старших BAR.
 - В `virtio_gpu_renderer` BAR lookup обобщён на `BAR0..BAR5`, чтобы `COMMON_CFG`/`NOTIFY_CFG`/`DEVICE_CFG` корректно находились не только в простейшей раскладке PCI-регистров.

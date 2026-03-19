@@ -13,6 +13,7 @@ typedef struct virtio_gpu_renderer_status {
     uint8_t pci_slot;
     uint8_t pci_func;
     uint32_t pci_bars[6];
+    uint32_t surface_pitch;
     uint64_t fallback_framebuffer;
     uint64_t active_framebuffer;
 } virtio_gpu_renderer_status_t;

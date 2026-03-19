@@ -112,6 +112,10 @@ qemu-system-x86_64 \
 Также учтите, что у `virtio-vga`/`virtio-vga-gl` virtio capability-регионы могут
 лежать не в `BAR0/BAR1`, а в старших PCI BAR. Поэтому WoOS должен читать все `BAR0..BAR5`,
 иначе устройство будет найдено на PCI, но renderer останется на `VIDEO: VBE (VIRTIO PCI)`.
+Отдельно важно, что backing resource для `virtio-gpu` должен использовать packed stride
+`width * bytes_per_pixel`, а не BIOS/VBE `pitch`: если передавать в `TRANSFER_TO_HOST_2D`
+смещения по более широкому VBE stride, QEMU начинает ругаться на `resource capacity`
+и на экране появляются артефакты.
 
 Если в гостевой системе всё «как 1 FPS», чаще всего проблема в медленной эмуляции (TCG без аппаратного ускорения) и/или слишком больших задержках в основном цикле ядра.
 
