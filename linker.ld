@@ -4,6 +4,7 @@ ENTRY(_start)
 SECTIONS
 {
     . = 0x8000;
+    __kernel_start = .;
 
     .text.boot : ALIGN(16)
     {
@@ -35,6 +36,8 @@ SECTIONS
     {
         *(.paging)
     }
+
+    __kernel_end = .;
 
     . = ALIGN(512);
     .pad :

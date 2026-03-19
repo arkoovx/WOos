@@ -45,11 +45,14 @@ typedef struct ui_runtime_stats_state {
     uint32_t keyboard_irq;
     uint32_t mouse_irq;
     uint16_t dirty_count;
+    uint8_t pmm_ready;
     uint64_t heap_used;
     uint64_t heap_free;
+    uint64_t pmm_total_pages;
+    uint64_t pmm_free_pages;
 } ui_runtime_stats_state_t;
 
-static ui_runtime_stats_state_t g_runtime_stats = {0u, 0u, 0u, 0u, 0u, 0u, 0ull, 0ull};
+static ui_runtime_stats_state_t g_runtime_stats = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0ull, 0ull, 0ull, 0ull};
 
 #define PANEL_BTN_X 12u
 #define PANEL_BTN_Y 8u
@@ -105,7 +108,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
 
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
-    fb_draw_text(info, 18, 13, "WOOS 1.13.0", COLOR_TEXT_LIGHT, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.14.0", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -156,12 +159,19 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
     write_decimal_padded(heap_text, 12, g_runtime_stats.heap_used % 100000u, 5);
     write_decimal_padded(heap_text, 20, g_runtime_stats.heap_free % 100000u, 5);
 
+    char pmm_text[24] = "PMM T:00000 F:00000";
+    write_decimal_padded(pmm_text, 11, g_runtime_stats.pmm_total_pages % 100000u, 5);
+    write_decimal_padded(pmm_text, 19, g_runtime_stats.pmm_free_pages % 100000u, 5);
+
     const char* video_text = g_runtime_stats.virtio_active ? "VIDEO: VIRTIO" : "VIDEO: VBE";
+    const char* pmm_status = g_runtime_stats.pmm_ready ? "PMM READY" : "PMM WAIT";
 
     fb_draw_text(info, 16, (uint16_t)(info->height - 32), status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, 16, (uint16_t)(info->height - 20), dirty_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, 104, (uint16_t)(info->height - 20), heap_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 292, (uint16_t)(info->height - 20), pmm_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, (uint16_t)(info->width - 404), (uint16_t)(info->height - 32), video_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(info->height - 32), pmm_status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(info->height - 20), irq_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, (uint16_t)(info->width - 142), (uint16_t)(info->height - 20), heartbeat_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
 }
@@ -387,6 +397,20 @@ void ui_set_irq_stats(video_info_t* info, uint32_t keyboard_irq, uint32_t mouse_
     g_runtime_stats.mouse_irq = mouse_irq;
 
     ui_mark_dirty((uint16_t)(info->width - 310), (uint16_t)(info->height - 24), 170, 24);
+}
+
+void ui_set_memory_stats(video_info_t* info, uint8_t pmm_ready, uint64_t total_pages, uint64_t free_pages) {
+    if (g_runtime_stats.pmm_ready == pmm_ready
+        && g_runtime_stats.pmm_total_pages == total_pages
+        && g_runtime_stats.pmm_free_pages == free_pages) {
+        return;
+    }
+
+    g_runtime_stats.pmm_ready = pmm_ready;
+    g_runtime_stats.pmm_total_pages = total_pages;
+    g_runtime_stats.pmm_free_pages = free_pages;
+
+    ui_mark_dirty(0, (uint16_t)(info->height - 36), info->width, 36);
 }
 
 void ui_set_runtime_stats(video_info_t* info, uint16_t dirty_count, uint64_t heap_used, uint64_t heap_free, uint8_t virtio_active) {

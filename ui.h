@@ -19,6 +19,7 @@ void ui_handle_mouse_move(video_info_t* info, uint16_t x, uint16_t y, uint8_t bu
 void ui_handle_mouse_button(video_info_t* info, uint8_t buttons);
 void ui_set_kernel_health(video_info_t* info, uint8_t idt_ready, uint32_t heartbeat);
 void ui_set_irq_stats(video_info_t* info, uint32_t keyboard_irq, uint32_t mouse_irq);
+void ui_set_memory_stats(video_info_t* info, uint8_t pmm_ready, uint64_t total_pages, uint64_t free_pages);
 void ui_set_runtime_stats(video_info_t* info, uint16_t dirty_count, uint64_t heap_used, uint64_t heap_free, uint8_t virtio_active);
 
 #endif

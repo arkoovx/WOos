@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.14.0
+- Добавлен boot ABI v2: `stage2` теперь собирает BIOS E820 memory map и передаёт её ядру вместе с framebuffer-параметрами.
+- Добавлен модуль `pmm` с базовым stack-based allocator физических страниц 4 КиБ, который резервирует low-memory и диапазон загруженного ядра.
+- В footer UI добавлена диагностика PMM (`PMM READY/WAIT`, total/free pages), а `kernel` публикует эти метрики через новый контракт `ui_set_memory_stats`.
+- Обновлены `VERSION`, UI-баннер и документация до `1.14.0`.
+
 ## 1.13.0
 - В footer UI добавлен минимальный runtime-overlay с диагностикой dirty-rect кадра, heap usage/free и текущего видеорежима (`VIRTIO`/`VBE`).
 - Добавлен новый UI-контракт `ui_set_runtime_stats`, через который ядро публикует runtime-метрики перед очередной отрисовкой.
