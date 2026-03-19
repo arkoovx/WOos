@@ -98,6 +98,8 @@ qemu-system-x86_64 \
 Если в гостевой системе всё «как 1 FPS», чаще всего проблема в медленной эмуляции (TCG без аппаратного ускорения) и/или слишком больших задержках в основном цикле ядра.
 
 ## Структура проекта
+
+### Ключевые исходники ядра
 - `boot.asm` — MBR/первичный загрузчик.
 - `stage2.asm` — второй этап загрузки и старт ядра.
 - `kernel.c` — вход и orchestration базовых подсистем.
@@ -111,11 +113,15 @@ qemu-system-x86_64 \
 - `mouse.c/.h` — polling-драйвер PS/2-мыши и трансляция пакетов в очередь input.
 - `pci.c/.h` — минимальный доступ к PCI config space и поиск устройств.
 - `drivers/virtio_gpu_renderer/virtio_gpu_renderer.c/.h` — renderer-драйвер virtio-gpu с command-oriented draw API, virtqueue-flush dirty-rect и fallback на stage2 framebuffer.
-- `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap.
-- `docs/ARCHITECTURE.md` — зафиксированная архитектура слоёв, init-flow и контрактов подсистем.
-- `docs/MEMORY.md` — roadmap memory stack: переход от PMM к VMM и policy kernel mappings.
-- `docs/DEBUGGING.md` — практическая памятка по типовым boot/runtime-проблемам и безопасным диагностическим режимам.
-- `docs/RELEASES.md` — правила версионирования, подготовки PR и автоматической публикации релизов.
+
+### Как читать документацию по порядку
+- `docs/README.md` — карта документации и рекомендуемый порядок чтения по файлам.
+- `DEVELOPMENT_PLAN.md` — расширенный поэтапный roadmap и статус этапов.
+- `docs/ARCHITECTURE.md` — архитектурный центр проекта: слои, init-flow и контракты.
+- `docs/MEMORY.md` — специализированный roadmap memory stack.
+- `docs/DEBUGGING.md` — практическая памятка по типовым boot/runtime-проблемам.
+- `RELEASE_CHECKLIST.md` — обязательный чеклист перед каждым PR.
+- `docs/RELEASES.md` — навигация по релизному контуру и связанным process-файлам.
 
 ## Процесс разработки
 В репозитории действует правило: **каждый PR = новая версия**.
