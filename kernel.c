@@ -11,6 +11,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "mouse.h"
 #include "kheap.h"
 #include "pmm.h"
+#include "storage.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
 
 typedef enum init_stage {
@@ -80,6 +81,7 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             pmm_init(video);
             kheap_init();
             input_init();
+            storage_init();
             // Heartbeat теперь идёт от аппаратного PIT, а не от числа итераций цикла,
             // поэтому частота UI-обновлений не зависит от скорости CPU/эмулятора.
             timer_init(20u);
@@ -102,6 +104,7 @@ static void dispatch_input_event(video_info_t* video, const input_event_t* event
             ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
             ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
             ui_set_memory_stats(video, pmm_is_ready(), pmm_total_pages(), pmm_free_pages());
+            ui_set_storage_stats(video, storage_is_ready(), storage_last_read_ok(), storage_last_lba(), storage_boot_signature_valid());
             break;
     }
 }
@@ -114,6 +117,7 @@ void kmain(video_info_t* video) {
     ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
     ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
     ui_set_memory_stats(video, pmm_is_ready(), pmm_total_pages(), pmm_free_pages());
+    ui_set_storage_stats(video, storage_is_ready(), storage_last_read_ok(), storage_last_lba(), storage_boot_signature_valid());
     ui_set_runtime_stats(video, ui_last_dirty_count(), kheap_used_bytes(), kheap_free_bytes(), virtio_gpu_renderer_is_active());
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);

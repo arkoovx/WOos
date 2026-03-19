@@ -46,13 +46,17 @@ typedef struct ui_runtime_stats_state {
     uint32_t mouse_irq;
     uint16_t dirty_count;
     uint8_t pmm_ready;
+    uint8_t storage_ready;
+    uint8_t storage_last_read_ok;
+    uint8_t boot_signature_valid;
     uint64_t heap_used;
     uint64_t heap_free;
     uint64_t pmm_total_pages;
     uint64_t pmm_free_pages;
+    uint32_t storage_last_lba;
 } ui_runtime_stats_state_t;
 
-static ui_runtime_stats_state_t g_runtime_stats = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0ull, 0ull, 0ull, 0ull};
+static ui_runtime_stats_state_t g_runtime_stats = {0};
 
 #define PANEL_BTN_X 12u
 #define PANEL_BTN_Y 8u
@@ -108,7 +112,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
 
     fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
     fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
-    fb_draw_text(info, 18, 13, "WOOS 1.17.1", COLOR_TEXT_LIGHT, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.18.0", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
@@ -163,8 +167,14 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
     write_decimal_padded(pmm_text, 11, g_runtime_stats.pmm_total_pages % 100000u, 5);
     write_decimal_padded(pmm_text, 19, g_runtime_stats.pmm_free_pages % 100000u, 5);
 
+    char storage_lba_text[19] = "DISK LBA: 000000";
+    write_decimal_padded(storage_lba_text, 15, g_runtime_stats.storage_last_lba % 1000000u, 6);
+
     const char* video_text = g_runtime_stats.virtio_active ? "VIDEO: VIRTIO" : "VIDEO: VBE";
     const char* pmm_status = g_runtime_stats.pmm_ready ? "PMM READY" : "PMM WAIT";
+    const char* storage_status = g_runtime_stats.storage_ready
+        ? (g_runtime_stats.boot_signature_valid ? "DISK READY SIG OK" : "DISK READY SIG BAD")
+        : (g_runtime_stats.storage_last_read_ok ? "DISK WAIT" : "DISK READ FAIL");
 
     fb_draw_text(info, 16, (uint16_t)(info->height - 32), status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, 16, (uint16_t)(info->height - 20), dirty_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
@@ -174,6 +184,8 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
     fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(info->height - 32), pmm_status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(info->height - 20), irq_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
     fb_draw_text(info, (uint16_t)(info->width - 142), (uint16_t)(info->height - 20), heartbeat_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 16, (uint16_t)(info->height - 44), storage_status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 176, (uint16_t)(info->height - 44), storage_lba_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
 }
 
 static void ui_draw_region(video_info_t* info, const ui_dirty_rect_t* clip) {
@@ -410,7 +422,7 @@ void ui_set_memory_stats(video_info_t* info, uint8_t pmm_ready, uint64_t total_p
     g_runtime_stats.pmm_total_pages = total_pages;
     g_runtime_stats.pmm_free_pages = free_pages;
 
-    ui_mark_dirty(0, (uint16_t)(info->height - 36), info->width, 36);
+    ui_mark_dirty(0, (uint16_t)(info->height - 48), info->width, 48);
 }
 
 void ui_set_runtime_stats(video_info_t* info, uint16_t dirty_count, uint64_t heap_used, uint64_t heap_free, uint8_t virtio_active) {
@@ -426,5 +438,21 @@ void ui_set_runtime_stats(video_info_t* info, uint16_t dirty_count, uint64_t hea
     g_runtime_stats.heap_free = heap_free;
     g_runtime_stats.virtio_active = virtio_active;
 
-    ui_mark_dirty(0, (uint16_t)(info->height - 36), info->width, 36);
+    ui_mark_dirty(0, (uint16_t)(info->height - 48), info->width, 48);
+}
+
+void ui_set_storage_stats(video_info_t* info, uint8_t storage_ready, uint8_t last_read_ok, uint32_t last_lba, uint8_t boot_signature_valid) {
+    if (g_runtime_stats.storage_ready == storage_ready
+        && g_runtime_stats.storage_last_read_ok == last_read_ok
+        && g_runtime_stats.storage_last_lba == last_lba
+        && g_runtime_stats.boot_signature_valid == boot_signature_valid) {
+        return;
+    }
+
+    g_runtime_stats.storage_ready = storage_ready;
+    g_runtime_stats.storage_last_read_ok = last_read_ok;
+    g_runtime_stats.storage_last_lba = last_lba;
+    g_runtime_stats.boot_signature_valid = boot_signature_valid;
+
+    ui_mark_dirty(0, (uint16_t)(info->height - 48), info->width, 48);
 }
