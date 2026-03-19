@@ -93,6 +93,7 @@ void kmain(video_info_t* video) {
     run_stage(video, INIT_UI);
     ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
     ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
+    ui_set_runtime_stats(video, ui_last_dirty_count(), kheap_used_bytes(), kheap_free_bytes(), virtio_gpu_renderer_is_active());
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);
     uint16_t cursor_y = (uint16_t)(video->height / 2);
@@ -120,6 +121,7 @@ void kmain(video_info_t* video) {
             dispatch_input_event(video, &next_event);
         }
 
+        ui_set_runtime_stats(video, ui_last_dirty_count(), kheap_used_bytes(), kheap_free_bytes(), virtio_gpu_renderer_is_active());
         ui_render_dirty(video);
     }
 }
