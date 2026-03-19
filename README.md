@@ -26,7 +26,8 @@
 - Исправлена причина циклической перезагрузки при исключениях: добавлен отдельный IDT-stub для векторов с аппаратным `error code`, чтобы корректно возвращаться через `iretq` без каскада `#GP/#DF`.
 - Добавлен базовый heap-аллокатор ядра (`kheap`) и перевод очереди input-событий на runtime-буфер с fallback на статический путь.
 - Добавлен базовый PMM (`pmm`) с E820 memory map из `stage2`: ядро получает список usable-регионов BIOS и поднимает stack-based allocator физических страниц 4 КиБ.
-- В footer UI добавлен runtime-overlay: dirty-rect count последнего кадра, heap usage/free, PMM total/free pages и активный video-path (`VIRTIO`/`VBE`) для быстрой диагностики подсистем.
+- Добавлен минимальный storage transport (`storage`) на ATA PIO: ядро умеет читать LBA-секторы через единый API и на старте проверяет boot-sector сигнатуру как первый шаг этапа Storage & VFS.
+- В footer UI добавлен runtime-overlay: dirty-rect count последнего кадра, heap usage/free, PMM total/free pages, storage-статус (`DISK READY/SIG`, `DISK LBA`) и активный video-path (`VIRTIO`/`VBE`) для быстрой диагностики подсистем.
 - В `kheap` исправлены расчёт split-блока и гарантия 16-байтного выравнивания payload-указателей.
 - Исправлен bootloader: чтение payload из диска теперь выполняется chunked-подходом (до 127 секторов за INT13 call), что устраняет `Disk error` на части BIOS/QEMU-конфигураций при росте ядра.
 - Уточнён boot-fix: исправлён расчёт следующего LBA при chunked-чтении (исключено чтение «лишних» байтов из структуры состояния), что убирает повторный `Disk error`.
@@ -111,6 +112,7 @@ qemu-system-x86_64 \
 - `kheap.c/.h` — базовый heap-аллокатор ядра для внутренних runtime-структур.
 - `pmm.c/.h` — базовый physical memory manager поверх BIOS E820 memory map.
 - `mouse.c/.h` — polling-драйвер PS/2-мыши и трансляция пакетов в очередь input.
+- `storage.c/.h` — минимальный блочный transport ATA PIO с LBA-read API и boot-sector self-check.
 - `pci.c/.h` — минимальный доступ к PCI config space и поиск устройств.
 - `drivers/virtio_gpu_renderer/virtio_gpu_renderer.c/.h` — renderer-драйвер virtio-gpu с command-oriented draw API, virtqueue-flush dirty-rect и fallback на stage2 framebuffer.
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.18.0
+- Добавлен модуль `storage` с минимальным ATA PIO transport-layer API (`storage_init`, `storage_read_sectors`) для чтения LBA-секторов через единый блочный контракт внутри ядра.
+- В driver-stage ядро теперь выполняет тестовое чтение фиксированного сектора `LBA 0`, проверяет сигнатуру загрузочного сектора `0x55AA` и публикует результат как runtime-диагностику.
+- Footer UI расширен диагностикой storage-path (`DISK READY/SIG`, `DISK LBA`), а `README.md`, `DEVELOPMENT_PLAN.md` и `docs/ARCHITECTURE.md` обновлены под начало этапа D.1 roadmap.
+
 ## 1.17.1
 - Документация перестроена как читаемая иерархия по файлам: добавлен `docs/README.md` с картой чтения и распределением ответственности между `README`, roadmap, architecture, debugging, memory и release-документами.
 - Снижено дублирование в релизной документации: `docs/RELEASES.md` теперь направляет к `RELEASE_CHECKLIST.md`, PR template и GitHub workflows вместо повторения тех же правил в нескольких местах.
