@@ -8,9 +8,11 @@ EXTERN kmain
 %define VBE_SET_LINEAR      0x4000
 %define LONG_MODE_STACK_TOP 0x0009F000
 %define BOCHS_LFB_FALLBACK  0xE0000000
-%define BOOT_INFO_MAGIC     0x31424957 ; 'WIB1' (WoOS Info Block v1)
-%define BOOT_INFO_VERSION   0x0001
-%define BOOT_INFO_SIZE      24
+%define BOOT_INFO_MAGIC     0x31424957 ; 'WIB1' (WoOS Info Block)
+%define BOOT_INFO_VERSION   0x0002
+%define BOOT_INFO_E820_MAX_ENTRIES 32
+%define BOOT_INFO_SIZE      (24 + BOOT_INFO_E820_MAX_ENTRIES * 24)
+%define E820_ENTRY_SIZE     24
 
 SECTION .text.boot
 _start:
@@ -22,6 +24,10 @@ _start:
     mov dword [boot_info + 0], BOOT_INFO_MAGIC
     mov word  [boot_info + 4], BOOT_INFO_VERSION
     mov word  [boot_info + 6], BOOT_INFO_SIZE
+    mov word  [boot_info + 24], 0
+    mov word  [boot_info + 26], BOOT_INFO_E820_MAX_ENTRIES
+
+    call collect_e820_map
 
     mov ax, 0x4F01
     mov cx, VBE_MODE_1024x768x32
@@ -61,6 +67,41 @@ _start:
     or eax, 0x1
     mov cr0, eax
     jmp 0x08:protected_mode_start
+
+collect_e820_map:
+    pushad
+    xor ebx, ebx
+    xor bp, bp
+    mov di, boot_info_memory_map
+.e820_next:
+    mov eax, 0xE820
+    mov edx, 0x534D4150
+    mov ecx, E820_ENTRY_SIZE
+    mov dword [di + 20], 1
+    int 0x15
+    jc .e820_done
+    cmp eax, 0x534D4150
+    jne .e820_done
+
+    cmp ecx, 20
+    jb .skip_entry
+    mov eax, [di + 8]
+    or eax, [di + 12]
+    jz .skip_entry
+
+    inc bp
+    add di, E820_ENTRY_SIZE
+    cmp bp, BOOT_INFO_E820_MAX_ENTRIES
+    jae .e820_done
+
+.skip_entry:
+    test ebx, ebx
+    jnz .e820_next
+
+.e820_done:
+    mov [boot_info + 24], bp
+    popad
+    ret
 
 stage2_fail:
     hlt
@@ -166,6 +207,10 @@ boot_info:
     dw 0
     db 0
     db 0
+    dw 0
+    dw BOOT_INFO_E820_MAX_ENTRIES
+boot_info_memory_map:
+    times BOOT_INFO_E820_MAX_ENTRIES * E820_ENTRY_SIZE db 0
 
 ALIGN 16
 vbe_mode_info:

@@ -10,6 +10,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "timer.h"
 #include "mouse.h"
 #include "kheap.h"
+#include "pmm.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
 
 typedef enum init_stage {
@@ -31,12 +32,29 @@ static void sanitize_boot_info(video_info_t* video) {
     if (video->magic != BOOT_INFO_MAGIC_EXPECTED) {
         video->magic = BOOT_INFO_MAGIC_EXPECTED;
         video->version = BOOT_INFO_VERSION_V1;
-        video->size = (uint16_t)sizeof(video_info_t);
+        video->size = 24u;
+        video->memory_region_count = 0;
+        video->memory_region_capacity = BOOT_INFO_E820_MAX_ENTRIES;
     }
 
-    if (video->version != BOOT_INFO_VERSION_V1 || video->size < (uint16_t)sizeof(video_info_t)) {
+    if (video->version != BOOT_INFO_VERSION_V1 && video->version != BOOT_INFO_VERSION_V2) {
         video->version = BOOT_INFO_VERSION_V1;
-        video->size = (uint16_t)sizeof(video_info_t);
+        video->size = 24u;
+        video->memory_region_count = 0;
+        video->memory_region_capacity = BOOT_INFO_E820_MAX_ENTRIES;
+    }
+
+    if (video->version == BOOT_INFO_VERSION_V2 && video->size < 28u) {
+        video->version = BOOT_INFO_VERSION_V1;
+        video->size = 24u;
+        video->memory_region_count = 0;
+    }
+
+    if (video->version == BOOT_INFO_VERSION_V1) {
+        video->memory_region_count = 0;
+        video->memory_region_capacity = BOOT_INFO_E820_MAX_ENTRIES;
+    } else if (video->memory_region_capacity == 0 || video->memory_region_capacity > BOOT_INFO_E820_MAX_ENTRIES) {
+        video->memory_region_capacity = BOOT_INFO_E820_MAX_ENTRIES;
     }
 
     if (video->framebuffer == 0) {
@@ -59,6 +77,7 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             break;
         case INIT_DRIVERS:
             virtio_gpu_renderer_init(video);
+            pmm_init(video);
             kheap_init();
             input_init();
             // Heartbeat обновляется заметно медленнее кадрового цикла,
@@ -82,6 +101,7 @@ static void dispatch_input_event(video_info_t* video, const input_event_t* event
         case INPUT_EVENT_TIMER_TICK:
             ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
             ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
+            ui_set_memory_stats(video, pmm_is_ready(), pmm_total_pages(), pmm_free_pages());
             break;
     }
 }
@@ -93,6 +113,7 @@ void kmain(video_info_t* video) {
     run_stage(video, INIT_UI);
     ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
     ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
+    ui_set_memory_stats(video, pmm_is_ready(), pmm_total_pages(), pmm_free_pages());
     ui_set_runtime_stats(video, ui_last_dirty_count(), kheap_used_bytes(), kheap_free_bytes(), virtio_gpu_renderer_is_active());
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);
