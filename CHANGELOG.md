@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.17.1
+- Документация перестроена как читаемая иерархия по файлам: добавлен `docs/README.md` с картой чтения и распределением ответственности между `README`, roadmap, architecture, debugging, memory и release-документами.
+- Снижено дублирование в релизной документации: `docs/RELEASES.md` теперь направляет к `RELEASE_CHECKLIST.md`, PR template и GitHub workflows вместо повторения тех же правил в нескольких местах.
+- Уточнены `docs/ARCHITECTURE.md`, `docs/MEMORY.md` и `docs/DEBUGGING.md`: в них добавлены секции «как читать документ» и убраны устаревшие/повторяющиеся пункты, чтобы человеку было проще идти по документации последовательно.
+- Обновлены `README.md`, `VERSION` и UI-баннер до версии `1.17.1`.
+
+## 1.17.0
+- Добавлен `docs/MEMORY.md` с планом миграции `PMM -> VMM -> kernel mapping policy`, чтобы следующий этап memory subsystem шёл по формальному контракту, а не через неявный identity-map baseline.
+- Добавлены `docs/DEBUGGING.md` и `docs/RELEASES.md`: в репозитории зафиксированы типовые boot/runtime-сценарии диагностики, safe fallback-переключатели и релизный процесс `каждый PR = новая версия`.
+- Добавлен `.github/pull_request_template.md`, а roadmap обновлён: закрыты пункты про VMM migration plan, debugging docs, releases docs и PR template.
+- Обновлены `README.md`, `docs/ARCHITECTURE.md`, `VERSION` и UI-баннер до версии `1.17.0`.
+
 ## 1.16.0
 - Модуль `timer` переведён с loop-based псевдотаймера на аппаратный PIT: канал 0 программируется в periodic rate generator mode, а ядро опрашивает latched-счётчик и детектирует прошедшие тики без зависимости от скорости основного цикла.
 - В `kernel` heartbeat теперь инициализируется как аппаратный таймер `20 Hz`, поэтому UI-диагностика обновляется от реального источника времени, а не от числа итераций main loop.
