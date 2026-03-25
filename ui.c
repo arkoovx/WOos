@@ -204,7 +204,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip, cons
         layout->panel_button.h,
         panel_button_color
     );
-    fb_draw_text(info, 18, 13, "WOOS 1.24.0", palette->text_light, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.24.1", palette->text_light, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 166), 13, "THEME:", palette->text_light, palette->panel);
     fb_draw_text(info, (uint16_t)(info->width - 108), 13, theme_name(), panel_button_color, palette->panel);
     fb_draw_text(info, (uint16_t)(info->width - 50), 13, "DEV", palette->text_light, palette->panel);
@@ -516,7 +516,6 @@ void ui_handle_mouse_move(video_info_t* info, uint16_t x, uint16_t y, uint8_t bu
 }
 
 void ui_handle_mouse_button(video_info_t* info, uint8_t buttons) {
-    (void)info;
     uint8_t left_pressed = (uint8_t)(buttons & 0x1u);
     uint8_t next_pressed = (uint8_t)(left_pressed && g_ui_state.panel_hover);
     uint8_t was_pressed = g_ui_state.panel_pressed;
@@ -527,6 +526,9 @@ void ui_handle_mouse_button(video_info_t* info, uint8_t buttons) {
             // Сменяем палитру только по фронту клика, иначе удержание кнопки
             // приводило бы к непрерывному переключению тем в каждом кадре.
             cycle_theme();
+            // Тема влияет на весь desktop (включая "обои"), поэтому локального
+            // dirty-marking панели/footer недостаточно — нужен полный redraw.
+            ui_mark_dirty(0, 0, info->width, info->height);
         }
         ui_mark_dirty(g_layout.panel.x, g_layout.panel.y, g_layout.panel.w, g_layout.panel.h);
         ui_mark_dirty(
