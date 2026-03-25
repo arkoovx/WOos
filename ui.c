@@ -1,16 +1,6 @@
 #include "ui.h"
 #include "fb.h"
 
-#define COLOR_BG_DARK    0x0E1116u
-#define COLOR_BG_LIGHT   0x141A22u
-#define COLOR_PANEL      0x1F2630u
-#define COLOR_ACCENT     0x58A6FFu
-#define COLOR_ACCENT_HOVER 0x79C0FFu
-#define COLOR_ACCENT_PRESSED 0x1F6FEBu
-#define COLOR_WINDOW     0xE6EDF3u
-#define COLOR_BORDER     0x2B3442u
-#define COLOR_TEXT_LIGHT 0xE6EDF3u
-
 #define UI_DIRTY_CAPACITY 16u
 
 static ui_dirty_rect_t g_dirty_queue[UI_DIRTY_CAPACITY];
@@ -19,7 +9,49 @@ static uint16_t g_last_dirty_count = 0;
 
 #define CURSOR_W 10u
 #define CURSOR_H 16u
-#define COLOR_CURSOR 0xFFFFFFu
+
+typedef struct ui_palette {
+    uint32_t bg_dark;
+    uint32_t panel;
+    uint32_t accent;
+    uint32_t accent_hover;
+    uint32_t accent_pressed;
+    uint32_t window;
+    uint32_t border;
+    uint32_t text_light;
+    uint32_t cursor;
+} ui_palette_t;
+
+typedef enum ui_theme_kind {
+    UI_THEME_NIGHT = 0,
+    UI_THEME_PAPER,
+    UI_THEME_COUNT
+} ui_theme_kind_t;
+
+static const ui_palette_t g_palettes[UI_THEME_COUNT] = {
+    [UI_THEME_NIGHT] = {
+        .bg_dark = 0x0E1116u,
+        .panel = 0x1F2630u,
+        .accent = 0x58A6FFu,
+        .accent_hover = 0x79C0FFu,
+        .accent_pressed = 0x1F6FEBu,
+        .window = 0xE6EDF3u,
+        .border = 0x2B3442u,
+        .text_light = 0xE6EDF3u,
+        .cursor = 0xFFFFFFu
+    },
+    [UI_THEME_PAPER] = {
+        .bg_dark = 0xF2EEE6u,
+        .panel = 0xD8CBB7u,
+        .accent = 0xB97A57u,
+        .accent_hover = 0xC89173u,
+        .accent_pressed = 0x8D5E45u,
+        .window = 0xFFF9F0u,
+        .border = 0x8B7C68u,
+        .text_light = 0x2A2014u,
+        .cursor = 0x2A2014u
+    }
+};
 
 typedef struct ui_cursor_state {
     uint16_t x;
@@ -59,6 +91,19 @@ typedef struct ui_runtime_stats_state {
 } ui_runtime_stats_state_t;
 
 static ui_runtime_stats_state_t g_runtime_stats = {0};
+static ui_theme_kind_t g_active_theme = UI_THEME_NIGHT;
+
+static const ui_palette_t* active_palette(void) {
+    return &g_palettes[g_active_theme];
+}
+
+static const char* theme_name(void) {
+    return (g_active_theme == UI_THEME_NIGHT) ? "NIGHT" : "PAPER";
+}
+
+static void cycle_theme(void) {
+    g_active_theme = (ui_theme_kind_t)((g_active_theme + 1) % UI_THEME_COUNT);
+}
 
 static inline uint16_t clamp_u16(uint16_t value, uint16_t max) {
     return (value > max) ? max : value;
@@ -134,21 +179,23 @@ void ui_layout_compute(video_info_t* info, ui_layout_t* layout) {
 }
 
 static void draw_background_band(video_info_t* info, const ui_dirty_rect_t* clip) {
+    const ui_palette_t* palette = active_palette();
     // Однотонный фон: без полос по всей высоте экрана.
-    fb_rect(info, clip->x, clip->y, clip->w, clip->h, COLOR_BG_DARK);
+    fb_rect(info, clip->x, clip->y, clip->w, clip->h, palette->bg_dark);
 }
 
 static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip, const ui_layout_t* layout) {
     (void)clip;
-    uint32_t panel_button_color = COLOR_ACCENT;
+    const ui_palette_t* palette = active_palette();
+    uint32_t panel_button_color = palette->accent;
 
     if (g_ui_state.panel_pressed) {
-        panel_button_color = COLOR_ACCENT_PRESSED;
+        panel_button_color = palette->accent_pressed;
     } else if (g_ui_state.panel_hover) {
-        panel_button_color = COLOR_ACCENT_HOVER;
+        panel_button_color = palette->accent_hover;
     }
 
-    fb_rect(info, layout->panel.x, layout->panel.y, layout->panel.w, layout->panel.h, COLOR_PANEL);
+    fb_rect(info, layout->panel.x, layout->panel.y, layout->panel.w, layout->panel.h, palette->panel);
     fb_rect(
         info,
         layout->panel_button.x,
@@ -157,19 +204,22 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip, cons
         layout->panel_button.h,
         panel_button_color
     );
-    fb_draw_text(info, 18, 13, "WOOS 1.23.0", COLOR_TEXT_LIGHT, panel_button_color);
-    fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
+    fb_draw_text(info, 18, 13, "WOOS 1.24.0", palette->text_light, panel_button_color);
+    fb_draw_text(info, (uint16_t)(info->width - 166), 13, "THEME:", palette->text_light, palette->panel);
+    fb_draw_text(info, (uint16_t)(info->width - 108), 13, theme_name(), panel_button_color, palette->panel);
+    fb_draw_text(info, (uint16_t)(info->width - 50), 13, "DEV", palette->text_light, palette->panel);
 }
 
 static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip, const ui_layout_t* layout) {
     (void)clip;
+    const ui_palette_t* palette = active_palette();
     fb_rect(
         info,
         layout->status_window.x,
         layout->status_window.y,
         layout->status_window.w,
         layout->status_window.h,
-        COLOR_WINDOW
+        palette->window
     );
     fb_frame(
         info,
@@ -178,9 +228,9 @@ static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip, 
         layout->status_window.w,
         layout->status_window.h,
         2,
-        COLOR_BORDER
+        palette->border
     );
-    uint32_t title_color = g_runtime_stats.idt_ready ? COLOR_ACCENT : COLOR_ACCENT_PRESSED;
+    uint32_t title_color = g_runtime_stats.idt_ready ? palette->accent : palette->accent_pressed;
     const char* title = g_runtime_stats.idt_ready ? "STATUS: IDT READY" : "STATUS: IDT BAD";
 
     fb_rect(
@@ -196,7 +246,7 @@ static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip, 
         (uint16_t)(layout->status_window.x + 8),
         (uint16_t)(layout->status_window.y + 7),
         title,
-        COLOR_TEXT_LIGHT,
+        palette->text_light,
         title_color
     );
 }
@@ -210,6 +260,7 @@ static void write_decimal_padded(char* buffer, uint16_t last_index, uint64_t val
 
 static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip, const ui_layout_t* layout) {
     (void)clip;
+    const ui_palette_t* palette = active_palette();
     const char* status = "EVENTS: MOVE CURSOR OVER PANEL";
 
     if (g_ui_state.panel_pressed) {
@@ -252,16 +303,17 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip, const u
         ? (g_runtime_stats.boot_signature_valid ? "DISK READY SIG OK" : "DISK READY SIG BAD")
         : (g_runtime_stats.storage_last_read_ok ? "DISK WAIT" : "DISK READ FAIL");
 
-    fb_draw_text(info, 16, (uint16_t)(layout->footer_runtime_line.y - 8), status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, 16, (uint16_t)(layout->footer_runtime_line.y + 4), dirty_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, 104, (uint16_t)(layout->footer_runtime_line.y + 4), heap_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, 292, (uint16_t)(layout->footer_runtime_line.y + 4), pmm_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, (uint16_t)(info->width - 404), (uint16_t)(layout->footer_runtime_line.y - 8), video_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(layout->footer_runtime_line.y - 8), pmm_status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(layout->footer_runtime_line.y + 4), irq_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, (uint16_t)(info->width - 142), (uint16_t)(layout->footer_runtime_line.y + 4), heartbeat_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, 16, (uint16_t)(layout->footer_status_line.y + 4), storage_status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, 176, (uint16_t)(layout->footer_status_line.y + 4), storage_lba_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 16, (uint16_t)(layout->footer_runtime_line.y - 8), status, palette->text_light, palette->bg_dark);
+    fb_draw_text(info, 16, (uint16_t)(layout->footer_runtime_line.y + 4), dirty_text, palette->text_light, palette->bg_dark);
+    fb_draw_text(info, 104, (uint16_t)(layout->footer_runtime_line.y + 4), heap_text, palette->text_light, palette->bg_dark);
+    fb_draw_text(info, 292, (uint16_t)(layout->footer_runtime_line.y + 4), pmm_text, palette->text_light, palette->bg_dark);
+    fb_draw_text(info, (uint16_t)(info->width - 404), (uint16_t)(layout->footer_runtime_line.y - 8), video_text, palette->text_light, palette->bg_dark);
+    fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(layout->footer_runtime_line.y - 8), pmm_status, palette->text_light, palette->bg_dark);
+    fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(layout->footer_runtime_line.y + 4), irq_text, palette->text_light, palette->bg_dark);
+    fb_draw_text(info, (uint16_t)(info->width - 142), (uint16_t)(layout->footer_runtime_line.y + 4), heartbeat_text, palette->text_light, palette->bg_dark);
+    fb_draw_text(info, 16, (uint16_t)(layout->footer_status_line.y + 4), storage_status, palette->text_light, palette->bg_dark);
+    fb_draw_text(info, 176, (uint16_t)(layout->footer_status_line.y + 4), storage_lba_text, palette->text_light, palette->bg_dark);
+    fb_draw_text(info, (uint16_t)(info->width - 120), (uint16_t)(layout->footer_status_line.y + 4), theme_name(), palette->text_light, palette->bg_dark);
 }
 
 static void ui_draw_region(video_info_t* info, const ui_dirty_rect_t* clip) {
@@ -295,6 +347,7 @@ static void cursor_restore_underlay(video_info_t* info) {
 }
 
 static void cursor_draw(video_info_t* info) {
+    const ui_palette_t* palette = active_palette();
     for (uint16_t py = 0; py < CURSOR_H; py++) {
         uint16_t y = (uint16_t)(g_cursor.y + py);
         if (y >= info->height) {
@@ -315,7 +368,7 @@ static void cursor_draw(video_info_t* info) {
             // Простая L-образная форма курсора без альфа-смешивания.
             uint8_t on = (px == 0) || (py == 0) || (px == py && px < 8);
             if (on) {
-                fb_writepixel(info, x, y, COLOR_CURSOR);
+                fb_writepixel(info, x, y, palette->cursor);
             }
         }
     }
@@ -466,15 +519,27 @@ void ui_handle_mouse_button(video_info_t* info, uint8_t buttons) {
     (void)info;
     uint8_t left_pressed = (uint8_t)(buttons & 0x1u);
     uint8_t next_pressed = (uint8_t)(left_pressed && g_ui_state.panel_hover);
+    uint8_t was_pressed = g_ui_state.panel_pressed;
 
     if (next_pressed != g_ui_state.panel_pressed) {
         g_ui_state.panel_pressed = next_pressed;
+        if (next_pressed && !was_pressed) {
+            // Сменяем палитру только по фронту клика, иначе удержание кнопки
+            // приводило бы к непрерывному переключению тем в каждом кадре.
+            cycle_theme();
+        }
         ui_mark_dirty(g_layout.panel.x, g_layout.panel.y, g_layout.panel.w, g_layout.panel.h);
         ui_mark_dirty(
             g_layout.footer_runtime_line.x,
             g_layout.footer_runtime_line.y,
             g_layout.footer_runtime_line.w,
             g_layout.footer_runtime_line.h
+        );
+        ui_mark_dirty(
+            g_layout.footer_status_line.x,
+            g_layout.footer_status_line.y,
+            g_layout.footer_status_line.w,
+            g_layout.footer_status_line.h
         );
     }
 }
