@@ -12,6 +12,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "kheap.h"
 #include "pmm.h"
 #include "storage.h"
+#include "vfs.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
 
 typedef enum init_stage {
@@ -28,6 +29,8 @@ typedef enum init_stage {
 #ifndef WOOS_ENABLE_HW_INTERRUPTS
 #define WOOS_ENABLE_HW_INTERRUPTS 1
 #endif
+
+static void run_vfs_selftest(void);
 
 static void sanitize_boot_info(video_info_t* video) {
     if (video->magic != BOOT_INFO_MAGIC_EXPECTED) {
@@ -82,6 +85,8 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             kheap_init();
             input_init();
             storage_init();
+            vfs_init();
+            run_vfs_selftest();
             // Heartbeat теперь идёт от аппаратного PIT, а не от числа итераций цикла,
             // поэтому частота UI-обновлений не зависит от скорости CPU/эмулятора.
             timer_init(20u);
@@ -89,6 +94,23 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
         case INIT_UI:
             ui_render_desktop(video);
             break;
+    }
+}
+
+
+static void run_vfs_selftest(void) {
+    int32_t root = vfs_open("/");
+    if (root >= 0) {
+        vfs_dirent_t entry;
+        (void)vfs_readdir(root, &entry);
+        vfs_close(root);
+    }
+
+    int32_t boot_file = vfs_open("/bootsect.bin");
+    if (boot_file >= 0) {
+        uint8_t boot_sig[2];
+        (void)vfs_read(boot_file, boot_sig, sizeof(boot_sig));
+        vfs_close(boot_file);
     }
 }
 
