@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.26.3
+- Из `DEVELOPMENT_PLAN.md` удалён подпункт про обязательную валидацию `APPROVED` review в release workflow: требование больше не считается частью roadmap.
+- Актуализирован `docs/PLAN_AUDIT.md` под новое решение по процессу.
+- Обновлены `VERSION` и UI-баннер до `1.26.3`.
+
+## 1.26.2
+- Проведён аудит `DEVELOPMENT_PLAN.md` против фактической реализации в репозитории.
+- Уточнён статус пункта release workflow про обязательный `APPROVED` review: в плане он переведён в незавершённый, так как в `.github/workflows/release.yml` сейчас нет явной валидации review-статуса.
+- Обновлены `VERSION` и UI-баннер до `1.26.2`.
+
 ## 1.26.1
 - Убрана избыточная process-валидация PR: удалён workflow `.github/workflows/pr-policy.yml`, чтобы оставить прежний простой поток — merge в `main` сразу ведёт к автосборке и автосозданию релиза по `VERSION`/`CHANGELOG`.
 - Упрощены process-документы (`README.md`, `RELEASE_CHECKLIST.md`, `docs/RELEASES.md`) и PR-шаблон: убраны жёсткие требования к naming policy, оставлен базовый сценарий "каждый PR = новая версия".

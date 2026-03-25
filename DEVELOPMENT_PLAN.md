@@ -133,7 +133,6 @@
 ### Автоматизация релизов
 - [x] Build workflow собирает `os.img` и публикует artifact.
 - [x] Release workflow после merge одобренного PR автоматически:
-  - [x] валидирует наличие `APPROVED` review,
   - [x] собирает `os.img` из merge-коммита,
   - [x] формирует notes из `CHANGELOG.md` для версии из `VERSION`,
   - [x] публикует GitHub Release с тегом `vX.Y.Z` и приложенным образом.
