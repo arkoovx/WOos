@@ -13,6 +13,10 @@
 #define VFS_WOFS_MAGIC3 'S'
 #define VFS_WOFS_VERSION 1u
 
+#ifndef WOOS_ENABLE_WOFS
+#define WOOS_ENABLE_WOFS 0
+#endif
+
 typedef struct vfs_wofs_superblock {
     uint8_t magic[4];
     uint16_t version;
@@ -118,6 +122,20 @@ void vfs_init(void) {
     if (!storage_is_ready()) {
         return;
     }
+
+#if !WOOS_ENABLE_WOFS
+    // Безопасный дефолтный профиль: фиксированный read-only файл из boot-sector.
+    // WOFS можно включить отдельно через сборочный флаг WOFS=1 после диагностики.
+    copy_name(g_nodes[1].name, "bootsect.bin", sizeof(g_nodes[1].name));
+    g_nodes[1].type = VFS_NODE_FILE;
+    g_nodes[1].parent = VFS_ROOT_NODE;
+    g_nodes[1].first_lba = 0u;
+    g_nodes[1].size_bytes = STORAGE_SECTOR_SIZE;
+
+    g_node_count = 2u;
+    g_vfs_ready = 1u;
+    return;
+#endif
 
     if (!storage_read_sectors(VFS_WOFS_SUPERBLOCK_LBA, 1u, g_sector_buffer)) {
         return;

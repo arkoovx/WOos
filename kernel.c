@@ -106,11 +106,15 @@ static void run_vfs_selftest(void) {
         vfs_close(root);
     }
 
-    int32_t hello_file = vfs_open("/hello.txt");
-    if (hello_file >= 0) {
-        uint8_t hello_preview[16];
-        (void)vfs_read(hello_file, hello_preview, sizeof(hello_preview));
-        vfs_close(hello_file);
+    int32_t test_file = vfs_open("/hello.txt");
+    if (test_file < 0) {
+        test_file = vfs_open("/bootsect.bin");
+    }
+
+    if (test_file >= 0) {
+        uint8_t preview[16];
+        (void)vfs_read(test_file, preview, sizeof(preview));
+        vfs_close(test_file);
     }
 }
 

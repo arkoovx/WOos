@@ -26,6 +26,8 @@ KERNEL_CPPFLAGS := -DWOOS_ENABLE_HW_INTERRUPTS=$(HW_INTERRUPTS)
 # Размещаем WOFS в самом конце 1.44MB образа (2880 секторов),
 # чтобы гарантированно не пересекаться с растущим kernel payload.
 WOOSFS_LBA ?= 2876
+WOFS ?= 0
+VFS_CPPFLAGS := -DWOOS_ENABLE_WOFS=$(WOFS)
 
 all: os.img
 
@@ -67,7 +69,7 @@ storage.o: storage.c storage.h kernel.h
 
 
 vfs.o: vfs.c vfs.h storage.h kernel.h
-	$(CC) $(CFLAGS) -c vfs.c -o vfs.o
+	$(CC) $(CFLAGS) $(VFS_CPPFLAGS) -c vfs.c -o vfs.o
 
 
 
@@ -92,7 +94,9 @@ os.img: boot.bin kernel.bin woosfs.bin
 	dd if=/dev/zero of=os.img bs=1024 count=1440
 	dd if=boot.bin of=os.img conv=notrunc
 	dd if=kernel.bin of=os.img seek=1 conv=notrunc
+ifneq ($(WOFS),0)
 	dd if=woosfs.bin of=os.img seek=$(WOOSFS_LBA) conv=notrunc
+endif
 
 verify-layout: os.img
 	dd if=os.img bs=1 skip=512 count=32 status=none | od -An -tx1
