@@ -37,6 +37,7 @@ typedef struct ui_interaction_state {
 } ui_interaction_state_t;
 
 static ui_interaction_state_t g_ui_state = {0, 0};
+static ui_layout_t g_layout = {0};
 
 typedef struct ui_runtime_stats_state {
     uint8_t idt_ready;
@@ -58,12 +59,6 @@ typedef struct ui_runtime_stats_state {
 } ui_runtime_stats_state_t;
 
 static ui_runtime_stats_state_t g_runtime_stats = {0};
-
-#define PANEL_BTN_X 12u
-#define PANEL_BTN_Y 8u
-#define PANEL_BTN_W 136u
-#define PANEL_BTN_H 18u
-
 
 static inline uint16_t clamp_u16(uint16_t value, uint16_t max) {
     return (value > max) ? max : value;
@@ -96,12 +91,54 @@ static ui_dirty_rect_t rect_union(const ui_dirty_rect_t* a, const ui_dirty_rect_
     return out;
 }
 
+void ui_layout_compute(video_info_t* info, ui_layout_t* layout) {
+    layout->panel.x = 0;
+    layout->panel.y = 0;
+    layout->panel.w = info->width;
+    layout->panel.h = 34;
+
+    layout->panel_button.x = 12;
+    layout->panel_button.y = 8;
+    layout->panel_button.w = 136;
+    layout->panel_button.h = 18;
+
+    layout->content.x = 0;
+    layout->content.y = layout->panel.h;
+    layout->content.w = info->width;
+    layout->content.h = (info->height > 48) ? (uint16_t)(info->height - 48 - layout->content.y) : 0;
+
+    layout->status_window.w = (uint16_t)(info->width / 3);
+    layout->status_window.h = (uint16_t)(info->height / 3);
+    layout->status_window.x = (uint16_t)(info->width - layout->status_window.w - 24);
+    layout->status_window.y = (uint16_t)(layout->panel.h + 22);
+
+    layout->status_window_title.x = layout->status_window.x;
+    layout->status_window_title.y = layout->status_window.y;
+    layout->status_window_title.w = layout->status_window.w;
+    layout->status_window_title.h = 22;
+
+    layout->footer.x = 0;
+    layout->footer.y = (info->height > 48) ? (uint16_t)(info->height - 48) : 0;
+    layout->footer.w = info->width;
+    layout->footer.h = 48;
+
+    layout->footer_status_line.x = 0;
+    layout->footer_status_line.y = (info->height > 44) ? (uint16_t)(info->height - 44) : 0;
+    layout->footer_status_line.w = info->width;
+    layout->footer_status_line.h = 24;
+
+    layout->footer_runtime_line.x = 0;
+    layout->footer_runtime_line.y = (info->height > 24) ? (uint16_t)(info->height - 24) : 0;
+    layout->footer_runtime_line.w = info->width;
+    layout->footer_runtime_line.h = 24;
+}
+
 static void draw_background_band(video_info_t* info, const ui_dirty_rect_t* clip) {
     // Однотонный фон: без полос по всей высоте экрана.
     fb_rect(info, clip->x, clip->y, clip->w, clip->h, COLOR_BG_DARK);
 }
 
-static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
+static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip, const ui_layout_t* layout) {
     (void)clip;
     uint32_t panel_button_color = COLOR_ACCENT;
 
@@ -111,26 +148,57 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip) {
         panel_button_color = COLOR_ACCENT_HOVER;
     }
 
-    fb_rect(info, 0, 0, info->width, 34, COLOR_PANEL);
-    fb_rect(info, PANEL_BTN_X, PANEL_BTN_Y, PANEL_BTN_W, PANEL_BTN_H, panel_button_color);
-    fb_draw_text(info, 18, 13, "WOOS 1.22.0", COLOR_TEXT_LIGHT, panel_button_color);
+    fb_rect(info, layout->panel.x, layout->panel.y, layout->panel.w, layout->panel.h, COLOR_PANEL);
+    fb_rect(
+        info,
+        layout->panel_button.x,
+        layout->panel_button.y,
+        layout->panel_button.w,
+        layout->panel_button.h,
+        panel_button_color
+    );
+    fb_draw_text(info, 18, 13, "WOOS 1.23.0", COLOR_TEXT_LIGHT, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 80), 13, "DEV BUILD", COLOR_TEXT_LIGHT, COLOR_PANEL);
 }
 
-static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip) {
+static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip, const ui_layout_t* layout) {
     (void)clip;
-    uint16_t win_w = (uint16_t)(info->width / 3);
-    uint16_t win_h = (uint16_t)(info->height / 3);
-    uint16_t win_x = (uint16_t)(info->width - win_w - 24);
-    uint16_t win_y = 56;
-
-    fb_rect(info, win_x, win_y, win_w, win_h, COLOR_WINDOW);
-    fb_frame(info, win_x, win_y, win_w, win_h, 2, COLOR_BORDER);
+    fb_rect(
+        info,
+        layout->status_window.x,
+        layout->status_window.y,
+        layout->status_window.w,
+        layout->status_window.h,
+        COLOR_WINDOW
+    );
+    fb_frame(
+        info,
+        layout->status_window.x,
+        layout->status_window.y,
+        layout->status_window.w,
+        layout->status_window.h,
+        2,
+        COLOR_BORDER
+    );
     uint32_t title_color = g_runtime_stats.idt_ready ? COLOR_ACCENT : COLOR_ACCENT_PRESSED;
     const char* title = g_runtime_stats.idt_ready ? "STATUS: IDT READY" : "STATUS: IDT BAD";
 
-    fb_rect(info, win_x, win_y, win_w, 22, title_color);
-    fb_draw_text(info, (uint16_t)(win_x + 8), (uint16_t)(win_y + 7), title, COLOR_TEXT_LIGHT, title_color);
+    fb_rect(
+        info,
+        layout->status_window_title.x,
+        layout->status_window_title.y,
+        layout->status_window_title.w,
+        layout->status_window_title.h,
+        title_color
+    );
+    fb_draw_text(
+        info,
+        (uint16_t)(layout->status_window.x + 8),
+        (uint16_t)(layout->status_window.y + 7),
+        title,
+        COLOR_TEXT_LIGHT,
+        title_color
+    );
 }
 
 static void write_decimal_padded(char* buffer, uint16_t last_index, uint64_t value, uint16_t digits) {
@@ -140,7 +208,7 @@ static void write_decimal_padded(char* buffer, uint16_t last_index, uint64_t val
     }
 }
 
-static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
+static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip, const ui_layout_t* layout) {
     (void)clip;
     const char* status = "EVENTS: MOVE CURSOR OVER PANEL";
 
@@ -184,23 +252,23 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip) {
         ? (g_runtime_stats.boot_signature_valid ? "DISK READY SIG OK" : "DISK READY SIG BAD")
         : (g_runtime_stats.storage_last_read_ok ? "DISK WAIT" : "DISK READ FAIL");
 
-    fb_draw_text(info, 16, (uint16_t)(info->height - 32), status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, 16, (uint16_t)(info->height - 20), dirty_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, 104, (uint16_t)(info->height - 20), heap_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, 292, (uint16_t)(info->height - 20), pmm_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, (uint16_t)(info->width - 404), (uint16_t)(info->height - 32), video_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(info->height - 32), pmm_status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(info->height - 20), irq_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, (uint16_t)(info->width - 142), (uint16_t)(info->height - 20), heartbeat_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, 16, (uint16_t)(info->height - 44), storage_status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
-    fb_draw_text(info, 176, (uint16_t)(info->height - 44), storage_lba_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 16, (uint16_t)(layout->footer_runtime_line.y - 8), status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 16, (uint16_t)(layout->footer_runtime_line.y + 4), dirty_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 104, (uint16_t)(layout->footer_runtime_line.y + 4), heap_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 292, (uint16_t)(layout->footer_runtime_line.y + 4), pmm_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, (uint16_t)(info->width - 404), (uint16_t)(layout->footer_runtime_line.y - 8), video_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(layout->footer_runtime_line.y - 8), pmm_status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, (uint16_t)(info->width - 300), (uint16_t)(layout->footer_runtime_line.y + 4), irq_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, (uint16_t)(info->width - 142), (uint16_t)(layout->footer_runtime_line.y + 4), heartbeat_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 16, (uint16_t)(layout->footer_status_line.y + 4), storage_status, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
+    fb_draw_text(info, 176, (uint16_t)(layout->footer_status_line.y + 4), storage_lba_text, COLOR_TEXT_LIGHT, COLOR_BG_DARK);
 }
 
 static void ui_draw_region(video_info_t* info, const ui_dirty_rect_t* clip) {
     draw_background_band(info, clip);
-    draw_top_panel(info, clip);
-    draw_status_window(info, clip);
-    draw_footer(info, clip);
+    draw_top_panel(info, clip, &g_layout);
+    draw_status_window(info, clip, &g_layout);
+    draw_footer(info, clip, &g_layout);
 }
 
 static void cursor_restore_underlay(video_info_t* info) {
@@ -365,15 +433,16 @@ uint16_t ui_last_dirty_count(void) {
 }
 
 void ui_render_desktop(video_info_t* info) {
+    ui_layout_compute(info, &g_layout);
     ui_mark_dirty(0, 0, info->width, info->height);
     ui_render_dirty(info);
     ui_set_cursor(info, (uint16_t)(info->width / 2), (uint16_t)(info->height / 2), 0);
 }
 
 static uint8_t point_inside_panel_button(uint16_t x, uint16_t y) {
-    uint16_t end_x = (uint16_t)(PANEL_BTN_X + PANEL_BTN_W);
-    uint16_t end_y = (uint16_t)(PANEL_BTN_Y + PANEL_BTN_H);
-    return (x >= PANEL_BTN_X && x < end_x && y >= PANEL_BTN_Y && y < end_y);
+    uint16_t end_x = (uint16_t)(g_layout.panel_button.x + g_layout.panel_button.w);
+    uint16_t end_y = (uint16_t)(g_layout.panel_button.y + g_layout.panel_button.h);
+    return (x >= g_layout.panel_button.x && x < end_x && y >= g_layout.panel_button.y && y < end_y);
 }
 
 void ui_handle_mouse_move(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons) {
@@ -381,21 +450,32 @@ void ui_handle_mouse_move(video_info_t* info, uint16_t x, uint16_t y, uint8_t bu
 
     if (next_hover != g_ui_state.panel_hover) {
         g_ui_state.panel_hover = next_hover;
-        ui_mark_dirty(0, 0, info->width, 34);
-        ui_mark_dirty(0, (uint16_t)(info->height - 24), info->width, 24);
+        ui_mark_dirty(g_layout.panel.x, g_layout.panel.y, g_layout.panel.w, g_layout.panel.h);
+        ui_mark_dirty(
+            g_layout.footer_runtime_line.x,
+            g_layout.footer_runtime_line.y,
+            g_layout.footer_runtime_line.w,
+            g_layout.footer_runtime_line.h
+        );
     }
 
     ui_set_cursor(info, x, y, buttons);
 }
 
 void ui_handle_mouse_button(video_info_t* info, uint8_t buttons) {
+    (void)info;
     uint8_t left_pressed = (uint8_t)(buttons & 0x1u);
     uint8_t next_pressed = (uint8_t)(left_pressed && g_ui_state.panel_hover);
 
     if (next_pressed != g_ui_state.panel_pressed) {
         g_ui_state.panel_pressed = next_pressed;
-        ui_mark_dirty(0, 0, info->width, 34);
-        ui_mark_dirty(0, (uint16_t)(info->height - 24), info->width, 24);
+        ui_mark_dirty(g_layout.panel.x, g_layout.panel.y, g_layout.panel.w, g_layout.panel.h);
+        ui_mark_dirty(
+            g_layout.footer_runtime_line.x,
+            g_layout.footer_runtime_line.y,
+            g_layout.footer_runtime_line.w,
+            g_layout.footer_runtime_line.h
+        );
     }
 }
 
@@ -407,10 +487,13 @@ void ui_set_kernel_health(video_info_t* info, uint8_t idt_ready, uint32_t heartb
     g_runtime_stats.idt_ready = idt_ready;
     g_runtime_stats.heartbeat = heartbeat;
 
-    uint16_t win_w = (uint16_t)(info->width / 3);
-    uint16_t win_x = (uint16_t)(info->width - win_w - 24);
-    ui_mark_dirty(win_x, 56, win_w, 22);
-    ui_mark_dirty((uint16_t)(info->width - 150), (uint16_t)(info->height - 24), 150, 24);
+    ui_mark_dirty(
+        g_layout.status_window_title.x,
+        g_layout.status_window_title.y,
+        g_layout.status_window_title.w,
+        g_layout.status_window_title.h
+    );
+    ui_mark_dirty((uint16_t)(info->width - 150), g_layout.footer_runtime_line.y, 150, g_layout.footer_runtime_line.h);
 }
 
 void ui_set_irq_stats(video_info_t* info, uint32_t keyboard_irq, uint32_t mouse_irq) {
@@ -421,10 +504,11 @@ void ui_set_irq_stats(video_info_t* info, uint32_t keyboard_irq, uint32_t mouse_
     g_runtime_stats.keyboard_irq = keyboard_irq;
     g_runtime_stats.mouse_irq = mouse_irq;
 
-    ui_mark_dirty((uint16_t)(info->width - 310), (uint16_t)(info->height - 24), 170, 24);
+    ui_mark_dirty((uint16_t)(info->width - 310), g_layout.footer_runtime_line.y, 170, g_layout.footer_runtime_line.h);
 }
 
 void ui_set_memory_stats(video_info_t* info, uint8_t pmm_ready, uint64_t total_pages, uint64_t free_pages) {
+    (void)info;
     if (g_runtime_stats.pmm_ready == pmm_ready
         && g_runtime_stats.pmm_total_pages == total_pages
         && g_runtime_stats.pmm_free_pages == free_pages) {
@@ -435,7 +519,7 @@ void ui_set_memory_stats(video_info_t* info, uint8_t pmm_ready, uint64_t total_p
     g_runtime_stats.pmm_total_pages = total_pages;
     g_runtime_stats.pmm_free_pages = free_pages;
 
-    ui_mark_dirty(0, (uint16_t)(info->height - 48), info->width, 48);
+    ui_mark_dirty(g_layout.footer.x, g_layout.footer.y, g_layout.footer.w, g_layout.footer.h);
 }
 
 void ui_set_runtime_stats(
@@ -446,6 +530,7 @@ void ui_set_runtime_stats(
     uint8_t virtio_detected,
     uint8_t virtio_active
 ) {
+    (void)info;
     if (g_runtime_stats.dirty_count == dirty_count
         && g_runtime_stats.heap_used == heap_used
         && g_runtime_stats.heap_free == heap_free
@@ -460,10 +545,11 @@ void ui_set_runtime_stats(
     g_runtime_stats.virtio_detected = virtio_detected;
     g_runtime_stats.virtio_active = virtio_active;
 
-    ui_mark_dirty(0, (uint16_t)(info->height - 48), info->width, 48);
+    ui_mark_dirty(g_layout.footer.x, g_layout.footer.y, g_layout.footer.w, g_layout.footer.h);
 }
 
 void ui_set_storage_stats(video_info_t* info, uint8_t storage_ready, uint8_t last_read_ok, uint32_t last_lba, uint8_t boot_signature_valid) {
+    (void)info;
     if (g_runtime_stats.storage_ready == storage_ready
         && g_runtime_stats.storage_last_read_ok == last_read_ok
         && g_runtime_stats.storage_last_lba == last_lba
@@ -476,5 +562,5 @@ void ui_set_storage_stats(video_info_t* info, uint8_t storage_ready, uint8_t las
     g_runtime_stats.storage_last_lba = last_lba;
     g_runtime_stats.boot_signature_valid = boot_signature_valid;
 
-    ui_mark_dirty(0, (uint16_t)(info->height - 48), info->width, 48);
+    ui_mark_dirty(g_layout.footer.x, g_layout.footer.y, g_layout.footer.w, g_layout.footer.h);
 }

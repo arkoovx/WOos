@@ -10,6 +10,18 @@ typedef struct ui_dirty_rect {
     uint16_t h;
 } ui_dirty_rect_t;
 
+typedef struct ui_layout {
+    ui_dirty_rect_t panel;
+    ui_dirty_rect_t panel_button;
+    ui_dirty_rect_t content;
+    ui_dirty_rect_t status_window;
+    ui_dirty_rect_t status_window_title;
+    ui_dirty_rect_t footer;
+    ui_dirty_rect_t footer_status_line;
+    ui_dirty_rect_t footer_runtime_line;
+} ui_layout_t;
+
+void ui_layout_compute(video_info_t* info, ui_layout_t* layout);
 void ui_render_desktop(video_info_t* info);
 void ui_mark_dirty(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 void ui_render_dirty(video_info_t* info);
