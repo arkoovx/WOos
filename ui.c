@@ -354,7 +354,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip, cons
         layout->panel_button.h,
         panel_button_color
     );
-    fb_draw_text(info, 18, 13, "WOOS 1.25.2", palette->text_light, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.25.3", palette->text_light, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 166), 13, "THEME:", palette->text_light, palette->panel);
     fb_draw_text(info, (uint16_t)(info->width - 108), 13, theme_name(), panel_button_color, palette->panel);
     fb_draw_text(info, (uint16_t)(info->width - 50), 13, "DEV", palette->text_light, palette->panel);
@@ -608,9 +608,12 @@ void ui_render_dirty(video_info_t* info) {
         return;
     }
 
+    ui_dirty_rect_t present_queue[UI_DIRTY_CAPACITY];
+    uint16_t present_count = 0;
+
     uint8_t should_refresh_cursor = 0;
+    ui_dirty_rect_t cursor_rect = {g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H};
     if (g_cursor.visible) {
-        ui_dirty_rect_t cursor_rect = {g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H};
         // Трогаем курсор только когда dirty-область реально пересекается
         // с его прямоугольником: это убирает лишние restore/draw/present
         // и заметно снижает визуальное мерцание.
@@ -639,13 +642,26 @@ void ui_render_dirty(video_info_t* info) {
         }
 
         ui_draw_region(info, &clip);
-        fb_present_rect(info, clip.x, clip.y, clip.w, clip.h);
+        if (present_count < UI_DIRTY_CAPACITY) {
+            present_queue[present_count++] = clip;
+        }
+    }
+
+    if (g_cursor.visible && should_refresh_cursor) {
+        cursor_draw(info);
+    }
+
+    uint8_t cursor_presented = 0;
+    for (uint16_t i = 0; i < present_count; i++) {
+        fb_present_rect(info, present_queue[i].x, present_queue[i].y, present_queue[i].w, present_queue[i].h);
+        if (g_cursor.visible && should_refresh_cursor && rect_intersects(&present_queue[i], &cursor_rect)) {
+            cursor_presented = 1;
+        }
     }
 
     g_dirty_count = 0;
 
-    if (g_cursor.visible && should_refresh_cursor) {
-        cursor_draw(info);
+    if (g_cursor.visible && should_refresh_cursor && !cursor_presented) {
         fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
     }
 }
