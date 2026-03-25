@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.26.1
+- Убрана избыточная process-валидация PR: удалён workflow `.github/workflows/pr-policy.yml`, чтобы оставить прежний простой поток — merge в `main` сразу ведёт к автосборке и автосозданию релиза по `VERSION`/`CHANGELOG`.
+- Упрощены process-документы (`README.md`, `RELEASE_CHECKLIST.md`, `docs/RELEASES.md`) и PR-шаблон: убраны жёсткие требования к naming policy, оставлен базовый сценарий "каждый PR = новая версия".
+- Из `DEVELOPMENT_PLAN.md` удалены лишние строки про формализацию naming policy/rollback как отдельную цель.
+- Обновлены `VERSION` и UI-баннер до `1.26.1`.
+
+## 1.26.0
+- Добавлен workflow `.github/workflows/pr-policy.yml`, который на каждом PR проверяет branch naming (`<type>/<short-topic>`), Conventional-style заголовок и заполнение секции `Risk / Rollback` без шаблонных заглушек.
+- Обновлены `.github/pull_request_template.md`, `RELEASE_CHECKLIST.md` и `docs/RELEASES.md`: теперь политика именования и требования к риск/rollback формализованы в process-документации.
+- В `DEVELOPMENT_PLAN.md` закрыты оставшиеся process-пункты раздела "Стандарты PR".
+- Обновлены `VERSION` и UI-баннер до `1.26.0`.
+
 ## 1.25.3
 - Исправлено мерцание курсора в статике: публикация dirty-регионов теперь выполняется после повторной отрисовки курсора в backbuffer, а не до неё.
 - В `ui_render_dirty()` добавлена отдельная очередь `present_queue`: сначала перерисовывается сцена и курсор, затем публикуются прямоугольники — это убирает «кадр без курсора».
