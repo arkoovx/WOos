@@ -354,7 +354,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip, cons
         layout->panel_button.h,
         panel_button_color
     );
-    fb_draw_text(info, 18, 13, "WOOS 1.25.0", palette->text_light, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.25.1", palette->text_light, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 166), 13, "THEME:", palette->text_light, palette->panel);
     fb_draw_text(info, (uint16_t)(info->width - 108), 13, theme_name(), panel_button_color, palette->panel);
     fb_draw_text(info, (uint16_t)(info->width - 50), 13, "DEV", palette->text_light, palette->panel);
@@ -528,9 +528,7 @@ static void cursor_draw(video_info_t* info) {
     g_cursor.visible = 1;
 }
 
-static void present_cursor_delta(video_info_t* info, uint16_t old_x, uint16_t old_y, uint8_t had_visible) {
-    (void)info;
-
+static void mark_cursor_delta_dirty(uint16_t old_x, uint16_t old_y, uint8_t had_visible) {
     if (!had_visible) {
         ui_mark_dirty(g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
         return;
@@ -539,9 +537,9 @@ static void present_cursor_delta(video_info_t* info, uint16_t old_x, uint16_t ol
     ui_dirty_rect_t old_rect = {old_x, old_y, CURSOR_W, CURSOR_H};
     ui_dirty_rect_t new_rect = {g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H};
     ui_dirty_rect_t union_rect = rect_union(&old_rect, &new_rect);
-    // Для virtio-path немедленный sync flush на каждое движение курсора заметно
-    // увеличивает latency. Вместо этого объединяем старую/новую область и
-    // публикуем её штатно через ближайший ui_render_dirty() кадр.
+    // Не рисуем курсор прямо в input-path: только помечаем dirty-область.
+    // Реальная отрисовка идёт в ui_render_dirty(), чтобы избежать мерцания
+    // из-за двойного restore/draw в пределах одного кадра.
     ui_mark_dirty(union_rect.x, union_rect.y, union_rect.w, union_rect.h);
 }
 
@@ -561,14 +559,15 @@ void ui_set_cursor(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons) 
     uint16_t old_y = g_cursor.y;
     uint8_t had_visible = g_cursor.visible;
 
-    cursor_restore_underlay(info);
+    if (had_visible && g_cursor.x == x && g_cursor.y == y && g_cursor.buttons == buttons) {
+        return;
+    }
+
     g_cursor.x = x;
     g_cursor.y = y;
     g_cursor.buttons = buttons;
-    cursor_draw(info);
-    // Публикуем старую и новую область курсора одним прямоугольником,
-    // чтобы не было «мигания» из-за двух последовательных flush-операций.
-    present_cursor_delta(info, old_x, old_y, had_visible);
+    g_cursor.visible = 1;
+    mark_cursor_delta_dirty(old_x, old_y, had_visible);
 }
 
 void ui_mark_dirty(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
@@ -643,6 +642,7 @@ void ui_render_desktop(video_info_t* info) {
     ui_mark_dirty(0, 0, info->width, info->height);
     ui_render_dirty(info);
     ui_set_cursor(info, (uint16_t)(info->width / 2), (uint16_t)(info->height / 2), 0);
+    ui_render_dirty(info);
 }
 
 static uint8_t point_inside_panel_button(uint16_t x, uint16_t y) {
