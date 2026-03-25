@@ -6,15 +6,11 @@
 #define VFS_MAX_HANDLES 8u
 #define VFS_ROOT_NODE 0u
 #define VFS_SECTOR_BUFFER_SIZE STORAGE_SECTOR_SIZE
-#ifndef WOOSFS_SUPERBLOCK_LBA
-#define WOOSFS_SUPERBLOCK_LBA 1024u
-#endif
-#define VFS_WOFS_SUPERBLOCK_LBA WOOSFS_SUPERBLOCK_LBA
-#define VFS_WOFS_MAGIC0 'W'
-#define VFS_WOFS_MAGIC1 'O'
-#define VFS_WOFS_MAGIC2 'F'
-#define VFS_WOFS_MAGIC3 'S'
+#define VFS_WOFS_MAGIC_U32 0x53464F57u /* "WOFS" little-endian */
 #define VFS_WOFS_VERSION 1u
+#define VFS_WOFS_MAX_ENTRY_COUNT 1024u
+#define VFS_KERNEL_LOAD_ADDR 0x8000u
+#define VFS_BOOT_SECTORS 1u
 
 #ifndef WOOS_ENABLE_WOFS
 #define WOOS_ENABLE_WOFS 1
@@ -59,6 +55,9 @@ static vfs_node_t g_nodes[VFS_MAX_NODES];
 static uint8_t g_node_count = 0u;
 static vfs_handle_t g_handles[VFS_MAX_HANDLES];
 static uint8_t g_sector_buffer[VFS_SECTOR_BUFFER_SIZE];
+static uint32_t g_wofs_start_lba = VFS_BOOT_SECTORS;
+
+extern uint8_t __kernel_end;
 
 static uint8_t str_equals(const char* a, const char* b) {
     if (a == 0 || b == 0) {
@@ -93,6 +92,23 @@ static uint32_t min_u32(uint32_t a, uint32_t b) {
     return a < b ? a : b;
 }
 
+static uint32_t read_magic_u32(const uint8_t magic[4]) {
+    return (uint32_t)magic[0] | ((uint32_t)magic[1] << 8u) | ((uint32_t)magic[2] << 16u) | ((uint32_t)magic[3] << 24u);
+}
+
+static void copy_dirent_name(char* dst, const char src[24], uint32_t capacity) {
+    if (dst == 0 || src == 0 || capacity == 0u) {
+        return;
+    }
+
+    uint32_t i = 0u;
+    const uint32_t src_capacity = 24u;
+    for (; i + 1u < capacity && i < src_capacity && src[i] != '\0'; i++) {
+        dst[i] = src[i];
+    }
+    dst[i] = '\0';
+}
+
 static int32_t allocate_handle(uint8_t node_index) {
     for (uint8_t i = 0u; i < VFS_MAX_HANDLES; i++) {
         if (!g_handles[i].in_use) {
@@ -117,19 +133,17 @@ static void try_mount_wofs(void) {
     }
     g_wofs_mount_attempted = 1u;
 
-    if (!storage_read_sectors(VFS_WOFS_SUPERBLOCK_LBA, 1u, g_sector_buffer)) {
+    if (!storage_read_sectors(g_wofs_start_lba, 1u, g_sector_buffer)) {
         return;
     }
 
     const vfs_wofs_superblock_t* sb = (const vfs_wofs_superblock_t*)g_sector_buffer;
-    if (sb->magic[0] != VFS_WOFS_MAGIC0 || sb->magic[1] != VFS_WOFS_MAGIC1
-        || sb->magic[2] != VFS_WOFS_MAGIC2 || sb->magic[3] != VFS_WOFS_MAGIC3
-        || sb->version != VFS_WOFS_VERSION || sb->entry_count == 0u
-        || sb->entry_count > (VFS_MAX_NODES - 1u)) {
+    if (read_magic_u32(sb->magic) != VFS_WOFS_MAGIC_U32 || sb->version != VFS_WOFS_VERSION || sb->entry_count == 0u
+        || sb->entry_count > (VFS_MAX_NODES - 1u) || sb->entry_count > VFS_WOFS_MAX_ENTRY_COUNT) {
         return;
     }
 
-    if (!storage_read_sectors(sb->dir_lba, 1u, g_sector_buffer)) {
+    if (!storage_read_sectors(g_wofs_start_lba + sb->dir_lba, 1u, g_sector_buffer)) {
         return;
     }
 
@@ -141,7 +155,7 @@ static void try_mount_wofs(void) {
         }
 
         vfs_node_t* node = &g_nodes[g_node_count];
-        copy_name(node->name, entry->name, sizeof(node->name));
+        copy_dirent_name(node->name, entry->name, sizeof(node->name));
         node->type = VFS_NODE_FILE;
         node->parent = VFS_ROOT_NODE;
         node->first_lba = entry->first_lba;
@@ -154,6 +168,7 @@ void vfs_init(void) {
     g_vfs_ready = 0u;
     g_wofs_mount_attempted = 0u;
     g_node_count = 0u;
+    g_wofs_start_lba = VFS_BOOT_SECTORS;
 
     for (uint8_t i = 0u; i < VFS_MAX_HANDLES; i++) {
         g_handles[i].in_use = 0u;
@@ -169,6 +184,13 @@ void vfs_init(void) {
 
     if (!storage_is_ready()) {
         return;
+    }
+
+    uint64_t kernel_end = (uint64_t)&__kernel_end;
+    if (kernel_end > VFS_KERNEL_LOAD_ADDR) {
+        uint32_t kernel_size = (uint32_t)(kernel_end - VFS_KERNEL_LOAD_ADDR);
+        uint32_t kernel_sectors = (kernel_size + STORAGE_SECTOR_SIZE - 1u) / STORAGE_SECTOR_SIZE;
+        g_wofs_start_lba = VFS_BOOT_SECTORS + kernel_sectors;
     }
 
 #if !WOOS_ENABLE_WOFS
@@ -242,7 +264,7 @@ uint32_t vfs_read(int32_t handle, void* buffer, uint32_t bytes) {
     while (copied < to_read) {
         uint32_t absolute_offset = h->cursor + copied;
         uint32_t sector_offset = absolute_offset % STORAGE_SECTOR_SIZE;
-        uint32_t lba = node->first_lba + (absolute_offset / STORAGE_SECTOR_SIZE);
+        uint32_t lba = g_wofs_start_lba + node->first_lba + (absolute_offset / STORAGE_SECTOR_SIZE);
 
         if (!storage_read_sectors(lba, 1u, g_sector_buffer)) {
             break;
