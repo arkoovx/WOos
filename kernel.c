@@ -30,6 +30,8 @@ typedef enum init_stage {
 #define WOOS_ENABLE_HW_INTERRUPTS 1
 #endif
 
+static uint8_t g_vfs_probe_done = 0u;
+
 static void sanitize_boot_info(video_info_t* video) {
     if (video->magic != BOOT_INFO_MAGIC_EXPECTED) {
         video->magic = BOOT_INFO_MAGIC_EXPECTED;
@@ -126,6 +128,28 @@ static void refresh_runtime_stats(video_info_t* video) {
     );
 }
 
+static void run_deferred_vfs_probe(void) {
+    if (g_vfs_probe_done || timer_ticks() < 20u) {
+        return;
+    }
+
+    g_vfs_probe_done = 1u;
+
+    int32_t root = vfs_open("/");
+    if (root >= 0) {
+        vfs_dirent_t entry;
+        (void)vfs_readdir(root, &entry);
+        vfs_close(root);
+    }
+
+    int32_t hello = vfs_open("/hello.txt");
+    if (hello >= 0) {
+        uint8_t preview[16];
+        (void)vfs_read(hello, preview, sizeof(preview));
+        vfs_close(hello);
+    }
+}
+
 void kmain(video_info_t* video) {
     run_stage(video, INIT_EARLY);
     run_stage(video, INIT_PLATFORM);
@@ -163,6 +187,7 @@ void kmain(video_info_t* video) {
             dispatch_input_event(video, &next_event);
         }
 
+        run_deferred_vfs_probe();
         refresh_runtime_stats(video);
         ui_render_dirty(video);
     }

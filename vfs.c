@@ -198,8 +198,6 @@ int32_t vfs_open(const char* path) {
         return -1;
     }
 
-    try_mount_wofs();
-
     if (str_equals(path, "/")) {
         return allocate_handle(VFS_ROOT_NODE);
     }
@@ -207,6 +205,10 @@ int32_t vfs_open(const char* path) {
     if (path[0] == '/' && path[1] != '\0') {
         path++;
     }
+
+    // Ленивый mount WOFS нужен только для доступа к файловым нодам.
+    // Операции с корнем не должны автоматически дёргать disk-read.
+    try_mount_wofs();
 
     for (uint8_t node = 0u; node < g_node_count; node++) {
         if (g_nodes[node].parent == VFS_ROOT_NODE && str_equals(g_nodes[node].name, path)) {
@@ -262,8 +264,6 @@ int32_t vfs_readdir(int32_t handle, vfs_dirent_t* out_entry) {
     if (!g_vfs_ready || out_entry == 0 || handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) {
         return -1;
     }
-
-    try_mount_wofs();
 
     vfs_handle_t* h = &g_handles[handle];
     if (!h->in_use) {
