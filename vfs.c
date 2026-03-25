@@ -6,7 +6,10 @@
 #define VFS_MAX_HANDLES 8u
 #define VFS_ROOT_NODE 0u
 #define VFS_SECTOR_BUFFER_SIZE STORAGE_SECTOR_SIZE
-#define VFS_WOFS_SUPERBLOCK_LBA 2876u
+#ifndef WOOSFS_SUPERBLOCK_LBA
+#define WOOSFS_SUPERBLOCK_LBA 1024u
+#endif
+#define VFS_WOFS_SUPERBLOCK_LBA WOOSFS_SUPERBLOCK_LBA
 #define VFS_WOFS_MAGIC0 'W'
 #define VFS_WOFS_MAGIC1 'O'
 #define VFS_WOFS_MAGIC2 'F'
@@ -14,7 +17,7 @@
 #define VFS_WOFS_VERSION 1u
 
 #ifndef WOOS_ENABLE_WOFS
-#define WOOS_ENABLE_WOFS 0
+#define WOOS_ENABLE_WOFS 1
 #endif
 
 typedef struct vfs_wofs_superblock {

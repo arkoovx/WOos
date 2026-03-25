@@ -23,11 +23,11 @@ RENDERER_CPPFLAGS := -DWOOS_ENABLE_VIRTIO_GPU=$(VIRTIO_GPU)
 # стабильности boot (polling-путь уже покрывает mouse/timer).
 HW_INTERRUPTS ?= 1
 KERNEL_CPPFLAGS := -DWOOS_ENABLE_HW_INTERRUPTS=$(HW_INTERRUPTS)
-# Размещаем WOFS в самом конце 1.44MB образа (2880 секторов),
-# чтобы гарантированно не пересекаться с растущим kernel payload.
-WOOSFS_LBA ?= 2876
-WOFS ?= 0
-VFS_CPPFLAGS := -DWOOS_ENABLE_WOFS=$(WOFS)
+# Базовый сектор WOFS держим в середине образа, а пересечение
+# с kernel payload дополнительно валидируем в os.img-таргете.
+WOOSFS_LBA ?= 1024
+WOFS ?= 1
+VFS_CPPFLAGS := -DWOOS_ENABLE_WOFS=$(WOFS) -DWOOSFS_SUPERBLOCK_LBA=$(WOOSFS_LBA)
 
 all: os.img
 
@@ -95,6 +95,7 @@ os.img: boot.bin kernel.bin woosfs.bin
 	dd if=boot.bin of=os.img conv=notrunc
 	dd if=kernel.bin of=os.img seek=1 conv=notrunc
 ifneq ($(WOFS),0)
+	test $$(( $$(stat -c%s kernel.bin) / 512 )) -lt $(WOOSFS_LBA)
 	dd if=woosfs.bin of=os.img seek=$(WOOSFS_LBA) conv=notrunc
 endif
 
