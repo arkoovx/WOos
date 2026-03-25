@@ -21,7 +21,7 @@ WoOS развивается по слоистой модели:
    - Определяет init-flow.
    - Оркестрирует запуск платформенных и runtime-подсистем.
    - Содержит главный цикл обработки событий.
-3. **Platform / Hardware Abstraction** — `fb`, `idt`, `timer`, `mouse`, `pci`, `pmm`, `storage`.
+3. **Platform / Hardware Abstraction** — `fb`, `idt`, `timer`, `mouse`, `pci`, `pmm`, `storage`, `vfs`.
    - Даёт ядру минимально безопасный доступ к видео, IRQ, аппаратному PIT-таймеру, input и физической памяти.
 4. **Drivers** — `drivers/virtio_gpu_renderer` и будущие драйверы устройств.
    - Расширяют базовые платформенные сервисы.
@@ -58,7 +58,7 @@ WoOS развивается по слоистой модели:
 - код этого этапа не должен зависеть от `ui`.
 
 ### Stage `drivers`
-Файлы: `drivers/virtio_gpu_renderer`, `pmm`, `kheap`, `input`, `timer`, `storage`
+Файлы: `drivers/virtio_gpu_renderer`, `pmm`, `kheap`, `input`, `timer`, `storage`, `vfs`
 
 Назначение:
 - инициализация ускоренного видео-path (`virtio-gpu`) с fallback на software framebuffer;
@@ -66,7 +66,8 @@ WoOS развивается по слоистой модели:
 - запуск heap allocator;
 - инициализация input queue;
 - запуск heartbeat-таймера;
-- инициализация storage transport и self-check чтения фиксированного сектора.
+- инициализация storage transport и self-check чтения фиксированного сектора;
+- инициализация VFS skeleton с унифицированным read-only API (`open/read/close/readdir`).
 
 Правила:
 - все runtime-структуры, требующие динамической памяти, должны подниматься только после `kheap_init`;
@@ -170,6 +171,7 @@ UI получает только абстракции:
 
 ### Storage
 - `storage.c/.h`
+- `vfs.c/.h`
 
 ### UI
 - `ui.c/.h`
@@ -191,10 +193,10 @@ UI получает только абстракции:
 
 ## 6. Ограничения текущего baseline
 
-На момент версии `1.18.0` архитектура всё ещё имеет сознательные ограничения:
+На момент версии `1.19.0` архитектура всё ещё имеет сознательные ограничения:
 - heartbeat уже использует аппаратный PIT, но пока остаётся polling-based, а не IRQ-driven;
 - полноценный VMM отсутствует;
-- есть только transport-layer чтения секторов и boot-sector self-check, полноценный storage stack/VFS ещё не реализованы;
+- VFS пока минимальный и read-only (фиксированный каталог + тестовый файл), полноценная файловая система поверх него ещё не реализована;
 - UI пока остаётся монолитным и не содержит window manager.
 
 Эти ограничения допустимы, пока новые изменения не нарушают описанные выше контракты.
