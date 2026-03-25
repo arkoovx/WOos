@@ -23,8 +23,16 @@ RENDERER_CPPFLAGS := -DWOOS_ENABLE_VIRTIO_GPU=$(VIRTIO_GPU)
 # стабильности boot (polling-путь уже покрывает mouse/timer).
 HW_INTERRUPTS ?= 1
 KERNEL_CPPFLAGS := -DWOOS_ENABLE_HW_INTERRUPTS=$(HW_INTERRUPTS)
+# Базовый сектор WOFS держим в середине образа, а пересечение
+# с kernel payload дополнительно валидируем в os.img-таргете.
+WOOSFS_LBA ?= 1024
+WOFS ?= 1
+VFS_CPPFLAGS := -DWOOS_ENABLE_WOFS=$(WOFS) -DWOOSFS_SUPERBLOCK_LBA=$(WOOSFS_LBA)
 
 all: os.img
+
+woosfs.bin: tools/build_woosfs.py
+	python3 tools/build_woosfs.py --base-lba $(WOOSFS_LBA)
 
 boot.bin: kernel.bin boot.asm
 	$(NASM) -f bin -DKERNEL_SECTORS=$(shell expr $$(stat -c%s kernel.bin) / 512) boot.asm -o boot.bin
@@ -61,7 +69,7 @@ storage.o: storage.c storage.h kernel.h
 
 
 vfs.o: vfs.c vfs.h storage.h kernel.h
-	$(CC) $(CFLAGS) -c vfs.c -o vfs.o
+	$(CC) $(CFLAGS) $(VFS_CPPFLAGS) -c vfs.c -o vfs.o
 
 
 
@@ -82,10 +90,14 @@ kernel.bin: kernel.elf
 	$(OBJCOPY) -O binary kernel.elf kernel.bin
 	truncate -s %512 kernel.bin
 
-os.img: boot.bin kernel.bin
+os.img: boot.bin kernel.bin woosfs.bin
 	dd if=/dev/zero of=os.img bs=1024 count=1440
 	dd if=boot.bin of=os.img conv=notrunc
 	dd if=kernel.bin of=os.img seek=1 conv=notrunc
+ifneq ($(WOFS),0)
+	test $$(( $$(stat -c%s kernel.bin) / 512 )) -lt $(WOOSFS_LBA)
+	dd if=woosfs.bin of=os.img seek=$(WOOSFS_LBA) conv=notrunc
+endif
 
 verify-layout: os.img
 	dd if=os.img bs=1 skip=512 count=32 status=none | od -An -tx1

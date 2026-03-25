@@ -30,7 +30,7 @@ typedef enum init_stage {
 #define WOOS_ENABLE_HW_INTERRUPTS 1
 #endif
 
-static void run_vfs_selftest(void);
+static uint8_t g_vfs_probe_done = 0u;
 
 static void sanitize_boot_info(video_info_t* video) {
     if (video->magic != BOOT_INFO_MAGIC_EXPECTED) {
@@ -86,7 +86,8 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             input_init();
             storage_init();
             vfs_init();
-            run_vfs_selftest();
+            // WOFS и VFS проверяются по запросу (lazy-mount path),
+            // чтобы не утяжелять ранний boot возможными disk-read пиками.
             // Heartbeat теперь идёт от аппаратного PIT, а не от числа итераций цикла,
             // поэтому частота UI-обновлений не зависит от скорости CPU/эмулятора.
             timer_init(20u);
@@ -97,22 +98,6 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
     }
 }
 
-
-static void run_vfs_selftest(void) {
-    int32_t root = vfs_open("/");
-    if (root >= 0) {
-        vfs_dirent_t entry;
-        (void)vfs_readdir(root, &entry);
-        vfs_close(root);
-    }
-
-    int32_t boot_file = vfs_open("/bootsect.bin");
-    if (boot_file >= 0) {
-        uint8_t boot_sig[2];
-        (void)vfs_read(boot_file, boot_sig, sizeof(boot_sig));
-        vfs_close(boot_file);
-    }
-}
 
 static void dispatch_input_event(video_info_t* video, const input_event_t* event) {
     switch (event->type) {
@@ -141,6 +126,28 @@ static void refresh_runtime_stats(video_info_t* video) {
         renderer->detected,
         renderer->active
     );
+}
+
+static void run_deferred_vfs_probe(void) {
+    if (g_vfs_probe_done || timer_ticks() < 20u) {
+        return;
+    }
+
+    g_vfs_probe_done = 1u;
+
+    int32_t root = vfs_open("/");
+    if (root >= 0) {
+        vfs_dirent_t entry;
+        (void)vfs_readdir(root, &entry);
+        vfs_close(root);
+    }
+
+    int32_t hello = vfs_open("/hello.txt");
+    if (hello >= 0) {
+        uint8_t preview[16];
+        (void)vfs_read(hello, preview, sizeof(preview));
+        vfs_close(hello);
+    }
 }
 
 void kmain(video_info_t* video) {
@@ -180,6 +187,7 @@ void kmain(video_info_t* video) {
             dispatch_input_event(video, &next_event);
         }
 
+        run_deferred_vfs_probe();
         refresh_runtime_stats(video);
         ui_render_dirty(video);
     }
