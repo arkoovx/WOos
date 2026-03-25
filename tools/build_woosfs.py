@@ -12,15 +12,22 @@ files = [
 ]
 
 parser = argparse.ArgumentParser(description="Build minimal WOFS image")
-parser.add_argument("--base-lba", type=int, default=1024, help="LBA where superblock will be placed in os.img")
+parser.add_argument(
+    "--base-lba",
+    type=int,
+    default=0,
+    help="Reserved for compatibility. WOFS image always uses relative LBA addressing.",
+)
 args = parser.parse_args()
 
-if args.base_lba < 2:
-    raise ValueError("base-lba must be >= 2")
-if args.base_lba > 2876:
-    raise ValueError("base-lba must be <= 2876 for 1.44MB image")
+# В образе WOFS LBA всегда относительные:
+#   0 = superblock
+#   1 = directory sector
+#   2.. = file data
+if args.base_lba != 0:
+    print("warning: --base-lba ignored, WOFS now stores relative LBAs only")
 
-superblock_lba = args.base_lba
+superblock_lba = 0
 dir_lba = superblock_lba + 1
 data_lba = dir_lba + 1
 
@@ -37,7 +44,7 @@ for index, (name, payload) in enumerate(files):
     if len(name.encode("ascii")) > 23:
         raise ValueError(f"filename too long: {name}")
 
-    # Выравниваем каждый файл до целого числа секторов.
+    # Выравниваем каждый файл до границы сектора, иначе LBA сломаются.
     sectors = (len(payload) + SECTOR_SIZE - 1) // SECTOR_SIZE
     offset = index * 32
     name_buf = name.encode("ascii") + b"\x00"
@@ -45,8 +52,9 @@ for index, (name, payload) in enumerate(files):
     dir_sector[offset : offset + 24] = name_buf
     struct.pack_into("<II", dir_sector, offset + 24, current_lba, len(payload))
 
-    padded = payload.ljust(sectors * SECTOR_SIZE, b"\x00")
-    data.extend(padded)
+    data.extend(payload)
+    padding = (SECTOR_SIZE - (len(payload) % SECTOR_SIZE)) % SECTOR_SIZE
+    data.extend(b"\x00" * padding)
     current_lba += sectors
 
 with open("woosfs.bin", "wb") as f:
