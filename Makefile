@@ -23,11 +23,12 @@ RENDERER_CPPFLAGS := -DWOOS_ENABLE_VIRTIO_GPU=$(VIRTIO_GPU)
 # стабильности boot (polling-путь уже покрывает mouse/timer).
 HW_INTERRUPTS ?= 1
 KERNEL_CPPFLAGS := -DWOOS_ENABLE_HW_INTERRUPTS=$(HW_INTERRUPTS)
+WOOSFS_LBA ?= 2048
 
 all: os.img
 
 woosfs.bin: tools/build_woosfs.py
-	python3 tools/build_woosfs.py
+	python3 tools/build_woosfs.py --base-lba $(WOOSFS_LBA)
 
 boot.bin: kernel.bin boot.asm
 	$(NASM) -f bin -DKERNEL_SECTORS=$(shell expr $$(stat -c%s kernel.bin) / 512) boot.asm -o boot.bin
@@ -89,7 +90,7 @@ os.img: boot.bin kernel.bin woosfs.bin
 	dd if=/dev/zero of=os.img bs=1024 count=1440
 	dd if=boot.bin of=os.img conv=notrunc
 	dd if=kernel.bin of=os.img seek=1 conv=notrunc
-	dd if=woosfs.bin of=os.img seek=128 conv=notrunc
+	dd if=woosfs.bin of=os.img seek=$(WOOSFS_LBA) conv=notrunc
 
 verify-layout: os.img
 	dd if=os.img bs=1 skip=512 count=32 status=none | od -An -tx1

@@ -1,26 +1,35 @@
 #!/usr/bin/env python3
+import argparse
 import struct
 
 SECTOR_SIZE = 512
 MAGIC = b"WOFS"
 VERSION = 1
-SUPERBLOCK_LBA = 128
-DIR_LBA = SUPERBLOCK_LBA + 1
-DATA_LBA = DIR_LBA + 1
 
 files = [
     ("hello.txt", b"Hello from WoOS VFS!\n"),
     ("readme.txt", b"WoOS minimal read-only filesystem image.\n"),
 ]
 
+parser = argparse.ArgumentParser(description="Build minimal WOFS image")
+parser.add_argument("--base-lba", type=int, default=2048, help="LBA where superblock will be placed in os.img")
+args = parser.parse_args()
+
+if args.base_lba < 2:
+    raise ValueError("base-lba must be >= 2")
+
+superblock_lba = args.base_lba
+dir_lba = superblock_lba + 1
+data_lba = dir_lba + 1
+
 # superblock: magic[4], version(u16), entry_count(u16), dir_lba(u32)
 superblock = bytearray(SECTOR_SIZE)
-struct.pack_into("<4sHHI", superblock, 0, MAGIC, VERSION, len(files), DIR_LBA)
+struct.pack_into("<4sHHI", superblock, 0, MAGIC, VERSION, len(files), dir_lba)
 
 # dir entries: name[24], first_lba(u32), size_bytes(u32)
 dir_sector = bytearray(SECTOR_SIZE)
 data = bytearray()
-current_lba = DATA_LBA
+current_lba = data_lba
 
 for index, (name, payload) in enumerate(files):
     if len(name.encode("ascii")) > 23:
