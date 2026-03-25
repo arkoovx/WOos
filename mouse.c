@@ -11,6 +11,7 @@
 #define PS2_STATUS_AUX_DATA    0x20u
 
 #define MOUSE_PACKET_SIZE 3u
+#define MOUSE_POLL_MAX_BYTES 64u
 
 typedef struct mouse_state {
     uint16_t x;
@@ -206,7 +207,9 @@ void mouse_poll(void) {
         return;
     }
 
-    for (uint8_t i = 0; i < 8u; i++) {
+    // Вычитываем больше байтов за одну итерацию цикла ядра, чтобы не терять
+    // PS/2-пакеты при быстрых движениях мыши на стороне хоста/QEMU.
+    for (uint8_t i = 0; i < MOUSE_POLL_MAX_BYTES; i++) {
         uint8_t status = inb(PS2_STATUS_PORT);
         if ((status & PS2_STATUS_OUTPUT_FULL) == 0u) {
             return;
