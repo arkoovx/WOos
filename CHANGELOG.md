@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.22.0
+- В `vfs` добавлен упрощённый ACL-like каркас: для нод введены owner/group/other права и текущая identity (`uid/gid`) с отдельным API `vfs_set_identity(...)`.
+- Операции `open/read/readdir` переведены на единый permission-check, чтобы зафиксировать контракт контроля доступа до появления userspace.
+- Для текущего kernel-only baseline добавлен ожидаемый root-bypass (`uid=0`), чтобы не ломать существующий read-only сценарий и при этом подготовить расширение правовой модели.
+- В roadmap (`DEVELOPMENT_PLAN.md`) закрыт пункт D.2 про каркас прав доступа; следующий фокус смещён на этап E (layout-структуры UI).
+- Обновлены `VERSION` и UI-баннер до `1.22.0`.
+
 ## 1.21.1
 - По запросу убрано условие `APPROVED` из `release-woos`: автрелиз снова запускается для любого merged PR без дополнительного review-gate.
 - Синхронизирована документация релизного процесса (`README.md`, `RELEASE_CHECKLIST.md`) с фактическим поведением workflow.
