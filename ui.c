@@ -2,6 +2,10 @@
 #include "fb.h"
 
 #define UI_DIRTY_CAPACITY 16u
+#define UI_WM_WINDOW_COUNT 2u
+#define UI_WM_MIN_WIDTH 220u
+#define UI_WM_MIN_HEIGHT 120u
+#define UI_WM_TITLE_HEIGHT 22u
 
 static ui_dirty_rect_t g_dirty_queue[UI_DIRTY_CAPACITY];
 static uint16_t g_dirty_count = 0;
@@ -90,8 +94,24 @@ typedef struct ui_runtime_stats_state {
     uint32_t storage_last_lba;
 } ui_runtime_stats_state_t;
 
+typedef struct ui_window {
+    ui_dirty_rect_t rect;
+    const char* title;
+} ui_window_t;
+
+typedef struct ui_window_manager_state {
+    ui_window_t windows[UI_WM_WINDOW_COUNT];
+    uint8_t order[UI_WM_WINDOW_COUNT];
+    uint8_t focused_slot;
+    uint8_t dragging;
+    uint8_t drag_slot;
+    uint16_t drag_offset_x;
+    uint16_t drag_offset_y;
+} ui_window_manager_state_t;
+
 static ui_runtime_stats_state_t g_runtime_stats = {0};
 static ui_theme_kind_t g_active_theme = UI_THEME_NIGHT;
+static ui_window_manager_state_t g_wm = {0};
 
 static const ui_palette_t* active_palette(void) {
     return &g_palettes[g_active_theme];
@@ -136,6 +156,65 @@ static ui_dirty_rect_t rect_union(const ui_dirty_rect_t* a, const ui_dirty_rect_
     return out;
 }
 
+static uint8_t wm_is_focused_slot(uint8_t slot) {
+    return (g_wm.focused_slot == slot);
+}
+
+static void wm_raise_slot(uint8_t slot) {
+    uint8_t index = 0;
+    while (index < UI_WM_WINDOW_COUNT && g_wm.order[index] != slot) {
+        index++;
+    }
+
+    if (index >= UI_WM_WINDOW_COUNT || index == (UI_WM_WINDOW_COUNT - 1u)) {
+        g_wm.focused_slot = slot;
+        return;
+    }
+
+    while (index + 1u < UI_WM_WINDOW_COUNT) {
+        g_wm.order[index] = g_wm.order[index + 1u];
+        index++;
+    }
+
+    g_wm.order[UI_WM_WINDOW_COUNT - 1u] = slot;
+    g_wm.focused_slot = slot;
+}
+
+static uint8_t point_inside_rect(const ui_dirty_rect_t* rect, uint16_t x, uint16_t y) {
+    uint16_t end_x = (uint16_t)(rect->x + rect->w);
+    uint16_t end_y = (uint16_t)(rect->y + rect->h);
+    return (x >= rect->x && x < end_x && y >= rect->y && y < end_y);
+}
+
+static uint8_t wm_pick_window_slot(uint16_t x, uint16_t y, uint8_t* out_slot) {
+    for (int8_t i = (int8_t)(UI_WM_WINDOW_COUNT - 1u); i >= 0; i--) {
+        uint8_t slot = g_wm.order[(uint8_t)i];
+        if (point_inside_rect(&g_wm.windows[slot].rect, x, y)) {
+            *out_slot = slot;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static uint8_t wm_pick_titlebar_slot(uint16_t x, uint16_t y, uint8_t* out_slot) {
+    uint8_t slot = 0;
+    if (!wm_pick_window_slot(x, y, &slot)) {
+        return 0;
+    }
+
+    ui_dirty_rect_t title_rect = g_wm.windows[slot].rect;
+    title_rect.h = UI_WM_TITLE_HEIGHT;
+
+    if (!point_inside_rect(&title_rect, x, y)) {
+        return 0;
+    }
+
+    *out_slot = slot;
+    return 1;
+}
+
 void ui_layout_compute(video_info_t* info, ui_layout_t* layout) {
     layout->panel.x = 0;
     layout->panel.y = 0;
@@ -160,7 +239,7 @@ void ui_layout_compute(video_info_t* info, ui_layout_t* layout) {
     layout->status_window_title.x = layout->status_window.x;
     layout->status_window_title.y = layout->status_window.y;
     layout->status_window_title.w = layout->status_window.w;
-    layout->status_window_title.h = 22;
+    layout->status_window_title.h = UI_WM_TITLE_HEIGHT;
 
     layout->footer.x = 0;
     layout->footer.y = (info->height > 48) ? (uint16_t)(info->height - 48) : 0;
@@ -176,6 +255,77 @@ void ui_layout_compute(video_info_t* info, ui_layout_t* layout) {
     layout->footer_runtime_line.y = (info->height > 24) ? (uint16_t)(info->height - 24) : 0;
     layout->footer_runtime_line.w = info->width;
     layout->footer_runtime_line.h = 24;
+}
+
+static void wm_sync_layout(video_info_t* info, ui_layout_t* layout) {
+    uint16_t content_height = layout->content.h;
+    uint16_t content_width = layout->content.w;
+
+    uint16_t min_w = (content_width < UI_WM_MIN_WIDTH) ? content_width : UI_WM_MIN_WIDTH;
+    uint16_t min_h = (content_height < UI_WM_MIN_HEIGHT) ? content_height : UI_WM_MIN_HEIGHT;
+
+    uint16_t status_w = (layout->status_window.w < min_w) ? min_w : layout->status_window.w;
+    uint16_t status_h = (layout->status_window.h < min_h) ? min_h : layout->status_window.h;
+
+    uint16_t log_w = (uint16_t)(status_w + 54);
+    if (log_w > content_width) {
+        log_w = content_width;
+    }
+
+    uint16_t log_h = (uint16_t)(status_h - 34);
+    if (log_h < min_h) {
+        log_h = min_h;
+    }
+
+    g_wm.windows[0].title = "SYSTEM STATUS";
+    g_wm.windows[0].rect.x = layout->status_window.x;
+    g_wm.windows[0].rect.y = layout->status_window.y;
+    g_wm.windows[0].rect.w = status_w;
+    g_wm.windows[0].rect.h = status_h;
+
+    g_wm.windows[1].title = "EVENT TRACE";
+    g_wm.windows[1].rect.x = (uint16_t)(layout->content.x + 72);
+    g_wm.windows[1].rect.y = (uint16_t)(layout->content.y + 84);
+    g_wm.windows[1].rect.w = log_w;
+    g_wm.windows[1].rect.h = log_h;
+
+    for (uint8_t i = 0; i < UI_WM_WINDOW_COUNT; i++) {
+        ui_dirty_rect_t* rect = &g_wm.windows[i].rect;
+
+        if (rect->w > content_width) {
+            rect->w = content_width;
+        }
+        if (rect->h > content_height) {
+            rect->h = content_height;
+        }
+
+        uint16_t max_x = (uint16_t)(layout->content.x + content_width - rect->w);
+        uint16_t max_y = (uint16_t)(layout->content.y + content_height - rect->h);
+
+        if (rect->x < layout->content.x) {
+            rect->x = layout->content.x;
+        }
+        if (rect->y < layout->content.y) {
+            rect->y = layout->content.y;
+        }
+
+        rect->x = clamp_u16(rect->x, max_x);
+        rect->y = clamp_u16(rect->y, max_y);
+    }
+
+    g_wm.order[0] = 1;
+    g_wm.order[1] = 0;
+    g_wm.focused_slot = 0;
+    g_wm.dragging = 0;
+    g_wm.drag_slot = 0;
+    g_wm.drag_offset_x = 0;
+    g_wm.drag_offset_y = 0;
+
+    layout->status_window = g_wm.windows[g_wm.focused_slot].rect;
+    layout->status_window_title = layout->status_window;
+    layout->status_window_title.h = UI_WM_TITLE_HEIGHT;
+
+    (void)info;
 }
 
 static void draw_background_band(video_info_t* info, const ui_dirty_rect_t* clip) {
@@ -204,51 +354,51 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip, cons
         layout->panel_button.h,
         panel_button_color
     );
-    fb_draw_text(info, 18, 13, "WOOS 1.24.1", palette->text_light, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.25.3", palette->text_light, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 166), 13, "THEME:", palette->text_light, palette->panel);
     fb_draw_text(info, (uint16_t)(info->width - 108), 13, theme_name(), panel_button_color, palette->panel);
     fb_draw_text(info, (uint16_t)(info->width - 50), 13, "DEV", palette->text_light, palette->panel);
 }
 
-static void draw_status_window(video_info_t* info, const ui_dirty_rect_t* clip, const ui_layout_t* layout) {
+static void draw_window_contents(video_info_t* info, uint8_t slot, const ui_window_t* window) {
+    const ui_palette_t* palette = active_palette();
+
+    if (slot == 0) {
+        const char* idt_line = g_runtime_stats.idt_ready ? "IDT: READY" : "IDT: BAD";
+        const char* storage_line = g_runtime_stats.storage_ready ? "STORAGE: READY" : "STORAGE: WAIT";
+        const char* irq_line = g_runtime_stats.mouse_irq > 0 ? "MOUSE IRQ: ACTIVE" : "MOUSE IRQ: POLL";
+
+        fb_draw_text(info, (uint16_t)(window->rect.x + 8), (uint16_t)(window->rect.y + 34), idt_line, palette->border, palette->window);
+        fb_draw_text(info, (uint16_t)(window->rect.x + 8), (uint16_t)(window->rect.y + 50), storage_line, palette->border, palette->window);
+        fb_draw_text(info, (uint16_t)(window->rect.x + 8), (uint16_t)(window->rect.y + 66), irq_line, palette->border, palette->window);
+    } else {
+        const char* drag_line = g_wm.dragging ? "DRAG: ACTIVE" : "DRAG: READY";
+        const char* focus_line = wm_is_focused_slot(slot) ? "FOCUS: THIS WINDOW" : "FOCUS: BACKGROUND";
+
+        fb_draw_text(info, (uint16_t)(window->rect.x + 8), (uint16_t)(window->rect.y + 34), "MOUSE TOOLS:", palette->border, palette->window);
+        fb_draw_text(info, (uint16_t)(window->rect.x + 8), (uint16_t)(window->rect.y + 50), "- TITLE CLICK = FOCUS", palette->border, palette->window);
+        fb_draw_text(info, (uint16_t)(window->rect.x + 8), (uint16_t)(window->rect.y + 66), "- TITLE DRAG = MOVE", palette->border, palette->window);
+        fb_draw_text(info, (uint16_t)(window->rect.x + 8), (uint16_t)(window->rect.y + 82), drag_line, palette->border, palette->window);
+        fb_draw_text(info, (uint16_t)(window->rect.x + 8), (uint16_t)(window->rect.y + 98), focus_line, palette->border, palette->window);
+    }
+}
+
+static void draw_window_manager(video_info_t* info, const ui_dirty_rect_t* clip) {
     (void)clip;
     const ui_palette_t* palette = active_palette();
-    fb_rect(
-        info,
-        layout->status_window.x,
-        layout->status_window.y,
-        layout->status_window.w,
-        layout->status_window.h,
-        palette->window
-    );
-    fb_frame(
-        info,
-        layout->status_window.x,
-        layout->status_window.y,
-        layout->status_window.w,
-        layout->status_window.h,
-        2,
-        palette->border
-    );
-    uint32_t title_color = g_runtime_stats.idt_ready ? palette->accent : palette->accent_pressed;
-    const char* title = g_runtime_stats.idt_ready ? "STATUS: IDT READY" : "STATUS: IDT BAD";
 
-    fb_rect(
-        info,
-        layout->status_window_title.x,
-        layout->status_window_title.y,
-        layout->status_window_title.w,
-        layout->status_window_title.h,
-        title_color
-    );
-    fb_draw_text(
-        info,
-        (uint16_t)(layout->status_window.x + 8),
-        (uint16_t)(layout->status_window.y + 7),
-        title,
-        palette->text_light,
-        title_color
-    );
+    for (uint8_t i = 0; i < UI_WM_WINDOW_COUNT; i++) {
+        uint8_t slot = g_wm.order[i];
+        const ui_window_t* window = &g_wm.windows[slot];
+        uint32_t title_color = wm_is_focused_slot(slot) ? palette->accent : palette->panel;
+        uint32_t title_text_color = wm_is_focused_slot(slot) ? palette->text_light : palette->cursor;
+
+        fb_rect(info, window->rect.x, window->rect.y, window->rect.w, window->rect.h, palette->window);
+        fb_frame(info, window->rect.x, window->rect.y, window->rect.w, window->rect.h, 2, palette->border);
+        fb_rect(info, window->rect.x, window->rect.y, window->rect.w, UI_WM_TITLE_HEIGHT, title_color);
+        fb_draw_text(info, (uint16_t)(window->rect.x + 8), (uint16_t)(window->rect.y + 7), window->title, title_text_color, title_color);
+        draw_window_contents(info, slot, window);
+    }
 }
 
 static void write_decimal_padded(char* buffer, uint16_t last_index, uint64_t value, uint16_t digits) {
@@ -263,7 +413,9 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip, const u
     const ui_palette_t* palette = active_palette();
     const char* status = "EVENTS: MOVE CURSOR OVER PANEL";
 
-    if (g_ui_state.panel_pressed) {
+    if (g_wm.dragging) {
+        status = "EVENTS: WINDOW DRAG ACTIVE";
+    } else if (g_ui_state.panel_pressed) {
         status = "EVENTS: PANEL CLICK HANDLED";
     } else if (g_ui_state.panel_hover) {
         status = "EVENTS: PANEL HOVER ACTIVE";
@@ -319,7 +471,7 @@ static void draw_footer(video_info_t* info, const ui_dirty_rect_t* clip, const u
 static void ui_draw_region(video_info_t* info, const ui_dirty_rect_t* clip) {
     draw_background_band(info, clip);
     draw_top_panel(info, clip, &g_layout);
-    draw_status_window(info, clip, &g_layout);
+    draw_window_manager(info, clip);
     draw_footer(info, clip, &g_layout);
 }
 
@@ -376,9 +528,7 @@ static void cursor_draw(video_info_t* info) {
     g_cursor.visible = 1;
 }
 
-static void present_cursor_delta(video_info_t* info, uint16_t old_x, uint16_t old_y, uint8_t had_visible) {
-    (void)info;
-
+static void mark_cursor_delta_dirty(uint16_t old_x, uint16_t old_y, uint8_t had_visible) {
     if (!had_visible) {
         ui_mark_dirty(g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
         return;
@@ -387,9 +537,9 @@ static void present_cursor_delta(video_info_t* info, uint16_t old_x, uint16_t ol
     ui_dirty_rect_t old_rect = {old_x, old_y, CURSOR_W, CURSOR_H};
     ui_dirty_rect_t new_rect = {g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H};
     ui_dirty_rect_t union_rect = rect_union(&old_rect, &new_rect);
-    // Для virtio-path немедленный sync flush на каждое движение курсора заметно
-    // увеличивает latency. Вместо этого объединяем старую/новую область и
-    // публикуем её штатно через ближайший ui_render_dirty() кадр.
+    // Не рисуем курсор прямо в input-path: только помечаем dirty-область.
+    // Реальная отрисовка идёт в ui_render_dirty(), чтобы избежать мерцания
+    // из-за двойного restore/draw в пределах одного кадра.
     ui_mark_dirty(union_rect.x, union_rect.y, union_rect.w, union_rect.h);
 }
 
@@ -409,14 +559,25 @@ void ui_set_cursor(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons) 
     uint16_t old_y = g_cursor.y;
     uint8_t had_visible = g_cursor.visible;
 
-    cursor_restore_underlay(info);
+    if (had_visible && g_cursor.x == x && g_cursor.y == y && g_cursor.buttons == buttons) {
+        return;
+    }
+
     g_cursor.x = x;
     g_cursor.y = y;
     g_cursor.buttons = buttons;
-    cursor_draw(info);
-    // Публикуем старую и новую область курсора одним прямоугольником,
-    // чтобы не было «мигания» из-за двух последовательных flush-операций.
-    present_cursor_delta(info, old_x, old_y, had_visible);
+    g_cursor.visible = 1;
+    mark_cursor_delta_dirty(old_x, old_y, had_visible);
+}
+
+static uint8_t dirty_intersects_rect(const ui_dirty_rect_t* rect) {
+    for (uint16_t i = 0; i < g_dirty_count; i++) {
+        if (rect_intersects(&g_dirty_queue[i], rect)) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 void ui_mark_dirty(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
@@ -447,8 +608,19 @@ void ui_render_dirty(video_info_t* info) {
         return;
     }
 
+    ui_dirty_rect_t present_queue[UI_DIRTY_CAPACITY];
+    uint16_t present_count = 0;
+
+    uint8_t should_refresh_cursor = 0;
+    ui_dirty_rect_t cursor_rect = {g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H};
     if (g_cursor.visible) {
-        cursor_restore_underlay(info);
+        // Трогаем курсор только когда dirty-область реально пересекается
+        // с его прямоугольником: это убирает лишние restore/draw/present
+        // и заметно снижает визуальное мерцание.
+        should_refresh_cursor = dirty_intersects_rect(&cursor_rect);
+        if (should_refresh_cursor) {
+            cursor_restore_underlay(info);
+        }
     }
 
     g_last_dirty_count = g_dirty_count;
@@ -470,13 +642,26 @@ void ui_render_dirty(video_info_t* info) {
         }
 
         ui_draw_region(info, &clip);
-        fb_present_rect(info, clip.x, clip.y, clip.w, clip.h);
+        if (present_count < UI_DIRTY_CAPACITY) {
+            present_queue[present_count++] = clip;
+        }
+    }
+
+    if (g_cursor.visible && should_refresh_cursor) {
+        cursor_draw(info);
+    }
+
+    uint8_t cursor_presented = 0;
+    for (uint16_t i = 0; i < present_count; i++) {
+        fb_present_rect(info, present_queue[i].x, present_queue[i].y, present_queue[i].w, present_queue[i].h);
+        if (g_cursor.visible && should_refresh_cursor && rect_intersects(&present_queue[i], &cursor_rect)) {
+            cursor_presented = 1;
+        }
     }
 
     g_dirty_count = 0;
 
-    if (g_cursor.visible) {
-        cursor_draw(info);
+    if (g_cursor.visible && should_refresh_cursor && !cursor_presented) {
         fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
     }
 }
@@ -487,15 +672,57 @@ uint16_t ui_last_dirty_count(void) {
 
 void ui_render_desktop(video_info_t* info) {
     ui_layout_compute(info, &g_layout);
+    wm_sync_layout(info, &g_layout);
     ui_mark_dirty(0, 0, info->width, info->height);
     ui_render_dirty(info);
     ui_set_cursor(info, (uint16_t)(info->width / 2), (uint16_t)(info->height / 2), 0);
+    ui_render_dirty(info);
 }
 
 static uint8_t point_inside_panel_button(uint16_t x, uint16_t y) {
     uint16_t end_x = (uint16_t)(g_layout.panel_button.x + g_layout.panel_button.w);
     uint16_t end_y = (uint16_t)(g_layout.panel_button.y + g_layout.panel_button.h);
     return (x >= g_layout.panel_button.x && x < end_x && y >= g_layout.panel_button.y && y < end_y);
+}
+
+static void wm_drag_to(video_info_t* info, uint16_t cursor_x, uint16_t cursor_y) {
+    if (!g_wm.dragging) {
+        return;
+    }
+
+    ui_window_t* window = &g_wm.windows[g_wm.drag_slot];
+    ui_dirty_rect_t old_rect = window->rect;
+
+    uint16_t content_x = g_layout.content.x;
+    uint16_t content_y = g_layout.content.y;
+    uint16_t content_max_x = (uint16_t)(g_layout.content.x + g_layout.content.w - window->rect.w);
+    uint16_t content_max_y = (uint16_t)(g_layout.content.y + g_layout.content.h - window->rect.h);
+
+    uint16_t next_x = (cursor_x > g_wm.drag_offset_x) ? (uint16_t)(cursor_x - g_wm.drag_offset_x) : content_x;
+    uint16_t next_y = (cursor_y > g_wm.drag_offset_y) ? (uint16_t)(cursor_y - g_wm.drag_offset_y) : content_y;
+
+    if (next_x < content_x) {
+        next_x = content_x;
+    }
+    if (next_y < content_y) {
+        next_y = content_y;
+    }
+
+    next_x = clamp_u16(next_x, content_max_x);
+    next_y = clamp_u16(next_y, content_max_y);
+
+    if (window->rect.x == next_x && window->rect.y == next_y) {
+        return;
+    }
+
+    window->rect.x = next_x;
+    window->rect.y = next_y;
+
+    ui_mark_dirty(old_rect.x, old_rect.y, old_rect.w, old_rect.h);
+    ui_mark_dirty(window->rect.x, window->rect.y, window->rect.w, window->rect.h);
+    ui_mark_dirty(g_layout.footer_runtime_line.x, g_layout.footer_runtime_line.y, g_layout.footer_runtime_line.w, g_layout.footer_runtime_line.h);
+
+    (void)info;
 }
 
 void ui_handle_mouse_move(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons) {
@@ -512,6 +739,7 @@ void ui_handle_mouse_move(video_info_t* info, uint16_t x, uint16_t y, uint8_t bu
         );
     }
 
+    wm_drag_to(info, x, y);
     ui_set_cursor(info, x, y, buttons);
 }
 
@@ -519,6 +747,26 @@ void ui_handle_mouse_button(video_info_t* info, uint8_t buttons) {
     uint8_t left_pressed = (uint8_t)(buttons & 0x1u);
     uint8_t next_pressed = (uint8_t)(left_pressed && g_ui_state.panel_hover);
     uint8_t was_pressed = g_ui_state.panel_pressed;
+    uint8_t was_dragging = g_wm.dragging;
+
+    if (!left_pressed) {
+        g_wm.dragging = 0;
+    }
+
+    if (left_pressed && !g_wm.dragging) {
+        uint8_t slot = 0;
+        if (wm_pick_titlebar_slot(g_cursor.x, g_cursor.y, &slot)) {
+            ui_dirty_rect_t old_rect = g_wm.windows[slot].rect;
+            wm_raise_slot(slot);
+            g_wm.dragging = 1;
+            g_wm.drag_slot = slot;
+            g_wm.drag_offset_x = (uint16_t)(g_cursor.x - g_wm.windows[slot].rect.x);
+            g_wm.drag_offset_y = (uint16_t)(g_cursor.y - g_wm.windows[slot].rect.y);
+            ui_mark_dirty(old_rect.x, old_rect.y, old_rect.w, old_rect.h);
+            ui_mark_dirty(g_wm.windows[slot].rect.x, g_wm.windows[slot].rect.y, g_wm.windows[slot].rect.w, g_wm.windows[slot].rect.h);
+            ui_mark_dirty(g_layout.footer_runtime_line.x, g_layout.footer_runtime_line.y, g_layout.footer_runtime_line.w, g_layout.footer_runtime_line.h);
+        }
+    }
 
     if (next_pressed != g_ui_state.panel_pressed) {
         g_ui_state.panel_pressed = next_pressed;
@@ -544,6 +792,10 @@ void ui_handle_mouse_button(video_info_t* info, uint8_t buttons) {
             g_layout.footer_status_line.h
         );
     }
+
+    if (was_dragging != g_wm.dragging) {
+        ui_mark_dirty(g_layout.footer_runtime_line.x, g_layout.footer_runtime_line.y, g_layout.footer_runtime_line.w, g_layout.footer_runtime_line.h);
+    }
 }
 
 void ui_set_kernel_health(video_info_t* info, uint8_t idt_ready, uint32_t heartbeat) {
@@ -554,12 +806,7 @@ void ui_set_kernel_health(video_info_t* info, uint8_t idt_ready, uint32_t heartb
     g_runtime_stats.idt_ready = idt_ready;
     g_runtime_stats.heartbeat = heartbeat;
 
-    ui_mark_dirty(
-        g_layout.status_window_title.x,
-        g_layout.status_window_title.y,
-        g_layout.status_window_title.w,
-        g_layout.status_window_title.h
-    );
+    ui_mark_dirty(g_layout.content.x, g_layout.content.y, g_layout.content.w, g_layout.content.h);
     ui_mark_dirty((uint16_t)(info->width - 150), g_layout.footer_runtime_line.y, 150, g_layout.footer_runtime_line.h);
 }
 
@@ -572,6 +819,7 @@ void ui_set_irq_stats(video_info_t* info, uint32_t keyboard_irq, uint32_t mouse_
     g_runtime_stats.mouse_irq = mouse_irq;
 
     ui_mark_dirty((uint16_t)(info->width - 310), g_layout.footer_runtime_line.y, 170, g_layout.footer_runtime_line.h);
+    ui_mark_dirty(g_layout.content.x, g_layout.content.y, g_layout.content.w, g_layout.content.h);
 }
 
 void ui_set_memory_stats(video_info_t* info, uint8_t pmm_ready, uint64_t total_pages, uint64_t free_pages) {
@@ -630,4 +878,5 @@ void ui_set_storage_stats(video_info_t* info, uint8_t storage_ready, uint8_t las
     g_runtime_stats.boot_signature_valid = boot_signature_valid;
 
     ui_mark_dirty(g_layout.footer.x, g_layout.footer.y, g_layout.footer.w, g_layout.footer.h);
+    ui_mark_dirty(g_layout.content.x, g_layout.content.y, g_layout.content.w, g_layout.content.h);
 }
