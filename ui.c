@@ -354,7 +354,7 @@ static void draw_top_panel(video_info_t* info, const ui_dirty_rect_t* clip, cons
         layout->panel_button.h,
         panel_button_color
     );
-    fb_draw_text(info, 18, 13, "WOOS 1.25.1", palette->text_light, panel_button_color);
+    fb_draw_text(info, 18, 13, "WOOS 1.25.2", palette->text_light, panel_button_color);
     fb_draw_text(info, (uint16_t)(info->width - 166), 13, "THEME:", palette->text_light, palette->panel);
     fb_draw_text(info, (uint16_t)(info->width - 108), 13, theme_name(), panel_button_color, palette->panel);
     fb_draw_text(info, (uint16_t)(info->width - 50), 13, "DEV", palette->text_light, palette->panel);
@@ -570,6 +570,16 @@ void ui_set_cursor(video_info_t* info, uint16_t x, uint16_t y, uint8_t buttons) 
     mark_cursor_delta_dirty(old_x, old_y, had_visible);
 }
 
+static uint8_t dirty_intersects_rect(const ui_dirty_rect_t* rect) {
+    for (uint16_t i = 0; i < g_dirty_count; i++) {
+        if (rect_intersects(&g_dirty_queue[i], rect)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 void ui_mark_dirty(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     if (w == 0 || h == 0) {
         return;
@@ -598,8 +608,16 @@ void ui_render_dirty(video_info_t* info) {
         return;
     }
 
+    uint8_t should_refresh_cursor = 0;
     if (g_cursor.visible) {
-        cursor_restore_underlay(info);
+        ui_dirty_rect_t cursor_rect = {g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H};
+        // Трогаем курсор только когда dirty-область реально пересекается
+        // с его прямоугольником: это убирает лишние restore/draw/present
+        // и заметно снижает визуальное мерцание.
+        should_refresh_cursor = dirty_intersects_rect(&cursor_rect);
+        if (should_refresh_cursor) {
+            cursor_restore_underlay(info);
+        }
     }
 
     g_last_dirty_count = g_dirty_count;
@@ -626,7 +644,7 @@ void ui_render_dirty(video_info_t* info) {
 
     g_dirty_count = 0;
 
-    if (g_cursor.visible) {
+    if (g_cursor.visible && should_refresh_cursor) {
         cursor_draw(info);
         fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
     }
