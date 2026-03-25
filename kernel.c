@@ -105,17 +105,6 @@ static void run_vfs_selftest(void) {
         (void)vfs_readdir(root, &entry);
         vfs_close(root);
     }
-
-    int32_t test_file = vfs_open("/hello.txt");
-    if (test_file < 0) {
-        test_file = vfs_open("/bootsect.bin");
-    }
-
-    if (test_file >= 0) {
-        uint8_t preview[16];
-        (void)vfs_read(test_file, preview, sizeof(preview));
-        vfs_close(test_file);
-    }
 }
 
 static void dispatch_input_event(video_info_t* video, const input_event_t* event) {
