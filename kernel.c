@@ -24,7 +24,7 @@ typedef enum init_stage {
 
 // Короткая пауза в idle-path. Большая задержка здесь напрямую увеличивает
 // input-latency (курсор «плывёт» и клики приходят с опозданием).
-#define KERNEL_MAIN_LOOP_PAUSE 2000u
+#define KERNEL_MAIN_LOOP_PAUSE 512u
 
 #ifndef WOOS_ENABLE_HW_INTERRUPTS
 #define WOOS_ENABLE_HW_INTERRUPTS 1
@@ -116,11 +116,11 @@ static void dispatch_input_event(video_info_t* video, const input_event_t* event
     }
 }
 
-static void refresh_runtime_stats(video_info_t* video) {
+static void refresh_runtime_stats(video_info_t* video, uint16_t dirty_count) {
     const virtio_gpu_renderer_status_t* renderer = virtio_gpu_renderer_status();
     ui_set_runtime_stats(
         video,
-        ui_last_dirty_count(),
+        dirty_count,
         kheap_used_bytes(),
         kheap_free_bytes(),
         renderer->detected,
@@ -159,7 +159,7 @@ void kmain(video_info_t* video) {
     ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
     ui_set_memory_stats(video, pmm_is_ready(), pmm_total_pages(), pmm_free_pages());
     ui_set_storage_stats(video, storage_is_ready(), storage_last_read_ok(), storage_last_lba(), storage_boot_signature_valid());
-    refresh_runtime_stats(video);
+    refresh_runtime_stats(video, 0u);
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);
     uint16_t cursor_y = (uint16_t)(video->height / 2);
@@ -172,10 +172,12 @@ void kmain(video_info_t* video) {
     while (1) {
         uint8_t had_work = 0u;
         input_event_t tick_event = {INPUT_EVENT_TIMER_TICK, 0, 0, 0};
+        uint8_t had_tick = 0u;
 
         if (timer_poll_tick()) {
             input_push(&tick_event);
             had_work = 1u;
+            had_tick = 1u;
         }
 
         mouse_poll();
@@ -187,8 +189,13 @@ void kmain(video_info_t* video) {
         }
 
         run_deferred_vfs_probe();
-        refresh_runtime_stats(video);
         ui_render_dirty(video);
+
+        // Runtime-оверлей обновляем на heartbeat-тиках (и в boot-init),
+        // чтобы heavy footer redraw не привязывался к каждой mouse-микроитерации.
+        if (had_tick) {
+            refresh_runtime_stats(video, ui_last_dirty_count());
+        }
 
         // Троттлим цикл только когда в итерации не было полезной работы,
         // чтобы не добавлять лишнюю задержку на активном перемещении мыши.
