@@ -1,7 +1,7 @@
 #include "input.h"
 #include "kheap.h"
 
-#define INPUT_QUEUE_CAPACITY 64u
+#define INPUT_QUEUE_CAPACITY 256u
 
 typedef struct input_queue {
     input_event_t* buffer;

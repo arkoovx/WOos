@@ -22,9 +22,9 @@ typedef enum init_stage {
     INIT_UI,
 } init_stage_t;
 
-// Пауза в основном цикле: нужна, чтобы не загружать CPU на 100%,
-// но без «тормозов» интерфейса в эмуляторе.
-#define KERNEL_MAIN_LOOP_PAUSE 20000u
+// Короткая пауза в idle-path. Большая задержка здесь напрямую увеличивает
+// input-latency (курсор «плывёт» и клики приходят с опозданием).
+#define KERNEL_MAIN_LOOP_PAUSE 2000u
 
 #ifndef WOOS_ENABLE_HW_INTERRUPTS
 #define WOOS_ENABLE_HW_INTERRUPTS 1
@@ -170,25 +170,32 @@ void kmain(video_info_t* video) {
 #endif
 
     while (1) {
-        for (volatile uint32_t delay = 0; delay < KERNEL_MAIN_LOOP_PAUSE; delay++) {
-            __asm__ __volatile__("pause");
-        }
-
+        uint8_t had_work = 0u;
         input_event_t tick_event = {INPUT_EVENT_TIMER_TICK, 0, 0, 0};
 
         if (timer_poll_tick()) {
             input_push(&tick_event);
+            had_work = 1u;
         }
 
         mouse_poll();
 
         input_event_t next_event;
         while (input_pop(&next_event)) {
+            had_work = 1u;
             dispatch_input_event(video, &next_event);
         }
 
         run_deferred_vfs_probe();
         refresh_runtime_stats(video);
         ui_render_dirty(video);
+
+        // Троттлим цикл только когда в итерации не было полезной работы,
+        // чтобы не добавлять лишнюю задержку на активном перемещении мыши.
+        if (!had_work) {
+            for (volatile uint32_t delay = 0; delay < KERNEL_MAIN_LOOP_PAUSE; delay++) {
+                __asm__ __volatile__("pause");
+            }
+        }
     }
 }
