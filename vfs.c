@@ -2,10 +2,29 @@
 
 #include "storage.h"
 
-#define VFS_MAX_NODES 4u
+#define VFS_MAX_NODES 16u
 #define VFS_MAX_HANDLES 8u
 #define VFS_ROOT_NODE 0u
 #define VFS_SECTOR_BUFFER_SIZE STORAGE_SECTOR_SIZE
+#define VFS_WOFS_SUPERBLOCK_LBA 128u
+#define VFS_WOFS_MAGIC0 'W'
+#define VFS_WOFS_MAGIC1 'O'
+#define VFS_WOFS_MAGIC2 'F'
+#define VFS_WOFS_MAGIC3 'S'
+#define VFS_WOFS_VERSION 1u
+
+typedef struct vfs_wofs_superblock {
+    uint8_t magic[4];
+    uint16_t version;
+    uint16_t entry_count;
+    uint32_t dir_lba;
+} vfs_wofs_superblock_t;
+
+typedef struct vfs_wofs_dirent {
+    char name[24];
+    uint32_t first_lba;
+    uint32_t size_bytes;
+} vfs_wofs_dirent_t;
 
 typedef enum vfs_node_type {
     VFS_NODE_DIR = 1,
@@ -88,23 +107,51 @@ void vfs_init(void) {
         g_handles[i].in_use = 0u;
     }
 
-    // Базовый VFS-каталог фиксированный и read-only:
-    // корень "/" и один тестовый файл boot-сектора, чтобы
-    // унифицировать API open/read/close/readdir для следующих PR.
+    // Корневой каталог существует всегда, даже если FS-образ невалиден.
     copy_name(g_nodes[0].name, "/", sizeof(g_nodes[0].name));
     g_nodes[0].type = VFS_NODE_DIR;
     g_nodes[0].parent = VFS_ROOT_NODE;
     g_nodes[0].first_lba = 0u;
     g_nodes[0].size_bytes = 0u;
+    g_node_count = 1u;
 
-    copy_name(g_nodes[1].name, "bootsect.bin", sizeof(g_nodes[1].name));
-    g_nodes[1].type = VFS_NODE_FILE;
-    g_nodes[1].parent = VFS_ROOT_NODE;
-    g_nodes[1].first_lba = 0u;
-    g_nodes[1].size_bytes = STORAGE_SECTOR_SIZE;
+    if (!storage_is_ready()) {
+        return;
+    }
 
-    g_node_count = 2u;
-    g_vfs_ready = storage_is_ready();
+    if (!storage_read_sectors(VFS_WOFS_SUPERBLOCK_LBA, 1u, g_sector_buffer)) {
+        return;
+    }
+
+    const vfs_wofs_superblock_t* sb = (const vfs_wofs_superblock_t*)g_sector_buffer;
+    if (sb->magic[0] != VFS_WOFS_MAGIC0 || sb->magic[1] != VFS_WOFS_MAGIC1
+        || sb->magic[2] != VFS_WOFS_MAGIC2 || sb->magic[3] != VFS_WOFS_MAGIC3
+        || sb->version != VFS_WOFS_VERSION || sb->entry_count == 0u
+        || sb->entry_count > (VFS_MAX_NODES - 1u)) {
+        return;
+    }
+
+    if (!storage_read_sectors(sb->dir_lba, 1u, g_sector_buffer)) {
+        return;
+    }
+
+    const vfs_wofs_dirent_t* entries = (const vfs_wofs_dirent_t*)g_sector_buffer;
+    for (uint16_t i = 0u; i < sb->entry_count; i++) {
+        const vfs_wofs_dirent_t* entry = &entries[i];
+        if (entry->name[0] == '\0' || entry->size_bytes == 0u) {
+            continue;
+        }
+
+        vfs_node_t* node = &g_nodes[g_node_count];
+        copy_name(node->name, entry->name, sizeof(node->name));
+        node->type = VFS_NODE_FILE;
+        node->parent = VFS_ROOT_NODE;
+        node->first_lba = entry->first_lba;
+        node->size_bytes = entry->size_bytes;
+        g_node_count++;
+    }
+
+    g_vfs_ready = (uint8_t)(g_node_count > 1u);
 }
 
 uint8_t vfs_is_ready(void) {
