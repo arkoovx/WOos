@@ -23,7 +23,9 @@ RENDERER_CPPFLAGS := -DWOOS_ENABLE_VIRTIO_GPU=$(VIRTIO_GPU)
 # стабильности boot (polling-путь уже покрывает mouse/timer).
 HW_INTERRUPTS ?= 1
 KERNEL_CPPFLAGS := -DWOOS_ENABLE_HW_INTERRUPTS=$(HW_INTERRUPTS)
-WOOSFS_LBA ?= 2048
+# Размещаем WOFS в самом конце 1.44MB образа (2880 секторов),
+# чтобы гарантированно не пересекаться с растущим kernel payload.
+WOOSFS_LBA ?= 2876
 
 all: os.img
 

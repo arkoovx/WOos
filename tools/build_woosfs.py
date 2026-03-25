@@ -12,11 +12,13 @@ files = [
 ]
 
 parser = argparse.ArgumentParser(description="Build minimal WOFS image")
-parser.add_argument("--base-lba", type=int, default=2048, help="LBA where superblock will be placed in os.img")
+parser.add_argument("--base-lba", type=int, default=2876, help="LBA where superblock will be placed in os.img")
 args = parser.parse_args()
 
 if args.base_lba < 2:
     raise ValueError("base-lba must be >= 2")
+if args.base_lba > 2876:
+    raise ValueError("base-lba must be <= 2876 for 1.44MB image")
 
 superblock_lba = args.base_lba
 dir_lba = superblock_lba + 1
