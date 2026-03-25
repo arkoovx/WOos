@@ -40,6 +40,7 @@ typedef struct vfs_node {
     uint8_t parent;
     uint32_t first_lba;
     uint32_t size_bytes;
+    vfs_acl_t acl;
 } vfs_node_t;
 
 typedef struct vfs_handle {
@@ -56,6 +57,8 @@ static uint8_t g_node_count = 0u;
 static vfs_handle_t g_handles[VFS_MAX_HANDLES];
 static uint8_t g_sector_buffer[VFS_SECTOR_BUFFER_SIZE];
 static uint32_t g_wofs_start_lba = VFS_BOOT_SECTORS;
+static uint16_t g_current_uid = 0u;
+static uint16_t g_current_gid = 0u;
 
 extern uint8_t __kernel_end;
 
@@ -123,6 +126,39 @@ static int32_t allocate_handle(uint8_t node_index) {
     return -1;
 }
 
+static uint8_t acl_allows(const vfs_node_t* node, uint8_t requested_perm) {
+    if (node == 0 || requested_perm == 0u) {
+        return 0u;
+    }
+
+    // uid=0 рассматривается как kernel/superuser и пока обходит ACL-проверки.
+    // Это даёт минимально совместимый scaffold до появления userspace и login-контекста.
+    if (g_current_uid == 0u) {
+        return 1u;
+    }
+
+    uint8_t granted = node->acl.other_perms;
+    if (g_current_uid == node->acl.owner_uid) {
+        granted = node->acl.owner_perms;
+    } else if (g_current_gid == node->acl.owner_gid) {
+        granted = node->acl.group_perms;
+    }
+
+    return (uint8_t)((granted & requested_perm) == requested_perm);
+}
+
+static void set_default_acl(vfs_node_t* node, uint8_t owner_perms, uint8_t group_perms, uint8_t other_perms) {
+    if (node == 0) {
+        return;
+    }
+
+    node->acl.owner_uid = 0u;
+    node->acl.owner_gid = 0u;
+    node->acl.owner_perms = owner_perms;
+    node->acl.group_perms = group_perms;
+    node->acl.other_perms = other_perms;
+}
+
 static void try_mount_wofs(void) {
 #if !WOOS_ENABLE_WOFS
     return;
@@ -160,6 +196,7 @@ static void try_mount_wofs(void) {
         node->parent = VFS_ROOT_NODE;
         node->first_lba = entry->first_lba;
         node->size_bytes = entry->size_bytes;
+        set_default_acl(node, VFS_PERM_READ, VFS_PERM_READ, VFS_PERM_READ);
         g_node_count++;
     }
 }
@@ -169,6 +206,8 @@ void vfs_init(void) {
     g_wofs_mount_attempted = 0u;
     g_node_count = 0u;
     g_wofs_start_lba = VFS_BOOT_SECTORS;
+    g_current_uid = 0u;
+    g_current_gid = 0u;
 
     for (uint8_t i = 0u; i < VFS_MAX_HANDLES; i++) {
         g_handles[i].in_use = 0u;
@@ -180,6 +219,7 @@ void vfs_init(void) {
     g_nodes[0].parent = VFS_ROOT_NODE;
     g_nodes[0].first_lba = 0u;
     g_nodes[0].size_bytes = 0u;
+    set_default_acl(&g_nodes[0], VFS_PERM_LIST, VFS_PERM_LIST, VFS_PERM_LIST);
     g_node_count = 1u;
 
     if (!storage_is_ready()) {
@@ -201,6 +241,7 @@ void vfs_init(void) {
     g_nodes[1].parent = VFS_ROOT_NODE;
     g_nodes[1].first_lba = 0u;
     g_nodes[1].size_bytes = STORAGE_SECTOR_SIZE;
+    set_default_acl(&g_nodes[1], VFS_PERM_READ, VFS_PERM_READ, VFS_PERM_READ);
 
     g_node_count = 2u;
     g_vfs_ready = 1u;
@@ -215,12 +256,20 @@ uint8_t vfs_is_ready(void) {
     return g_vfs_ready;
 }
 
+void vfs_set_identity(uint16_t uid, uint16_t gid) {
+    g_current_uid = uid;
+    g_current_gid = gid;
+}
+
 int32_t vfs_open(const char* path) {
     if (!g_vfs_ready || path == 0) {
         return -1;
     }
 
     if (str_equals(path, "/")) {
+        if (!acl_allows(&g_nodes[VFS_ROOT_NODE], VFS_PERM_LIST)) {
+            return -1;
+        }
         return allocate_handle(VFS_ROOT_NODE);
     }
 
@@ -234,6 +283,9 @@ int32_t vfs_open(const char* path) {
 
     for (uint8_t node = 0u; node < g_node_count; node++) {
         if (g_nodes[node].parent == VFS_ROOT_NODE && str_equals(g_nodes[node].name, path)) {
+            if (!acl_allows(&g_nodes[node], VFS_PERM_READ)) {
+                return -1;
+            }
             return allocate_handle(node);
         }
     }
@@ -252,7 +304,7 @@ uint32_t vfs_read(int32_t handle, void* buffer, uint32_t bytes) {
     }
 
     vfs_node_t* node = &g_nodes[h->node_index];
-    if (node->type != VFS_NODE_FILE || h->cursor >= node->size_bytes) {
+    if (node->type != VFS_NODE_FILE || h->cursor >= node->size_bytes || !acl_allows(node, VFS_PERM_READ)) {
         return 0u;
     }
 
@@ -293,7 +345,7 @@ int32_t vfs_readdir(int32_t handle, vfs_dirent_t* out_entry) {
     }
 
     vfs_node_t* node = &g_nodes[h->node_index];
-    if (node->type != VFS_NODE_DIR) {
+    if (node->type != VFS_NODE_DIR || !acl_allows(node, VFS_PERM_LIST)) {
         return -1;
     }
 
