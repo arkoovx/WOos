@@ -54,6 +54,7 @@ typedef struct vfs_handle {
 } vfs_handle_t;
 
 static uint8_t g_vfs_ready = 0u;
+static uint8_t g_wofs_mount_attempted = 0u;
 static vfs_node_t g_nodes[VFS_MAX_NODES];
 static uint8_t g_node_count = 0u;
 static vfs_handle_t g_handles[VFS_MAX_HANDLES];
@@ -106,8 +107,52 @@ static int32_t allocate_handle(uint8_t node_index) {
     return -1;
 }
 
+static void try_mount_wofs(void) {
+#if !WOOS_ENABLE_WOFS
+    return;
+#endif
+
+    if (!g_vfs_ready || g_wofs_mount_attempted) {
+        return;
+    }
+    g_wofs_mount_attempted = 1u;
+
+    if (!storage_read_sectors(VFS_WOFS_SUPERBLOCK_LBA, 1u, g_sector_buffer)) {
+        return;
+    }
+
+    const vfs_wofs_superblock_t* sb = (const vfs_wofs_superblock_t*)g_sector_buffer;
+    if (sb->magic[0] != VFS_WOFS_MAGIC0 || sb->magic[1] != VFS_WOFS_MAGIC1
+        || sb->magic[2] != VFS_WOFS_MAGIC2 || sb->magic[3] != VFS_WOFS_MAGIC3
+        || sb->version != VFS_WOFS_VERSION || sb->entry_count == 0u
+        || sb->entry_count > (VFS_MAX_NODES - 1u)) {
+        return;
+    }
+
+    if (!storage_read_sectors(sb->dir_lba, 1u, g_sector_buffer)) {
+        return;
+    }
+
+    const vfs_wofs_dirent_t* entries = (const vfs_wofs_dirent_t*)g_sector_buffer;
+    for (uint16_t i = 0u; i < sb->entry_count; i++) {
+        const vfs_wofs_dirent_t* entry = &entries[i];
+        if (entry->name[0] == '\0' || entry->size_bytes == 0u || g_node_count >= VFS_MAX_NODES) {
+            continue;
+        }
+
+        vfs_node_t* node = &g_nodes[g_node_count];
+        copy_name(node->name, entry->name, sizeof(node->name));
+        node->type = VFS_NODE_FILE;
+        node->parent = VFS_ROOT_NODE;
+        node->first_lba = entry->first_lba;
+        node->size_bytes = entry->size_bytes;
+        g_node_count++;
+    }
+}
+
 void vfs_init(void) {
     g_vfs_ready = 0u;
+    g_wofs_mount_attempted = 0u;
     g_node_count = 0u;
 
     for (uint8_t i = 0u; i < VFS_MAX_HANDLES; i++) {
@@ -139,40 +184,9 @@ void vfs_init(void) {
     g_vfs_ready = 1u;
     return;
 #endif
-
-    if (!storage_read_sectors(VFS_WOFS_SUPERBLOCK_LBA, 1u, g_sector_buffer)) {
-        return;
-    }
-
-    const vfs_wofs_superblock_t* sb = (const vfs_wofs_superblock_t*)g_sector_buffer;
-    if (sb->magic[0] != VFS_WOFS_MAGIC0 || sb->magic[1] != VFS_WOFS_MAGIC1
-        || sb->magic[2] != VFS_WOFS_MAGIC2 || sb->magic[3] != VFS_WOFS_MAGIC3
-        || sb->version != VFS_WOFS_VERSION || sb->entry_count == 0u
-        || sb->entry_count > (VFS_MAX_NODES - 1u)) {
-        return;
-    }
-
-    if (!storage_read_sectors(sb->dir_lba, 1u, g_sector_buffer)) {
-        return;
-    }
-
-    const vfs_wofs_dirent_t* entries = (const vfs_wofs_dirent_t*)g_sector_buffer;
-    for (uint16_t i = 0u; i < sb->entry_count; i++) {
-        const vfs_wofs_dirent_t* entry = &entries[i];
-        if (entry->name[0] == '\0' || entry->size_bytes == 0u) {
-            continue;
-        }
-
-        vfs_node_t* node = &g_nodes[g_node_count];
-        copy_name(node->name, entry->name, sizeof(node->name));
-        node->type = VFS_NODE_FILE;
-        node->parent = VFS_ROOT_NODE;
-        node->first_lba = entry->first_lba;
-        node->size_bytes = entry->size_bytes;
-        g_node_count++;
-    }
-
-    g_vfs_ready = (uint8_t)(g_node_count > 1u);
+    // В WOFS-режиме монтирование делаем лениво при первом файловом обращении,
+    // чтобы не добавлять агрессивные disk-read операции в ранний init-path.
+    g_vfs_ready = 1u;
 }
 
 uint8_t vfs_is_ready(void) {
@@ -183,6 +197,8 @@ int32_t vfs_open(const char* path) {
     if (!g_vfs_ready || path == 0) {
         return -1;
     }
+
+    try_mount_wofs();
 
     if (str_equals(path, "/")) {
         return allocate_handle(VFS_ROOT_NODE);
@@ -246,6 +262,8 @@ int32_t vfs_readdir(int32_t handle, vfs_dirent_t* out_entry) {
     if (!g_vfs_ready || out_entry == 0 || handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) {
         return -1;
     }
+
+    try_mount_wofs();
 
     vfs_handle_t* h = &g_handles[handle];
     if (!h->in_use) {
