@@ -6,6 +6,8 @@ SECTIONS
     . = 0x8000;
     __kernel_start = .;
 
+    /* Stage2 и критические данные (GDT, BootInfo, Таблицы страниц) 
+       Всегда в первом сегменте, доступном для 16-бит. */
     .text.boot : ALIGN(16)
     {
         KEEP(*(.text.boot))
@@ -26,22 +28,15 @@ SECTIONS
         *(.data .data.*)
     }
 
-    .bss : ALIGN(16)
+    . = 0x100000;
+
+    .bss : ALIGN(4096)
     {
+        __bss_start = .;
         *(.bss .bss.*)
         *(COMMON)
-    }
-
-    .paging : ALIGN(4096)
-    {
-        *(.paging)
+        __bss_end = .;
     }
 
     __kernel_end = .;
-
-    . = ALIGN(512);
-    .pad :
-    {
-        BYTE(0)
-    }
 }

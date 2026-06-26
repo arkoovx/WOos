@@ -233,3 +233,34 @@ void mouse_poll(void) {
         }
     }
 }
+
+void mouse_handler(void) {
+    if (!g_mouse.ready) {
+        return;
+    }
+
+    while (1) {
+        uint8_t status = inb(PS2_STATUS_PORT);
+        if ((status & PS2_STATUS_OUTPUT_FULL) == 0u) {
+            break;
+        }
+
+        uint8_t data = inb(PS2_DATA_PORT);
+
+        if ((status & PS2_STATUS_AUX_DATA) == 0u) {
+            continue;
+        }
+
+        if (g_mouse.packet_index == 0u && (data & 0x08u) == 0u) {
+            continue;
+        }
+
+        g_mouse.packet[g_mouse.packet_index++] = data;
+
+        if (g_mouse.packet_index == MOUSE_PACKET_SIZE) {
+            handle_mouse_packet(g_mouse.packet);
+            g_mouse.packet_index = 0u;
+        }
+    }
+}
+

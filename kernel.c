@@ -13,7 +13,34 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "pmm.h"
 #include "storage.h"
 #include "vfs.h"
+#include "net.h"
+#include "serial.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
+
+uint64_t g_tsc_per_ms = 2000000ULL;
+
+void calibrate_tsc(void) {
+    uint32_t start_ticks = timer_ticks();
+    // Ждем изменения тика
+    while (timer_ticks() == start_ticks) {
+        __asm__ __volatile__("pause");
+    }
+    
+    start_ticks = timer_ticks();
+    uint64_t start_tsc = rdtsc();
+    
+    // Ждем 5 тиков (100 мс)
+    while (timer_ticks() < start_ticks + 5) {
+        __asm__ __volatile__("pause");
+    }
+    
+    uint64_t end_tsc = rdtsc();
+    g_tsc_per_ms = (end_tsc - start_tsc) / 100;
+    if (g_tsc_per_ms == 0) {
+        g_tsc_per_ms = 2000000ULL;
+    }
+    serial_printf("[WoOS Kernel] TSC calibrated: %u ticks/ms\n", (uint32_t)g_tsc_per_ms);
+}
 
 typedef enum init_stage {
     INIT_EARLY = 0,
@@ -71,35 +98,55 @@ static void sanitize_boot_info(video_info_t* video) {
 }
 
 static void run_stage(video_info_t* video, init_stage_t stage) {
+    serial_printf("[WoOS Kernel] Starting stage: %d...\n", (int)stage);
     switch (stage) {
         case INIT_EARLY:
             sanitize_boot_info(video);
+            serial_init();
+            serial_printf("[WoOS Kernel] Serial logging initialized.\n");
+            serial_printf("[WoOS Kernel] Framebuffer info: addr=%p, w=%u, h=%u, pitch=%u, bpp=%u\n",
+                          (void*)video->framebuffer, video->width, video->height, video->pitch, video->bpp);
             break;
         case INIT_PLATFORM:
+            serial_printf("[WoOS Kernel] Initializing platform components...\n");
             fb_init(video);
+            fb_enable_write_combining(video);
+            serial_printf("[WoOS Kernel] Framebuffer driver initialized with Write-Combining.\n");
             idt_init();
+            serial_printf("[WoOS Kernel] IDT loaded.\n");
             break;
         case INIT_DRIVERS:
+            serial_printf("[WoOS Kernel] Initializing drivers...\n");
             virtio_gpu_renderer_init(video);
+            serial_printf("[WoOS Kernel] Virtio-GPU renderer initialized.\n");
             pmm_init(video);
+            serial_printf("[WoOS Kernel] PMM initialized.\n");
             kheap_init();
+            serial_printf("[WoOS Kernel] Heap initialized.\n");
             input_init();
+            serial_printf("[WoOS Kernel] Input queue initialized.\n");
             storage_init();
+            serial_printf("[WoOS Kernel] Storage driver initialized.\n");
             vfs_init();
-            // WOFS и VFS проверяются по запросу (lazy-mount path),
-            // чтобы не утяжелять ранний boot возможными disk-read пиками.
-            // Heartbeat теперь идёт от аппаратного PIT, а не от числа итераций цикла,
-            // поэтому частота UI-обновлений не зависит от скорости CPU/эмулятора.
+            serial_printf("[WoOS Kernel] VFS / WOFS initialized.\n");
+            net_init();
+            serial_printf("[WoOS Kernel] Net stack initialized.\n");
             timer_init(20u);
+            serial_printf("[WoOS Kernel] Timer initialized.\n");
             break;
         case INIT_UI:
+            serial_printf("[WoOS Kernel] Launching UI...\n");
             ui_render_desktop(video);
+            serial_printf("[WoOS Kernel] UI rendering finished. Kernel entering loop.\n");
             break;
     }
 }
 
 
+static void refresh_runtime_stats(video_info_t* video, uint16_t dirty_count);
+
 static void dispatch_input_event(video_info_t* video, const input_event_t* event) {
+
     switch (event->type) {
         case INPUT_EVENT_MOUSE_MOVE:
             ui_handle_mouse_move(video, event->x, event->y, event->buttons);
@@ -112,7 +159,11 @@ static void dispatch_input_event(video_info_t* video, const input_event_t* event
             ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
             ui_set_memory_stats(video, pmm_is_ready(), pmm_total_pages(), pmm_free_pages());
             ui_set_storage_stats(video, storage_is_ready(), storage_last_read_ok(), storage_last_lba(), storage_boot_signature_valid());
+            const net_status_t* net = net_get_status();
+            ui_set_net_status(video, net->ready, net->active, net->link_up, net->ip_addr);
+            refresh_runtime_stats(video, ui_last_dirty_count());
             break;
+
     }
 }
 
@@ -159,6 +210,8 @@ void kmain(video_info_t* video) {
     ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
     ui_set_memory_stats(video, pmm_is_ready(), pmm_total_pages(), pmm_free_pages());
     ui_set_storage_stats(video, storage_is_ready(), storage_last_read_ok(), storage_last_lba(), storage_boot_signature_valid());
+    const net_status_t* net = net_get_status();
+    ui_set_net_status(video, net->ready, net->active, net->link_up, net->ip_addr);
     refresh_runtime_stats(video, 0u);
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);
@@ -169,40 +222,50 @@ void kmain(video_info_t* video) {
     idt_enable_interrupts();
 #endif
 
+    calibrate_tsc();
+
     while (1) {
-        uint8_t had_work = 0u;
-        input_event_t tick_event = {INPUT_EVENT_TIMER_TICK, 0, 0, 0};
-        uint8_t had_tick = 0u;
+        uint64_t start, end;
 
-        if (timer_poll_tick()) {
-            input_push(&tick_event);
-            had_work = 1u;
-            had_tick = 1u;
+        start = rdtsc();
+        net_poll();
+        end = rdtsc();
+        uint64_t net_time = (end - start) / g_tsc_per_ms;
+        if (net_time >= 2) {
+            serial_printf("[Perf Warning] net_poll took %u ms\n", (uint32_t)net_time);
         }
 
-        mouse_poll();
-
+        start = rdtsc();
         input_event_t next_event;
+        uint32_t event_count = 0;
         while (input_pop(&next_event)) {
-            had_work = 1u;
             dispatch_input_event(video, &next_event);
+            event_count++;
+        }
+        end = rdtsc();
+        uint64_t input_time = (end - start) / g_tsc_per_ms;
+        if (input_time >= 2) {
+            serial_printf("[Perf Warning] input dispatch (%u events) took %u ms\n", event_count, (uint32_t)input_time);
         }
 
+        start = rdtsc();
         run_deferred_vfs_probe();
+        end = rdtsc();
+        uint64_t vfs_time = (end - start) / g_tsc_per_ms;
+        if (vfs_time >= 2) {
+            serial_printf("[Perf Warning] vfs_probe took %u ms\n", (uint32_t)vfs_time);
+        }
+
+        start = rdtsc();
         ui_render_dirty(video);
-
-        // Runtime-оверлей обновляем на heartbeat-тиках (и в boot-init),
-        // чтобы heavy footer redraw не привязывался к каждой mouse-микроитерации.
-        if (had_tick) {
-            refresh_runtime_stats(video, ui_last_dirty_count());
+        end = rdtsc();
+        uint64_t render_time = (end - start) / g_tsc_per_ms;
+        if (render_time >= 2) {
+            serial_printf("[Perf Warning] ui_render_dirty took %u ms\n", (uint32_t)render_time);
         }
 
-        // Троттлим цикл только когда в итерации не было полезной работы,
-        // чтобы не добавлять лишнюю задержку на активном перемещении мыши.
-        if (!had_work) {
-            for (volatile uint32_t delay = 0; delay < KERNEL_MAIN_LOOP_PAUSE; delay++) {
-                __asm__ __volatile__("pause");
-            }
-        }
+        // Усыпляем процессор до следующего прерывания
+        __asm__ __volatile__("hlt");
     }
 }
+

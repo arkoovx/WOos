@@ -21,6 +21,7 @@ global idt_stub_irq14
 global idt_stub_irq15
 
 extern idt_handle_irq
+extern idt_handle_exception
 
 section .text
 
@@ -82,6 +83,76 @@ idt_load:
     POP_GPRS
     iretq
 %endmacro
+
+; Макрос для исключений БЕЗ кода ошибки (кладёт фиктивный 0 на стек)
+%macro EXCEPTION_NOERRCODE 2
+global idt_stub_exception%1
+idt_stub_exception%1:
+    push qword 0         ; фиктивный error code
+    push qword %2        ; вектор исключения
+    PUSH_GPRS
+    mov rdi, rsp         ; указатель на registers_t
+    mov r15, rsp
+    and rsp, -16
+    sub rsp, 8
+    call idt_handle_exception
+    mov rsp, r15
+    POP_GPRS
+    add rsp, 16          ; очищаем вектор и error code
+    iretq
+%endmacro
+
+; Макрос для исключений С кодом ошибки
+%macro EXCEPTION_ERRCODE 2
+global idt_stub_exception%1
+idt_stub_exception%1:
+    ; CPU уже положил error code на стек
+    push qword %2        ; вектор исключения
+    PUSH_GPRS
+    mov rdi, rsp         ; указатель на registers_t
+    mov r15, rsp
+    and rsp, -16
+    sub rsp, 8
+    call idt_handle_exception
+    mov rsp, r15
+    POP_GPRS
+    add rsp, 16          ; очищаем вектор и error code
+    iretq
+%endmacro
+
+; Описание всех 32 исключений CPU
+EXCEPTION_NOERRCODE 0, 0
+EXCEPTION_NOERRCODE 1, 1
+EXCEPTION_NOERRCODE 2, 2
+EXCEPTION_NOERRCODE 3, 3
+EXCEPTION_NOERRCODE 4, 4
+EXCEPTION_NOERRCODE 5, 5
+EXCEPTION_NOERRCODE 6, 6
+EXCEPTION_NOERRCODE 7, 7
+EXCEPTION_ERRCODE   8, 8
+EXCEPTION_NOERRCODE 9, 9
+EXCEPTION_ERRCODE   10, 10
+EXCEPTION_ERRCODE   11, 11
+EXCEPTION_ERRCODE   12, 12
+EXCEPTION_ERRCODE   13, 13
+EXCEPTION_ERRCODE   14, 14
+EXCEPTION_NOERRCODE 15, 15
+EXCEPTION_NOERRCODE 16, 16
+EXCEPTION_ERRCODE   17, 17
+EXCEPTION_NOERRCODE 18, 18
+EXCEPTION_NOERRCODE 19, 19
+EXCEPTION_NOERRCODE 20, 20
+EXCEPTION_ERRCODE   21, 21
+EXCEPTION_NOERRCODE 22, 22
+EXCEPTION_NOERRCODE 23, 23
+EXCEPTION_NOERRCODE 24, 24
+EXCEPTION_NOERRCODE 25, 25
+EXCEPTION_NOERRCODE 26, 26
+EXCEPTION_NOERRCODE 27, 27
+EXCEPTION_NOERRCODE 28, 28
+EXCEPTION_ERRCODE   29, 29
+EXCEPTION_ERRCODE   30, 30
+EXCEPTION_NOERRCODE 31, 31
 
 idt_stub_ignore:
     iretq

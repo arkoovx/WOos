@@ -3,6 +3,9 @@
 
 #include "kernel.h"
 
+#define PMM_MAX_PAGES 1048576u
+#define PMM_BITMAP_SIZE (PMM_MAX_PAGES / 8u)
+
 void pmm_init(const video_info_t* info);
 void* pmm_alloc_page(void);
 void pmm_free_page(void* page);

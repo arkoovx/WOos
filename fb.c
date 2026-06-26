@@ -220,9 +220,7 @@ static uint8_t* const g_backbuffer = (uint8_t*)(uint64_t)0x01000000ull;
 static uint8_t g_backbuffer_enabled = 0;
 
 static inline void mem_copy(uint8_t* dst, const uint8_t* src, uint16_t len) {
-    for (uint16_t i = 0; i < len; i++) {
-        dst[i] = src[i];
-    }
+    __builtin_memcpy(dst, src, len);
 }
 
 static inline uint8_t* fb_target_base(video_info_t* info) {
@@ -237,6 +235,25 @@ static inline uint8_t* fb_target_base(video_info_t* info) {
     return (uint8_t*)(uint64_t)info->framebuffer;
 }
 #endif
+
+static uint16_t g_clip_x = 0;
+static uint16_t g_clip_y = 0;
+static uint16_t g_clip_w = 0xFFFF;
+static uint16_t g_clip_h = 0xFFFF;
+
+void fb_set_clip(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    g_clip_x = x;
+    g_clip_y = y;
+    g_clip_w = w;
+    g_clip_h = h;
+}
+
+void fb_clear_clip(void) {
+    g_clip_x = 0;
+    g_clip_y = 0;
+    g_clip_w = 0xFFFF;
+    g_clip_h = 0xFFFF;
+}
 
 void fb_init(video_info_t* info) {
 #if WOOS_ENABLE_DBL_BUFFER
@@ -254,6 +271,49 @@ void fb_init(video_info_t* info) {
 #endif
 }
 
+void fb_enable_write_combining(video_info_t* info) {
+    uint64_t old_pat = rdmsr(0x277);
+    uint64_t pat = old_pat;
+    pat &= ~(0xFFULL << 24);
+    pat |= (0x01ULL << 24);
+    wrmsr(0x277, pat);
+    uint64_t new_pat = rdmsr(0x277);
+    serial_printf("[PAT] MSR 0x277 changed from %p to %p (expected WC at PAT3)\n", (void*)old_pat, (void*)new_pat);
+
+    uint64_t fb_start = info->framebuffer;
+    uint64_t fb_size = (uint64_t)info->pitch * info->height;
+    uint64_t fb_end = fb_start + fb_size;
+
+    uint64_t* pml4 = (uint64_t*)read_cr3();
+    uint32_t updated_pages = 0;
+
+    for (uint64_t addr = fb_start; addr < fb_end; addr += 0x200000) {
+        uint64_t pml4_idx = (addr >> 39) & 0x1FF;
+        uint64_t pml4_val = pml4[pml4_idx];
+        if (!(pml4_val & 1)) continue;
+
+        uint64_t* pdpt = (uint64_t*)(pml4_val & ~0xFFFULL);
+        uint64_t pdpt_idx = (addr >> 30) & 0x1FF;
+        uint64_t pdpt_val = pdpt[pdpt_idx];
+        if (!(pdpt_val & 1)) continue;
+
+        uint64_t* pd = (uint64_t*)(pdpt_val & ~0xFFFULL);
+        uint64_t pd_idx = (addr >> 21) & 0x1FF;
+        uint64_t pd_val = pd[pd_idx];
+        if (!(pd_val & 1)) continue;
+
+        if (pd_val & (1ULL << 7)) {
+            uint64_t old_val = pd_val;
+            pd[pd_idx] = (pd_val & ~(1ULL << 12)) | (1ULL << 3) | (1ULL << 4);
+            serial_printf("[PAT] PDE for %p (idx %u) changed from %p to %p\n", (void*)addr, (uint32_t)pd_idx, (void*)old_val, (void*)pd[pd_idx]);
+            updated_pages++;
+        }
+    }
+
+    serial_printf("[PAT] Total PDE entries updated to Write-Combining: %u\n", updated_pages);
+    write_cr3(read_cr3());
+}
+
 static inline uint8_t bytes_per_pixel(const video_info_t* info) {
     uint8_t bytes = (uint8_t)(info->bpp / 8u);
     return (bytes == 0u) ? 4u : bytes;
@@ -269,6 +329,10 @@ uint32_t fb_readpixel(video_info_t* info, uint16_t x, uint16_t y) {
     }
 
     if (x >= info->width || y >= info->height) {
+        return 0;
+    }
+
+    if (x < g_clip_x || y < g_clip_y || x >= g_clip_x + g_clip_w || y >= g_clip_y + g_clip_h) {
         return 0;
     }
 
@@ -297,6 +361,10 @@ void fb_writepixel(video_info_t* info, uint16_t x, uint16_t y, uint32_t color) {
     }
 
     if (x >= info->width || y >= info->height) {
+        return;
+    }
+
+    if (x < g_clip_x || y < g_clip_y || x >= g_clip_x + g_clip_w || y >= g_clip_y + g_clip_h) {
         return;
     }
 
@@ -336,18 +404,80 @@ void fb_fill(video_info_t* info, uint32_t color) {
     }
 }
 
+static inline uint16_t max_u16(uint16_t a, uint16_t b) {
+    return (a > b) ? a : b;
+}
+
+static inline uint16_t min_u16(uint16_t a, uint16_t b) {
+    return (a < b) ? a : b;
+}
+
 void fb_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint32_t color) {
     if (use_gpu_draw_commands()) {
         virtio_gpu_renderer_rect(info, x, y, w, h, color);
         return;
     }
 
-    uint16_t x_end = clamp_u16((uint16_t)(x + w), info->width);
-    uint16_t y_end = clamp_u16((uint16_t)(y + h), info->height);
+    if (w == 0 || h == 0) {
+        return;
+    }
 
-    for (uint16_t py = y; py < y_end; py++) {
-        for (uint16_t px = x; px < x_end; px++) {
-            fb_writepixel(info, px, py, color);
+    // 1. Вычисляем пересечение с областью клиппинга
+    uint16_t cx = max_u16(x, g_clip_x);
+    uint16_t cy = max_u16(y, g_clip_y);
+    
+    uint16_t x_end = (uint16_t)(x + w);
+    uint16_t y_end = (uint16_t)(y + h);
+    uint16_t clip_x_end = (uint16_t)(g_clip_x + g_clip_w);
+    uint16_t clip_y_end = (uint16_t)(g_clip_y + g_clip_h);
+
+    uint16_t cx2 = min_u16(x_end, clip_x_end);
+    uint16_t cy2 = min_u16(y_end, clip_y_end);
+
+    // 2. Ограничиваем границами экрана
+    cx = min_u16(cx, info->width);
+    cy = min_u16(cy, info->height);
+    cx2 = min_u16(cx2, info->width);
+    cy2 = min_u16(cy2, info->height);
+
+    if (cx2 <= cx || cy2 <= cy) {
+        return; // Полностью отсечено
+    }
+
+    uint16_t cw = (uint16_t)(cx2 - cx);
+    uint8_t bpp = bytes_per_pixel(info);
+    uint8_t* base = fb_target_base(info);
+
+    if (bpp == 4) {
+        for (uint16_t py = cy; py < cy2; py++) {
+            uint32_t* dst = (uint32_t*)(base + ((uint64_t)py * info->pitch) + ((uint64_t)cx * 4));
+            for (uint16_t px = 0; px < cw; px++) {
+                dst[px] = color & 0x00FFFFFFu;
+            }
+        }
+    } else if (bpp == 3) {
+        uint8_t r = (uint8_t)((color >> 16) & 0xFFu);
+        uint8_t g = (uint8_t)((color >> 8) & 0xFFu);
+        uint8_t b = (uint8_t)(color & 0xFFu);
+        for (uint16_t py = cy; py < cy2; py++) {
+            uint8_t* dst = base + ((uint64_t)py * info->pitch) + ((uint64_t)cx * 3);
+            for (uint16_t px = 0; px < cw; px++) {
+                dst[0] = b;
+                dst[1] = g;
+                dst[2] = r;
+                dst += 3;
+            }
+        }
+    } else if (bpp == 2) {
+        uint8_t r = (uint8_t)((color >> 16) & 0xFFu);
+        uint8_t g = (uint8_t)((color >> 8) & 0xFFu);
+        uint8_t b = (uint8_t)(color & 0xFFu);
+        uint16_t packed = (uint16_t)(((uint16_t)(r >> 3) << 11) | ((uint16_t)(g >> 2) << 5) | (uint16_t)(b >> 3));
+        for (uint16_t py = cy; py < cy2; py++) {
+            uint16_t* dst = (uint16_t*)(base + ((uint64_t)py * info->pitch) + ((uint64_t)cx * 2));
+            for (uint16_t px = 0; px < cw; px++) {
+                dst[px] = packed;
+            }
         }
     }
 }
@@ -374,12 +504,49 @@ void fb_draw_char(video_info_t* info, uint16_t x, uint16_t y, char c, uint32_t c
         return;
     }
 
+    // Раннее отсечение всего символа, если он целиком за пределами клиппинга
+    if (x + FONT_W <= g_clip_x || y + FONT_H <= g_clip_y || x >= g_clip_x + g_clip_w || y >= g_clip_y + g_clip_h) {
+        return;
+    }
+    // Раннее отсечение границами экрана
+    if (x >= info->width || y >= info->height) {
+        return;
+    }
+
+    uint8_t bpp = bytes_per_pixel(info);
+    uint8_t* base = fb_target_base(info);
+
     for (uint16_t gy = 0; gy < FONT_H; gy++) {
+        uint16_t py = (uint16_t)(y + gy);
+        if (py < g_clip_y || py >= g_clip_y + g_clip_h || py >= info->height) {
+            continue;
+        }
+
         uint8_t row = glyph[gy];
+        uint8_t* row_base = base + ((uint64_t)py * info->pitch);
+
         for (uint16_t gx = 0; gx < FONT_W; gx++) {
+            uint16_t px = (uint16_t)(x + gx);
+            if (px < g_clip_x || px >= g_clip_x + g_clip_w || px >= info->width) {
+                continue;
+            }
+
             uint8_t bit = (uint8_t)(0x80u >> gx);
             uint32_t px_color = (row & bit) ? color : bg_color;
-            fb_writepixel(info, (uint16_t)(x + gx), (uint16_t)(y + gy), px_color);
+
+            uint8_t* target_pixel = row_base + ((uint64_t)px * bpp);
+            if (bpp == 4) {
+                *(uint32_t*)target_pixel = px_color & 0x00FFFFFFu;
+            } else if (bpp == 3) {
+                target_pixel[0] = (uint8_t)(px_color & 0xFFu);
+                target_pixel[1] = (uint8_t)((px_color >> 8) & 0xFFu);
+                target_pixel[2] = (uint8_t)((px_color >> 16) & 0xFFu);
+            } else if (bpp == 2) {
+                uint8_t r = (uint8_t)((px_color >> 16) & 0xFFu);
+                uint8_t g = (uint8_t)((px_color >> 8) & 0xFFu);
+                uint8_t b = (uint8_t)(px_color & 0xFFu);
+                *(uint16_t*)target_pixel = (uint16_t)(((uint16_t)(r >> 3) << 11) | ((uint16_t)(g >> 2) << 5) | (uint16_t)(b >> 3));
+            }
         }
     }
 }

@@ -11,7 +11,7 @@ ORG 0x7C00
 %define LOAD_SEGMENT 0x0000
 %define LOAD_OFFSET  0x8000
 %define RESET_RETRIES 5
-%define MAX_SECTORS_PER_READ 127
+%define MAX_SECTORS_PER_READ 32
 
 start:
     cli

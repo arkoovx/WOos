@@ -4,23 +4,69 @@ LD        := ld
 OBJCOPY   := objcopy
 OBJDUMP   := objdump
 
-CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra
+CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra -I. -Inet -Iexternal/lwip/src/include -DLWIP_ACD=0 -DLWIP_DHCP_DOES_ACD_CHECK=0
 LDFLAGS   := -m elf_x86_64 -T linker.ld
-KERNEL_OBJS := stage2.o idt_asm.o kernel.o fb.o ui.o input.o idt.o timer.o mouse.o pci.o kheap.o pmm.o storage.o vfs.o drivers/virtio_gpu_renderer/virtio_gpu_renderer.o
 
-# По умолчанию держим двойную буферизацию включённой,
-# чтобы убрать заметное мерцание UI при частых dirty-update.
+BUILD_DIR := build
+
+LWIP_OBJS_RAW := \
+	external/lwip/src/core/init.o \
+	external/lwip/src/core/mem.o \
+	external/lwip/src/core/memp.o \
+	external/lwip/src/core/netif.o \
+	external/lwip/src/core/pbuf.o \
+	external/lwip/src/core/raw.o \
+	external/lwip/src/core/stats.o \
+	external/lwip/src/core/sys.o \
+	external/lwip/src/core/tcp.o \
+	external/lwip/src/core/tcp_in.o \
+	external/lwip/src/core/tcp_out.o \
+	external/lwip/src/core/udp.o \
+	external/lwip/src/core/ipv4/autoip.o \
+	external/lwip/src/core/ipv4/dhcp.o \
+	external/lwip/src/core/ipv4/etharp.o \
+	external/lwip/src/core/ipv4/icmp.o \
+	external/lwip/src/core/ipv4/ip4.o \
+	external/lwip/src/core/ipv4/ip4_addr.o \
+	external/lwip/src/core/ipv4/ip4_frag.o \
+	external/lwip/src/core/ipv4/igmp.o \
+	external/lwip/src/core/def.o \
+	external/lwip/src/core/timeouts.o \
+	external/lwip/src/core/ip.o \
+	external/lwip/src/core/inet_chksum.o \
+	external/lwip/src/netif/ethernet.o
+
+LWIP_OBJS := $(addprefix $(BUILD_DIR)/, $(LWIP_OBJS_RAW))
+
+KERNEL_OBJS_RAW := \
+	stage2.o \
+	idt_asm.o \
+	kernel.o \
+	fb.o \
+	ui.o \
+	input.o \
+	idt.o \
+	timer.o \
+	mouse.o \
+	pci.o \
+	kheap.o \
+	pmm.o \
+	storage.o \
+	vfs.o \
+	net.o \
+	lib.o \
+	serial.o \
+	drivers/virtio_gpu_renderer/virtio_gpu_renderer.o \
+	drivers/virtio_net.o
+
+KERNEL_OBJS := $(addprefix $(BUILD_DIR)/, $(KERNEL_OBJS_RAW)) $(LWIP_OBJS)
+
 DBL_BUFFER ?= 1
 FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)
 
-# По умолчанию оставляем virtio-gpu renderer выключенным: это
-# даёт максимально стабильный fallback на stage2 framebuffer на
-# проблемных конфигурациях эмулятора/видеобэкенда.
-VIRTIO_GPU ?= 1
+VIRTIO_GPU ?= 0
 RENDERER_CPPFLAGS := -DWOOS_ENABLE_VIRTIO_GPU=$(VIRTIO_GPU)
 
-# Аппаратные IRQ по умолчанию выключены для максимальной
-# стабильности boot (polling-путь уже покрывает mouse/timer).
 HW_INTERRUPTS ?= 1
 KERNEL_CPPFLAGS := -DWOOS_ENABLE_HW_INTERRUPTS=$(HW_INTERRUPTS)
 WOFS ?= 1
@@ -34,51 +80,31 @@ woosfs.bin: tools/build_woosfs.py
 boot.bin: kernel.bin boot.asm
 	$(NASM) -f bin -DKERNEL_SECTORS=$(shell expr $$(stat -c%s kernel.bin) / 512) boot.asm -o boot.bin
 
-stage2.o: stage2.asm
-	$(NASM) -f elf64 stage2.asm -o stage2.o
+# Специфические правила для файлов со спецфлагами
+$(BUILD_DIR)/kernel.o: kernel.c kernel.h ui.h input.h idt.h timer.h mouse.h kheap.h pmm.h storage.h vfs.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(KERNEL_CPPFLAGS) -c $< -o $@
 
-kernel.o: kernel.c kernel.h ui.h input.h idt.h timer.h mouse.h kheap.h pmm.h storage.h vfs.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
-	$(CC) $(CFLAGS) $(KERNEL_CPPFLAGS) -c kernel.c -o kernel.o
+$(BUILD_DIR)/fb.o: fb.c fb.h kernel.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(FB_CPPFLAGS) -c $< -o $@
 
-idt_asm.o: idt_asm.asm
-	$(NASM) -f elf64 idt_asm.asm -o idt_asm.o
+$(BUILD_DIR)/vfs.o: vfs.c vfs.h storage.h kernel.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(VFS_CPPFLAGS) -c $< -o $@
 
-idt.o: idt.c idt.h kernel.h
-	$(CC) $(CFLAGS) -c idt.c -o idt.o
+$(BUILD_DIR)/drivers/virtio_gpu_renderer/virtio_gpu_renderer.o: drivers/virtio_gpu_renderer/virtio_gpu_renderer.c drivers/virtio_gpu_renderer/virtio_gpu_renderer.h pci.h kernel.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(RENDERER_CPPFLAGS) -c $< -o $@
 
-timer.o: timer.c timer.h kernel.h
-	$(CC) $(CFLAGS) -c timer.c -o timer.o
+# Общие правила компиляции в build/
+$(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-input.o: input.c input.h kheap.h kernel.h
-	$(CC) $(CFLAGS) -c input.c -o input.o
-
-fb.o: fb.c fb.h kernel.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
-	$(CC) $(CFLAGS) $(FB_CPPFLAGS) -c fb.c -o fb.o
-
-kheap.o: kheap.c kheap.h kernel.h
-	$(CC) $(CFLAGS) -c kheap.c -o kheap.o
-
-pmm.o: pmm.c pmm.h kernel.h
-	$(CC) $(CFLAGS) -c pmm.c -o pmm.o
-
-storage.o: storage.c storage.h kernel.h
-	$(CC) $(CFLAGS) -c storage.c -o storage.o
-
-
-vfs.o: vfs.c vfs.h storage.h kernel.h
-	$(CC) $(CFLAGS) $(VFS_CPPFLAGS) -c vfs.c -o vfs.o
-
-
-
-ui.o: ui.c ui.h fb.h kernel.h
-	$(CC) $(CFLAGS) -c ui.c -o ui.o
-
-
-pci.o: pci.c pci.h kernel.h
-	$(CC) $(CFLAGS) -c pci.c -o pci.o
-
-drivers/virtio_gpu_renderer/virtio_gpu_renderer.o: drivers/virtio_gpu_renderer/virtio_gpu_renderer.c drivers/virtio_gpu_renderer/virtio_gpu_renderer.h pci.h kernel.h
-	$(CC) $(CFLAGS) $(RENDERER_CPPFLAGS) -c drivers/virtio_gpu_renderer/virtio_gpu_renderer.c -o drivers/virtio_gpu_renderer/virtio_gpu_renderer.o
+$(BUILD_DIR)/%.o: %.asm
+	@mkdir -p $(dir $@)
+	$(NASM) -f elf64 $< -o $@
 
 kernel.elf: $(KERNEL_OBJS) linker.ld
 	$(LD) $(LDFLAGS) $(KERNEL_OBJS) -o kernel.elf
@@ -100,9 +126,7 @@ verify-layout: os.img
 	$(OBJDUMP) -D -b binary -m i386 --start-address=512 --stop-address=640 os.img
 
 clean:
-	rm -f *.o *.bin *.elf *.img drivers/virtio_gpu_renderer/*.o
+	rm -rf $(BUILD_DIR)
+	rm -f *.bin *.elf *.img woosfs.bin
 
 .PHONY: all clean verify-layout
-
-mouse.o: mouse.c mouse.h input.h kernel.h
-	$(CC) $(CFLAGS) -c mouse.c -o mouse.o

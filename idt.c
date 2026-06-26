@@ -1,4 +1,5 @@
 #include "idt.h"
+#include "serial.h"
 
 #define PIC1_COMMAND 0x20u
 #define PIC1_DATA    0x21u
@@ -33,6 +34,42 @@ typedef struct idtr {
 extern void idt_load(const idtr_t* idtr);
 extern void idt_stub_ignore(void);
 extern void idt_stub_ignore_errcode(void);
+
+// CPU exception stubs
+extern void idt_stub_exception0(void);
+extern void idt_stub_exception1(void);
+extern void idt_stub_exception2(void);
+extern void idt_stub_exception3(void);
+extern void idt_stub_exception4(void);
+extern void idt_stub_exception5(void);
+extern void idt_stub_exception6(void);
+extern void idt_stub_exception7(void);
+extern void idt_stub_exception8(void);
+extern void idt_stub_exception9(void);
+extern void idt_stub_exception10(void);
+extern void idt_stub_exception11(void);
+extern void idt_stub_exception12(void);
+extern void idt_stub_exception13(void);
+extern void idt_stub_exception14(void);
+extern void idt_stub_exception15(void);
+extern void idt_stub_exception16(void);
+extern void idt_stub_exception17(void);
+extern void idt_stub_exception18(void);
+extern void idt_stub_exception19(void);
+extern void idt_stub_exception20(void);
+extern void idt_stub_exception21(void);
+extern void idt_stub_exception22(void);
+extern void idt_stub_exception23(void);
+extern void idt_stub_exception24(void);
+extern void idt_stub_exception25(void);
+extern void idt_stub_exception26(void);
+extern void idt_stub_exception27(void);
+extern void idt_stub_exception28(void);
+extern void idt_stub_exception29(void);
+extern void idt_stub_exception30(void);
+extern void idt_stub_exception31(void);
+
+// IRQ stubs
 extern void idt_stub_irq0(void);
 extern void idt_stub_irq1(void);
 extern void idt_stub_irq2(void);
@@ -55,6 +92,17 @@ static uint8_t g_idt_ready = 0;
 static uint32_t g_keyboard_irq_count = 0u;
 static uint32_t g_mouse_irq_count = 0u;
 
+static void (*const g_exception_stubs[32])(void) = {
+    idt_stub_exception0, idt_stub_exception1, idt_stub_exception2, idt_stub_exception3,
+    idt_stub_exception4, idt_stub_exception5, idt_stub_exception6, idt_stub_exception7,
+    idt_stub_exception8, idt_stub_exception9, idt_stub_exception10, idt_stub_exception11,
+    idt_stub_exception12, idt_stub_exception13, idt_stub_exception14, idt_stub_exception15,
+    idt_stub_exception16, idt_stub_exception17, idt_stub_exception18, idt_stub_exception19,
+    idt_stub_exception20, idt_stub_exception21, idt_stub_exception22, idt_stub_exception23,
+    idt_stub_exception24, idt_stub_exception25, idt_stub_exception26, idt_stub_exception27,
+    idt_stub_exception28, idt_stub_exception29, idt_stub_exception30, idt_stub_exception31
+};
+
 static void (*const g_irq_stubs[16])(void) = {
     idt_stub_irq0,
     idt_stub_irq1,
@@ -73,6 +121,7 @@ static void (*const g_irq_stubs[16])(void) = {
     idt_stub_irq14,
     idt_stub_irq15,
 };
+
 
 static inline uint8_t inb(uint16_t port) {
     uint8_t value;
@@ -135,7 +184,7 @@ static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
     uint64_t addr = (uint64_t)handler;
 
     g_idt[vector].offset_low = (uint16_t)(addr & 0xFFFFu);
-    g_idt[vector].selector = 0x08u;
+    g_idt[vector].selector = 0x18u;
     g_idt[vector].ist = 0;
     g_idt[vector].type_attr = 0x8Eu;
     g_idt[vector].offset_mid = (uint16_t)((addr >> 16) & 0xFFFFu);
@@ -143,39 +192,134 @@ static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
     g_idt[vector].zero = 0;
 }
 
+static const char* const g_exception_names[32] = {
+    "Divide-by-zero",
+    "Debug",
+    "Non-maskable Interrupt",
+    "Breakpoint",
+    "Overflow",
+    "Bound Range Exceeded",
+    "Invalid Opcode",
+    "Device Not Available",
+    "Double Fault",
+    "Coprocessor Segment Overrun",
+    "Invalid TSS",
+    "Segment Not Present",
+    "Stack-Segment Fault",
+    "General Protection Fault",
+    "Page Fault",
+    "Reserved",
+    "x87 Floating-Point Exception",
+    "Alignment Check",
+    "Machine Check",
+    "SIMD Floating-Point Exception",
+    "Virtualization Exception",
+    "Control Protection Exception",
+    "Reserved", "Reserved", "Reserved", "Reserved", "Reserved", "Reserved",
+    "Reserved",
+    "VMM Communication Exception",
+    "Security Exception",
+    "Reserved"
+};
+
+static void print_hex64(uint64_t val) {
+    serial_write_string("0x");
+    char hex_chars[] = "0123456789ABCDEF";
+    for (int i = 60; i >= 0; i -= 4) {
+        serial_write_char(hex_chars[(val >> i) & 0xF]);
+    }
+}
+
+void idt_handle_exception(registers_t* regs) {
+    __asm__ __volatile__("cli");
+
+    const char* name = "Unknown Exception";
+    if (regs->vector < 32) {
+        name = g_exception_names[regs->vector];
+    }
+
+    serial_write_string("\n==================================================\n");
+    serial_write_string("!!! WoOS KERNEL PANIC: CPU EXCEPTION: ");
+    serial_printf("%d (%s) !!!\n", (int)regs->vector, name);
+    serial_write_string("==================================================\n");
+    
+    serial_write_string("RIP:    "); print_hex64(regs->rip);
+    serial_write_string("   CS:     "); print_hex64(regs->cs);
+    serial_write_string("\n");
+    
+    serial_write_string("RFLAGS: "); print_hex64(regs->rflags);
+    serial_write_string("   RSP:    "); print_hex64(regs->rsp);
+    serial_write_string("\n");
+    
+    serial_write_string("SS:     "); print_hex64(regs->ss);
+    serial_write_string("   ERRCOD: "); print_hex64(regs->error_code);
+    serial_write_string("\n");
+
+    if (regs->vector == 14) {
+        uint64_t cr2;
+        __asm__ __volatile__("mov %%cr2, %0" : "=r"(cr2));
+        serial_write_string("Page Fault Address (CR2): ");
+        print_hex64(cr2);
+        serial_write_string("\n");
+    }
+
+    serial_write_string("\nGeneral Purpose Registers:\n");
+    serial_write_string("RAX: "); print_hex64(regs->rax);
+    serial_write_string("   RBX: "); print_hex64(regs->rbx);
+    serial_write_string("   RCX: "); print_hex64(regs->rcx);
+    serial_write_string("\n");
+    
+    serial_write_string("RDX: "); print_hex64(regs->rdx);
+    serial_write_string("   RSI: "); print_hex64(regs->rsi);
+    serial_write_string("   RDI: "); print_hex64(regs->rdi);
+    serial_write_string("\n");
+    
+    serial_write_string("RBP: "); print_hex64(regs->rbp);
+    serial_write_string("   R8:  "); print_hex64(regs->r8);
+    serial_write_string("   R9:  "); print_hex64(regs->r9);
+    serial_write_string("\n");
+    
+    serial_write_string("R10: "); print_hex64(regs->r10);
+    serial_write_string("   R11: "); print_hex64(regs->r11);
+    serial_write_string("   R12: "); print_hex64(regs->r12);
+    serial_write_string("\n");
+    
+    serial_write_string("R13: "); print_hex64(regs->r13);
+    serial_write_string("   R14: "); print_hex64(regs->r14);
+    serial_write_string("   R15: "); print_hex64(regs->r15);
+    serial_write_string("\n");
+    
+    serial_write_string("==================================================\n");
+    serial_write_string("System halted. Please reboot the virtual machine.\n");
+    serial_write_string("==================================================\n");
+
+    while (1) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
 void idt_init(void) {
     for (uint16_t i = 0; i < 256; i++) {
         idt_set_gate((uint8_t)i, idt_stub_ignore);
     }
 
-    // Для этих исключений CPU автоматически кладёт error code на стек.
-    // Им нужен отдельный stub, который снимет error code перед iretq.
-    idt_set_gate(8u, idt_stub_ignore_errcode);   // #DF
-    idt_set_gate(10u, idt_stub_ignore_errcode);  // #TS
-    idt_set_gate(11u, idt_stub_ignore_errcode);  // #NP
-    idt_set_gate(12u, idt_stub_ignore_errcode);  // #SS
-    idt_set_gate(13u, idt_stub_ignore_errcode);  // #GP
-    idt_set_gate(14u, idt_stub_ignore_errcode);  // #PF
-    idt_set_gate(17u, idt_stub_ignore_errcode);  // #AC
-    idt_set_gate(21u, idt_stub_ignore_errcode);  // #CP (если поддерживается CPU)
-    idt_set_gate(29u, idt_stub_ignore_errcode);  // #VC (SEV-ES)
-    idt_set_gate(30u, idt_stub_ignore_errcode);  // #SX
+    // Заполняем первые 32 вектора обработчиками исключений CPU
+    for (uint8_t i = 0; i < 32; i++) {
+        idt_set_gate(i, g_exception_stubs[i]);
+    }
 
-    // Ставим обработчики на весь диапазон PIC-IRQ (32..47), чтобы
-    // даже неожиданные/spurious IRQ корректно завершались EOI,
-    // а не уходили в «глухой» iret без ack контроллера.
+    // Ставим обработчики на весь диапазон PIC-IRQ (32..47)
     for (uint8_t irq = 0; irq < 16u; irq++) {
         idt_set_gate((uint8_t)(IRQ_VECTOR_BASE_MASTER + irq), g_irq_stubs[irq]);
     }
 
     pic_remap();
 
-    // Для стабильного boot в текущем runtime оставляем все линии PIC
-    // замаскированными. Мышь/heartbeat уже работают через polling,
-    // поэтому IRQ-линии здесь не обязательны и не должны провоцировать
-    // спорадические прерывания на отдельных VM-конфигурациях.
-    outb(PIC1_DATA, 0xFFu);
-    outb(PIC2_DATA, 0xFFu);
+    // Разве маскируем только то, что нам нужно:
+    // PIT (IRQ0), Keyboard (IRQ1), Cascade (IRQ2) -> Master = 0xF8 (1111 1000)
+    // Mouse (IRQ12) -> Slave = 0xEF (1110 1111)
+    outb(PIC1_DATA, 0xF8u);
+    outb(PIC2_DATA, 0xEFu);
 
     idtr_t idtr;
     idtr.limit = (uint16_t)(sizeof(g_idt) - 1u);
@@ -189,8 +333,13 @@ void idt_enable_interrupts(void) {
     __asm__ __volatile__("sti");
 }
 
+extern void timer_handler(void);
+extern void mouse_handler(void);
+
 void idt_handle_irq(uint32_t vector) {
-    if (vector == IRQ_KEYBOARD_VECTOR) {
+    if (vector == IRQ_VECTOR_BASE_MASTER + 0u) {
+        timer_handler();
+    } else if (vector == IRQ_KEYBOARD_VECTOR) {
         // Для спорадического IRQ1 читаем data-порт только если контроллер
         // действительно сообщает о готовом байте.
         if (ps2_status() & 0x01u) {
@@ -198,16 +347,13 @@ void idt_handle_irq(uint32_t vector) {
         }
         g_keyboard_irq_count++;
     } else if (vector == IRQ_MOUSE_VECTOR) {
-        // Даже при маскировании IRQ12 оставляем корректный drain порта,
-        // чтобы handler был безопасен на случай будущего unmask.
-        if (ps2_status() & 0x01u) {
-            (void)ps2_data();
-        }
+        mouse_handler();
         g_mouse_irq_count++;
     }
 
     pic_send_eoi((uint8_t)vector);
 }
+
 
 uint8_t idt_is_ready(void) {
     return g_idt_ready;

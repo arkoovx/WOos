@@ -33,26 +33,46 @@ void input_init(void) {
     }
 }
 
+static inline uint64_t save_interrupts(void) {
+    uint64_t rflags;
+    __asm__ __volatile__("pushf; pop %0; cli" : "=r"(rflags));
+    return rflags;
+}
+
+static inline void restore_interrupts(uint64_t rflags) {
+    __asm__ __volatile__("push %0; popf" : : "r"(rflags));
+}
+
 uint8_t input_push(const input_event_t* event) {
+    uint64_t flags = save_interrupts();
+
     if (g_queue.size >= g_queue.capacity) {
         g_queue.dropped++;
+        restore_interrupts(flags);
         return 0;
     }
 
     g_queue.buffer[g_queue.tail] = *event;
     g_queue.tail = (uint16_t)((g_queue.tail + 1u) % g_queue.capacity);
     g_queue.size++;
+
+    restore_interrupts(flags);
     return 1;
 }
 
 uint8_t input_pop(input_event_t* out_event) {
+    uint64_t flags = save_interrupts();
+
     if (g_queue.size == 0) {
+        restore_interrupts(flags);
         return 0;
     }
 
     *out_event = g_queue.buffer[g_queue.head];
     g_queue.head = (uint16_t)((g_queue.head + 1u) % g_queue.capacity);
     g_queue.size--;
+
+    restore_interrupts(flags);
     return 1;
 }
 
@@ -63,3 +83,4 @@ uint16_t input_dropped_events(void) {
 uint8_t input_uses_heap_queue(void) {
     return g_queue.uses_heap;
 }
+

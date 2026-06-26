@@ -1,4 +1,6 @@
 #include "timer.h"
+#include "input.h"
+
 
 #define PIT_CHANNEL0_DATA        0x40u
 #define PIT_COMMAND              0x43u
@@ -98,3 +100,10 @@ uint32_t timer_ticks(void) {
 uint32_t timer_frequency_hz(void) {
     return g_tick_hz;
 }
+
+void timer_handler(void) {
+    g_ticks++;
+    input_event_t tick_event = {INPUT_EVENT_TIMER_TICK, 0, 0, 0};
+    input_push(&tick_event);
+}
+

@@ -1,6 +1,7 @@
 #include "virtio_gpu_renderer.h"
 
 #include "../../pci.h"
+#include "../../serial.h"
 
 #define VIRTIO_VENDOR_ID 0x1AF4u
 #define VIRTIO_GPU_DEVICE_ID_MODERN 0x1050u
@@ -452,6 +453,7 @@ static uint8_t virtio_gpu_submit_request(void* req, uint32_t req_len, void* resp
         // заметно позже базового happy-path. Слишком маленький timeout здесь
         // даёт ложный "device failed" и визуально проявляется как чёрный экран.
         if (spin > 100000000u) {
+            serial_printf("[Virtio-GPU] Request timed out! last_used=%d, used_idx=%d\n", g_transport.last_used_idx, g_queue.used.idx);
             return 0u;
         }
         __asm__ __volatile__("pause");
@@ -642,20 +644,26 @@ void virtio_gpu_renderer_init(video_info_t* info) {
     // не трогаем virtio MMIO/queue path и работаем через
     // стабильный software framebuffer из stage2.
     (void)dev;
+    serial_printf("[Virtio-GPU] Virtio-GPU is disabled via macro.\n");
     return;
 #endif
 
+    serial_printf("[Virtio-GPU] Scanning PCI bus for Virtio-GPU...\n");
     if (pci_find_device_by_id(VIRTIO_VENDOR_ID, VIRTIO_GPU_DEVICE_ID_MODERN, &dev)) {
         apply_device_info(&dev);
         g_renderer.modern_device = 1u;
+        serial_printf("[Virtio-GPU] Modern PCI device found.\n");
     } else if (pci_find_device_by_id(VIRTIO_VENDOR_ID, VIRTIO_GPU_DEVICE_ID_LEGACY, &dev)) {
         apply_device_info(&dev);
         g_renderer.legacy_device = 1u;
+        serial_printf("[Virtio-GPU] Legacy PCI device found.\n");
     } else if (pci_find_display_controller(VIRTIO_VENDOR_ID, &dev)) {
         apply_device_info(&dev);
+        serial_printf("[Virtio-GPU] PCI Display Controller found.\n");
     }
 
     if (!g_renderer.detected || !g_renderer.modern_device) {
+        serial_printf("[Virtio-GPU] No modern Virtio-GPU device detected. Falling back.\n");
         return;
     }
 
@@ -667,11 +675,18 @@ void virtio_gpu_renderer_init(video_info_t* info) {
     if (g_draw_surface_enabled) {
         g_renderer.active_framebuffer = VIRTIO_GPU_DRAW_SURFACE_BASE;
     }
+    serial_printf("[Virtio-GPU] Framebuffer: %p, Surface pitch: %u, Draw surface: %p\n",
+                  (void*)g_renderer.fallback_framebuffer, g_renderer.surface_pitch, (void*)g_renderer.active_framebuffer);
 
+    serial_printf("[Virtio-GPU] Locating capabilities...\n");
     if (!virtio_gpu_locate_capabilities()) {
+        serial_printf("[Virtio-GPU] Failed to locate modern virtio capabilities!\n");
         return;
     }
+    serial_printf("[Virtio-GPU] Capabilities located. Common config: %p, Notify base: %p, Device config: %p\n",
+                  g_transport.common, g_transport.notify_base, g_transport.device_cfg);
 
+    serial_printf("[Virtio-GPU] Writing device status (Acknowledge + Driver)...\n");
     g_transport.common->device_status = 0u;
     g_transport.common->device_status = VIRTIO_STATUS_ACKNOWLEDGE;
     g_transport.common->device_status |= VIRTIO_STATUS_DRIVER;
@@ -683,14 +698,18 @@ void virtio_gpu_renderer_init(video_info_t* info) {
     uint32_t driver_features_lo = 0u;
     uint32_t driver_features_hi = 0u;
 
+    serial_printf("[Virtio-GPU] Device features: lo=0x%x, hi=0x%x\n", dev_features_lo, dev_features_hi);
+
     if ((dev_features_lo & VIRTIO_GPU_F_VIRGL) != 0u) {
         // Хост умеет virgl, но текущий драйвер использует только 2D control-path.
         // Фичу специально НЕ подтверждаем, чтобы не обещать 3D/virgl-контракт,
         // который ядро ещё не реализует.
         g_renderer.virgl_enabled = 1u;
+        serial_printf("[Virtio-GPU] Host supports VirGL 3D acceleration (not enabled).\n");
     }
 
     if ((dev_features_hi & (1u << (VIRTIO_F_VERSION_1 - 32u))) == 0u) {
+        serial_printf("[Virtio-GPU] Device does not support VIRTIO_F_VERSION_1!\n");
         virtio_gpu_set_failed();
         return;
     }
@@ -704,12 +723,15 @@ void virtio_gpu_renderer_init(video_info_t* info) {
     g_transport.common->driver_feature_select = 1u;
     g_transport.common->driver_feature = driver_features_hi;
 
+    serial_printf("[Virtio-GPU] Set FEATURES_OK...\n");
     g_transport.common->device_status |= VIRTIO_STATUS_FEATURES_OK;
     if ((g_transport.common->device_status & VIRTIO_STATUS_FEATURES_OK) == 0u) {
+        serial_printf("[Virtio-GPU] Device rejected feature negotiation!\n");
         virtio_gpu_set_failed();
         return;
     }
 
+    serial_printf("[Virtio-GPU] Setting up control queue...\n");
     if (!virtio_gpu_setup_queue()) {
         virtio_gpu_set_failed();
         return;

@@ -41,5 +41,6 @@ void ui_set_runtime_stats(
     uint8_t virtio_detected,
     uint8_t virtio_active
 );
+void ui_set_net_status(video_info_t* info, uint8_t ready, uint8_t active, uint8_t link_up, uint32_t ip_addr);
 
 #endif

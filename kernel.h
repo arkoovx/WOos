@@ -1,13 +1,7 @@
 #ifndef WOOS_KERNEL_H
 #define WOOS_KERNEL_H
 
-typedef signed char        int8_t;
-typedef unsigned char      uint8_t;
-typedef unsigned short     uint16_t;
-typedef signed short       int16_t;
-typedef signed int         int32_t;
-typedef unsigned int       uint32_t;
-typedef unsigned long long uint64_t;
+#include <stdint.h>
 
 #define BOOT_INFO_MAGIC_EXPECTED 0x31424957u
 #define BOOT_INFO_VERSION_V1     0x0001u
@@ -20,7 +14,7 @@ typedef struct boot_memory_region {
     uint64_t length;
     uint32_t type;
     uint32_t attributes;
-} boot_memory_region_t;
+} __attribute__((packed)) boot_memory_region_t;
 
 typedef struct video_info {
     uint32_t magic;
@@ -35,6 +29,36 @@ typedef struct video_info {
     uint16_t memory_region_count;
     uint16_t memory_region_capacity;
     boot_memory_region_t memory_regions[BOOT_INFO_E820_MAX_ENTRIES];
-} video_info_t;
+} __attribute__((packed)) video_info_t;
+
+extern uint64_t g_tsc_per_ms;
+
+static inline uint64_t rdtsc(void) {
+    uint32_t low, high;
+    __asm__ __volatile__("rdtsc" : "=a"(low), "=d"(high));
+    return ((uint64_t)high << 32) | low;
+}
+
+static inline uint64_t rdmsr(uint32_t msr) {
+    uint32_t low, high;
+    __asm__ __volatile__("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
+    return ((uint64_t)high << 32) | low;
+}
+
+static inline void wrmsr(uint32_t msr, uint64_t val) {
+    uint32_t low = (uint32_t)val;
+    uint32_t high = (uint32_t)(val >> 32);
+    __asm__ __volatile__("wrmsr" : : "a"(low), "d"(high), "c"(msr));
+}
+
+static inline uint64_t read_cr3(void) {
+    uint64_t val;
+    __asm__ __volatile__("mov %%cr3, %0" : "=r"(val));
+    return val;
+}
+
+static inline void write_cr3(uint64_t val) {
+    __asm__ __volatile__("mov %0, %%cr3" : : "r"(val));
+}
 
 #endif
