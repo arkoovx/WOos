@@ -15,6 +15,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "vfs.h"
 #include "net.h"
 #include "serial.h"
+#include "sched.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
 
 uint64_t g_tsc_per_ms = 2000000ULL;
@@ -97,6 +98,20 @@ static void sanitize_boot_info(video_info_t* video) {
     }
 }
 
+void task1(void) {
+    while (1) {
+        serial_printf("[Task 1] Hello from thread 1! ticks=%u\n", (uint32_t)timer_ticks());
+        for (volatile int i = 0; i < 20000000; i++);
+    }
+}
+
+void task2(void) {
+    while (1) {
+        serial_printf("[Task 2] Hello from thread 2! ticks=%u\n", (uint32_t)timer_ticks());
+        for (volatile int i = 0; i < 20000000; i++);
+    }
+}
+
 static void run_stage(video_info_t* video, init_stage_t stage) {
     serial_printf("[WoOS Kernel] Starting stage: %d...\n", (int)stage);
     switch (stage) {
@@ -123,6 +138,9 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             serial_printf("[WoOS Kernel] PMM initialized.\n");
             kheap_init();
             serial_printf("[WoOS Kernel] Heap initialized.\n");
+            sched_init();
+            thread_create(task1);
+            thread_create(task2);
             input_init();
             serial_printf("[WoOS Kernel] Input queue initialized.\n");
             storage_init();

@@ -338,7 +338,7 @@ extern void mouse_handler(void);
 
 void idt_handle_irq(uint32_t vector) {
     if (vector == IRQ_VECTOR_BASE_MASTER + 0u) {
-        timer_handler();
+        // Обрабатывается планировщиком в idt_stub_irq0 напрямую
     } else if (vector == IRQ_KEYBOARD_VECTOR) {
         // Для спорадического IRQ1 читаем data-порт только если контроллер
         // действительно сообщает о готовом байте.

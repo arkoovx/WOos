@@ -164,7 +164,27 @@ idt_stub_ignore_errcode:
     add rsp, 8
     iretq
 
-IRQ_STUB idt_stub_irq0, 32
+global idt_stub_irq0
+idt_stub_irq0:
+    PUSH_GPRS
+    mov rdi, rsp
+    mov r15, rsp
+    and rsp, -16
+    sub rsp, 8
+    
+    extern schedule_interrupt
+    call schedule_interrupt
+    
+    test rax, rax
+    jz .no_switch
+    mov rsp, rax
+    jmp .done
+.no_switch:
+    mov rsp, r15
+.done:
+    POP_GPRS
+    iretq
+
 IRQ_STUB idt_stub_irq1, 33
 IRQ_STUB idt_stub_irq2, 34
 IRQ_STUB idt_stub_irq3, 35

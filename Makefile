@@ -51,6 +51,7 @@ KERNEL_OBJS_RAW := \
 	pci.o \
 	kheap.o \
 	pmm.o \
+	sched.o \
 	storage.o \
 	vfs.o \
 	net.o \
