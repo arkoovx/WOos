@@ -1,9 +1,15 @@
 name: release-woos
 
 on:
+  # Старый путь: merge PR → релиз
   pull_request_target:
     types:
       - closed
+
+  # Новый путь: push в main → автоматический релиз
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -11,19 +17,26 @@ permissions:
 
 jobs:
   auto_release:
-    if: ${{ github.event.pull_request.merged == true }}
+    # Запускаем если:
+    #   • PR был смержен, ИЛИ
+    #   • прямой push в main
+    if: >
+      (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout merge commit
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          # При PR берём merge-коммит, при push — HEAD
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
+          fetch-depth: 0
 
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm xorriso
+          sudo apt-get install -y nasm xorriso gcc-multilib binutils
 
       - name: Build os.img
         run: make os.img
@@ -36,14 +49,19 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Ensure tag does not exist
+      - name: Skip if tag already exists
+        id: tag_check
         run: |
-          if git ls-remote --exit-code --tags origin "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
-            echo "Tag ${{ steps.version.outputs.tag }} already exists."
-            exit 1
+          TAG="${{ steps.version.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "$TAG" > /dev/null 2>&1; then
+            echo "Tag $TAG already exists — skipping release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build release notes from changelog
+        if: steps.tag_check.outputs.skip == 'false'
         id: notes
         run: |
           NOTES_FILE="release_notes.md"
@@ -51,23 +69,29 @@ jobs:
           {
             echo "# WoOS ${VERSION}"
             echo
-            echo "Автоматический релиз после merge PR #${{ github.event.pull_request.number }}."
+            if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+              echo "Автоматический релиз после merge PR #${{ github.event.pull_request.number }}."
+            else
+              echo "Автоматический релиз после push в \`main\` (коммит \`${{ github.sha }}\`)."
+            fi
             echo
             echo "## Изменения"
             bash .github/scripts/extract_changelog.sh "$VERSION"
           } > "$NOTES_FILE"
           echo "notes_path=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
 
-
       - name: Verify release payload
+        if: steps.tag_check.outputs.skip == 'false'
         run: |
           test -f os.img
           test -s "${{ steps.notes.outputs.notes_path }}"
+
       - name: Publish GitHub Release
+        if: steps.tag_check.outputs.skip == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          target_commitish: ${{ github.event.pull_request.merge_commit_sha }}
+          target_commitish: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
           name: WoOS ${{ steps.version.outputs.version }}
           body_path: ${{ steps.notes.outputs.notes_path }}
           files: |
