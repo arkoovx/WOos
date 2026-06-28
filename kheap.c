@@ -1,6 +1,6 @@
 #include "kheap.h"
 
-#define KHEAP_ARENA_SIZE (512u * 1024u)
+#define KHEAP_ARENA_SIZE (8u * 1024u * 1024u)
 #define KHEAP_ALIGN      16u
 
 typedef struct kheap_block {
@@ -115,6 +115,31 @@ void kheap_free(void* ptr) {
         coalesce_free_blocks();
         return;
     }
+}
+
+extern void* memcpy(void* restrict dest, const void* restrict src, uint64_t n);
+
+void* kheap_realloc(void* ptr, uint64_t size) {
+    if (!ptr) return kheap_alloc(size);
+    if (size == 0) {
+        kheap_free(ptr);
+        return 0;
+    }
+
+    kheap_block_t* block = (kheap_block_t*)((uint8_t*)ptr - sizeof(kheap_block_t));
+    uint64_t current_payload = block_payload_size(block);
+
+    if (current_payload >= size) {
+        return ptr;
+    }
+
+    void* new_ptr = kheap_alloc(size);
+    if (!new_ptr) return 0;
+
+    memcpy(new_ptr, ptr, current_payload);
+    kheap_free(ptr);
+
+    return new_ptr;
 }
 
 uint64_t kheap_total_bytes(void) {

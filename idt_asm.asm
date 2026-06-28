@@ -3,6 +3,7 @@ BITS 64
 global idt_load
 global idt_stub_ignore
 global idt_stub_ignore_errcode
+global idt_stub_syscall
 global idt_stub_irq0
 global idt_stub_irq1
 global idt_stub_irq2
@@ -64,6 +65,41 @@ idt_load:
     pop rcx
     pop rax
 %endmacro
+
+extern syscall_handler
+idt_stub_syscall:
+    PUSH_GPRS
+    
+    ; Setup arguments for syscall_handler:
+    ; rdi = rax (num)
+    ; rsi = rdi (arg1)
+    ; rdx = rsi (arg2)
+    ; rcx = rdx (arg3)
+    ; r8  = r10 (arg4)
+    ; r9  = r8  (arg5)
+    ; Stack: r9 (arg6)
+    push r9
+    mov r9, r8
+    mov r8, r10
+    mov rcx, rdx
+    mov rdx, rsi
+    mov rsi, rdi
+    mov rdi, rax
+
+    mov r15, rsp
+    and rsp, -16
+    sub rsp, 8
+    
+    call syscall_handler
+    
+    mov rsp, r15
+    add rsp, 8 ; clean up r9 from stack
+    
+    ; Overwrite saved rax with the return value
+    mov [rsp + 112], rax
+    
+    POP_GPRS
+    iretq
 
 %macro IRQ_STUB 2
 %1:

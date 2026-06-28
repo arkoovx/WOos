@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdint.h>
 
 void* memcpy(void* restrict dest, const void* restrict src, size_t n) {
     unsigned char* d = dest;
@@ -70,4 +71,77 @@ const unsigned short** __ctype_b_loc(void) {
     static const unsigned short* ptr = &ctype_b_data[128];
     static const unsigned short** pptr = &ptr;
     return pptr;
+}
+
+extern void* kheap_alloc(size_t size);
+extern void* kheap_realloc(void* ptr, size_t size);
+extern void kheap_free(void* ptr);
+
+void* malloc(size_t size) {
+    return kheap_alloc(size);
+}
+
+void* calloc(size_t nmemb, size_t size) {
+    size_t total = nmemb * size;
+    void* ptr = kheap_alloc(total);
+    if (ptr) {
+        memset(ptr, 0, total);
+    }
+    return ptr;
+}
+
+void* realloc(void* ptr, size_t size) {
+    return kheap_realloc(ptr, size);
+}
+
+void free(void* ptr) {
+    kheap_free(ptr);
+}
+
+int strcmp(const char* s1, const char* s2) {
+    while (*s1 && (*s1 == *s2)) {
+        s1++;
+        s2++;
+    }
+    return *(const unsigned char*)s1 - *(const unsigned char*)s2;
+}
+
+extern void serial_printf(const char* format, ...);
+
+void abort(void) {
+    serial_printf("abort() called! Halting CPU.\n");
+    while (1) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+unsigned long strtoul(const char* nptr, char** endptr, int base) {
+    (void)base;
+    unsigned long res = 0;
+    while (*nptr >= '0' && *nptr <= '9') {
+        res = res * 10 + (*nptr - '0');
+        nptr++;
+    }
+    if (endptr) *endptr = (char*)nptr;
+    return res;
+}
+
+unsigned long long strtoull(const char* nptr, char** endptr, int base) {
+    (void)base;
+    unsigned long long res = 0;
+    while (*nptr >= '0' && *nptr <= '9') {
+        res = res * 10 + (*nptr - '0');
+        nptr++;
+    }
+    if (endptr) *endptr = (char*)nptr;
+    return res;
+}
+
+int __popcountdi2(uint64_t val) {
+    int count = 0;
+    while (val) {
+        count += (val & 1);
+        val >>= 1;
+    }
+    return count;
 }

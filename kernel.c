@@ -17,6 +17,11 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "serial.h"
 #include "sched.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
+#include "vmm.h"
+#include "tss.h"
+#include "syscall.h"
+#include "wasm_runtime.h"
+#include "test_wasm.h"
 
 uint64_t g_tsc_per_ms = 2000000ULL;
 
@@ -151,6 +156,11 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             serial_printf("[WoOS Kernel] Net stack initialized.\n");
             timer_init(20u);
             serial_printf("[WoOS Kernel] Timer initialized.\n");
+            vmm_init();
+            tss_init((void*)0x200000);
+            syscall_init();
+            wasm_runtime_init();
+            // wasm_runtime_run(test_wasm, test_wasm_len);
             break;
         case INIT_UI:
             serial_printf("[WoOS Kernel] Launching UI...\n");

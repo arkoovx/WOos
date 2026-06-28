@@ -1,0 +1,10 @@
+# Build output
+build/
+*.bin
+*.elf
+*.img
+woosfs.bin
+
+# Logs and scratch
+serial.log
+.gemini/

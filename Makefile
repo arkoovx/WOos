@@ -4,7 +4,7 @@ LD        := ld
 OBJCOPY   := objcopy
 OBJDUMP   := objdump
 
-CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra -I. -Inet -Iexternal/lwip/src/include -DLWIP_ACD=0 -DLWIP_DHCP_DOES_ACD_CHECK=0
+CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra -I. -Inet -Iexternal/lwip/src/include -Iexternal/wasm3/source -DLWIP_ACD=0 -DLWIP_DHCP_DOES_ACD_CHECK=0 -Dd_m3HasFloat=0 -Dd_m3VerboseErrorMessages=0
 LDFLAGS   := -m elf_x86_64 -T linker.ld
 
 BUILD_DIR := build
@@ -58,9 +58,28 @@ KERNEL_OBJS_RAW := \
 	lib.o \
 	serial.o \
 	drivers/virtio_gpu_renderer/virtio_gpu_renderer.o \
-	drivers/virtio_net.o
+	drivers/virtio_net.o \
+	vmm.o \
+	tss.o \
+	syscall.o \
+	wasi.o \
+	wasm_runtime.o
 
-KERNEL_OBJS := $(addprefix $(BUILD_DIR)/, $(KERNEL_OBJS_RAW)) $(LWIP_OBJS)
+WASM3_OBJS_RAW := \
+	external/wasm3/source/m3_bind.o \
+	external/wasm3/source/m3_code.o \
+	external/wasm3/source/m3_compile.o \
+	external/wasm3/source/m3_core.o \
+	external/wasm3/source/m3_env.o \
+	external/wasm3/source/m3_exec.o \
+	external/wasm3/source/m3_function.o \
+	external/wasm3/source/m3_info.o \
+	external/wasm3/source/m3_module.o \
+	external/wasm3/source/m3_parse.o
+
+WASM3_OBJS := $(addprefix $(BUILD_DIR)/, $(WASM3_OBJS_RAW))
+
+KERNEL_OBJS := $(addprefix $(BUILD_DIR)/, $(KERNEL_OBJS_RAW)) $(LWIP_OBJS) $(WASM3_OBJS)
 
 DBL_BUFFER ?= 1
 FB_CPPFLAGS := -DWOOS_ENABLE_DBL_BUFFER=$(DBL_BUFFER)

@@ -5,6 +5,7 @@
 
 void kheap_init(void);
 void* kheap_alloc(uint64_t size);
+void* kheap_realloc(void* ptr, uint64_t size);
 void kheap_free(void* ptr);
 
 uint64_t kheap_total_bytes(void);

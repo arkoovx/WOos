@@ -86,6 +86,7 @@ extern void idt_stub_irq12(void);
 extern void idt_stub_irq13(void);
 extern void idt_stub_irq14(void);
 extern void idt_stub_irq15(void);
+extern void idt_stub_syscall(void);
 
 static idt_entry_t g_idt[256];
 static uint8_t g_idt_ready = 0;
@@ -180,16 +181,20 @@ static void pic_send_eoi(uint8_t vector) {
     outb(PIC1_COMMAND, PIC_EOI);
 }
 
-static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
+static void idt_set_gate_dpl(uint8_t vector, void (*handler)(void), uint8_t dpl) {
     uint64_t addr = (uint64_t)handler;
 
     g_idt[vector].offset_low = (uint16_t)(addr & 0xFFFFu);
     g_idt[vector].selector = 0x18u;
     g_idt[vector].ist = 0;
-    g_idt[vector].type_attr = 0x8Eu;
+    g_idt[vector].type_attr = 0x8Eu | (uint8_t)((dpl & 3u) << 5u);
     g_idt[vector].offset_mid = (uint16_t)((addr >> 16) & 0xFFFFu);
     g_idt[vector].offset_high = (uint32_t)((addr >> 32) & 0xFFFFFFFFu);
     g_idt[vector].zero = 0;
+}
+
+static void idt_set_gate(uint8_t vector, void (*handler)(void)) {
+    idt_set_gate_dpl(vector, handler, 0);
 }
 
 static const char* const g_exception_names[32] = {
@@ -308,10 +313,12 @@ void idt_init(void) {
         idt_set_gate(i, g_exception_stubs[i]);
     }
 
-    // Ставим обработчики на весь диапазон PIC-IRQ (32..47)
     for (uint8_t irq = 0; irq < 16u; irq++) {
         idt_set_gate((uint8_t)(IRQ_VECTOR_BASE_MASTER + irq), g_irq_stubs[irq]);
     }
+
+    // Регистрируем системный вызов int 0x80 с DPL = 3
+    idt_set_gate_dpl(0x80, idt_stub_syscall, 3);
 
     pic_remap();
 
