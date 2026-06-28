@@ -160,3 +160,49 @@ uint32_t storage_last_lba(void) {
 uint8_t storage_boot_signature_valid(void) {
     return g_boot_signature_valid;
 }
+
+#define ATA_CMD_WRITE_SECTORS    0x30u
+#define ATA_CMD_FLUSH            0xE7u
+
+static inline void outw(uint16_t port, uint16_t value) {
+    __asm__ __volatile__("outw %0, %1" : : "a"(value), "Nd"(port));
+}
+
+uint8_t storage_write_sectors(uint32_t lba, uint8_t sector_count, const void* buffer) {
+    const uint16_t* words = (const uint16_t*)buffer;
+
+    if (sector_count == 0u || buffer == 0 || lba > 0x0FFFFFFFu) {
+        return 0u;
+    }
+
+    if (!ata_wait_not_busy()) {
+        return 0u;
+    }
+
+    outb(ATA_REG_DEVICE_CONTROL, ATA_CTRL_NIEN);
+    outb(ATA_REG_DRIVE_HEAD, (uint8_t)(ATA_DH_LBA_MASTER | ((lba >> 24) & 0x0Fu)));
+    io_wait();
+    outb(ATA_REG_SECTOR_COUNT, sector_count);
+    outb(ATA_REG_LBA_LOW, (uint8_t)(lba & 0xFFu));
+    outb(ATA_REG_LBA_MID, (uint8_t)((lba >> 8) & 0xFFu));
+    outb(ATA_REG_LBA_HIGH, (uint8_t)((lba >> 16) & 0xFFu));
+    outb(ATA_REG_COMMAND, ATA_CMD_WRITE_SECTORS);
+
+    for (uint8_t sector = 0; sector < sector_count; sector++) {
+        if (!ata_wait_drq()) {
+            return 0u;
+        }
+
+        for (uint16_t word = 0; word < (STORAGE_SECTOR_SIZE / 2u); word++) {
+            outw(ATA_REG_DATA, words[(sector * (STORAGE_SECTOR_SIZE / 2u)) + word]);
+        }
+    }
+
+    // Flush Cache
+    outb(ATA_REG_COMMAND, ATA_CMD_FLUSH);
+    if (!ata_wait_not_busy()) {
+        return 0u;
+    }
+
+    return 1u;
+}

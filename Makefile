@@ -4,7 +4,7 @@ LD        := ld
 OBJCOPY   := objcopy
 OBJDUMP   := objdump
 
-CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra -I. -Inet -Iexternal/lwip/src/include -Iexternal/wasm3/source -DLWIP_ACD=0 -DLWIP_DHCP_DOES_ACD_CHECK=0 -Dd_m3HasFloat=0 -Dd_m3VerboseErrorMessages=0
+CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra -I. -Inet -Iexternal/lwip/src/include -Iexternal/wasm3/source -Iexternal/fatfs -DLWIP_ACD=0 -DLWIP_DHCP_DOES_ACD_CHECK=0 -Dd_m3HasFloat=0 -Dd_m3VerboseErrorMessages=0
 LDFLAGS   := -m elf_x86_64 -T linker.ld
 
 BUILD_DIR := build
@@ -63,7 +63,9 @@ KERNEL_OBJS_RAW := \
 	tss.o \
 	syscall.o \
 	wasi.o \
-	wasm_runtime.o
+	wasm_runtime.o \
+	external/fatfs/ff.o \
+	external/fatfs/diskio.o
 
 WASM3_OBJS_RAW := \
 	external/wasm3/source/m3_bind.o \
@@ -94,8 +96,8 @@ VFS_CPPFLAGS := -DWOOS_ENABLE_WOFS=$(WOFS)
 
 all: os.img
 
-woosfs.bin: tools/build_woosfs.py
-	python3 tools/build_woosfs.py
+woosfs.bin: tools/build_fat.py
+	python3 tools/build_fat.py
 
 boot.bin: kernel.bin boot.asm
 	$(NASM) -f bin -DKERNEL_SECTORS=$(shell expr $$(stat -c%s kernel.bin) / 512) boot.asm -o boot.bin

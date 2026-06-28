@@ -145,3 +145,30 @@ int __popcountdi2(uint64_t val) {
     }
     return count;
 }
+
+char* strchr(const char* s, int c) {
+    while (*s != '\0') {
+        if (*s == (char)c) {
+            return (char*)s;
+        }
+        s++;
+    }
+    if (c == '\0') {
+        return (char*)s;
+    }
+    return NULL;
+}
+
+char* strrchr(const char* s, int c) {
+    const char* last = NULL;
+    while (*s != '\0') {
+        if (*s == (char)c) {
+            last = s;
+        }
+        s++;
+    }
+    if (c == '\0') {
+        return (char*)s;
+    }
+    return (char*)last;
+}

@@ -151,7 +151,35 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             storage_init();
             serial_printf("[WoOS Kernel] Storage driver initialized.\n");
             vfs_init();
-            serial_printf("[WoOS Kernel] VFS / WOFS initialized.\n");
+            serial_printf("[WoOS Kernel] VFS / FAT12 initialized.\n");
+            
+            // Тест записи и последующего чтения в VFS (FatFs)
+            /*
+            {
+                int32_t handle = vfs_open("/WRITE.TXT", VFS_MODE_CREATE | VFS_MODE_WRITE | VFS_MODE_TRUNC);
+                if (handle >= 0) {
+                    const char msg[] = "FatFs read/write test is OK!\n";
+                    vfs_write(handle, msg, sizeof(msg) - 1);
+                    vfs_close(handle);
+                    serial_printf("[VFS Test] /WRITE.TXT written successfully.\n");
+                    
+                    // Читаем обратно для верификации
+                    handle = vfs_open("/WRITE.TXT", VFS_MODE_READ);
+                    if (handle >= 0) {
+                        char read_buf[64];
+                        for (int i = 0; i < 64; i++) read_buf[i] = 0;
+                        uint32_t br = vfs_read(handle, read_buf, sizeof(read_buf) - 1);
+                        vfs_close(handle);
+                        serial_printf("[VFS Test] Read back content: %s (read: %u bytes)\n", read_buf, br);
+                    } else {
+                        serial_printf("[VFS Test] Error: failed to open /WRITE.TXT for reading!\n");
+                    }
+                } else {
+                    serial_printf("[VFS Test] Error: failed to open /WRITE.TXT for writing!\n");
+                }
+            }
+            */
+
             net_init();
             serial_printf("[WoOS Kernel] Net stack initialized.\n");
             timer_init(20u);
@@ -215,14 +243,14 @@ static void run_deferred_vfs_probe(void) {
 
     g_vfs_probe_done = 1u;
 
-    int32_t root = vfs_open("/");
+    int32_t root = vfs_open("/", VFS_MODE_READ);
     if (root >= 0) {
         vfs_dirent_t entry;
         (void)vfs_readdir(root, &entry);
         vfs_close(root);
     }
 
-    int32_t hello = vfs_open("/hello.txt");
+    int32_t hello = vfs_open("/HELLO.TXT", VFS_MODE_READ);
     if (hello >= 0) {
         uint8_t preview[16];
         (void)vfs_read(hello, preview, sizeof(preview));
