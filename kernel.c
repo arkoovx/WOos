@@ -159,6 +159,7 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             vmm_init();
             tss_init((void*)0x200000);
             syscall_init();
+            // process_create();
             wasm_runtime_init();
             // wasm_runtime_run(test_wasm, test_wasm_len);
             break;

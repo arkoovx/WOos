@@ -1,5 +1,6 @@
 #include "syscall.h"
 #include "serial.h"
+#include "sched.h"
 
 void syscall_init(void) {
     serial_printf("[Syscall] Syscall interface initialized (int 0x80).\n");
@@ -21,10 +22,7 @@ uint64_t syscall_handler(uint64_t num, uint64_t arg1, uint64_t arg2, uint64_t ar
             return -1;
         }
         case SYS_EXIT: {
-            serial_printf("[Syscall] Process exited with status %d\n", (int)arg1);
-            while(1) {
-                __asm__ __volatile__("hlt");
-            }
+            thread_exit((int)arg1);
             return 0;
         }
         default:
