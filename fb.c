@@ -219,8 +219,23 @@ static inline uint16_t rect_end(uint16_t start, uint16_t length) {
 static uint8_t* const g_backbuffer = (uint8_t*)(uint64_t)0x01000000ull;
 static uint8_t g_backbuffer_enabled = 0;
 
-static inline void mem_copy(uint8_t* dst, const uint8_t* src, uint16_t len) {
-    __builtin_memcpy(dst, src, len);
+static inline void mem_copy(uint8_t* dst, const uint8_t* src, uint32_t len) {
+    // rep movsq — копирует 8 байт за такт, намного быстрее чем __builtin_memcpy
+    // для крупных записей в VRAM (Write-Combining memory).
+    uint64_t qwords = len >> 3;         // len / 8
+    uint32_t tail   = len & 7u;         // остаток байт
+
+    __asm__ __volatile__ (
+        "rep movsq\n\t"
+        : "+D"(dst), "+S"(src), "+c"(qwords)
+        :
+        : "memory"
+    );
+
+    // Хвост (0–7 байт) — простой байтовый цикл
+    while (tail--) {
+        *dst++ = *src++;
+    }
 }
 
 static inline uint8_t* fb_target_base(video_info_t* info) {
@@ -571,12 +586,14 @@ void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uin
     uint16_t x_end = clamp_u16(rect_end(x, w), info->width);
     uint16_t y_end = clamp_u16(rect_end(y, h), info->height);
     uint16_t copy_width = (uint16_t)(x_end - x);
-    uint16_t row_len = (uint16_t)(copy_width * bytes_per_pixel(info));
+    uint32_t row_len = (uint32_t)copy_width * (uint32_t)bytes_per_pixel(info);
     uint8_t* front = (uint8_t*)(uint64_t)info->framebuffer;
+    uint32_t pitch  = (uint32_t)info->pitch;
+    uint32_t x_off  = (uint32_t)x * (uint32_t)bytes_per_pixel(info);
 
     for (uint16_t py = y; py < y_end; py++) {
-        uint8_t* src = g_backbuffer + ((uint64_t)py * info->pitch) + ((uint64_t)x * bytes_per_pixel(info));
-        uint8_t* dst = front + ((uint64_t)py * info->pitch) + ((uint64_t)x * bytes_per_pixel(info));
+        uint8_t* src = g_backbuffer + (uint64_t)py * pitch + x_off;
+        uint8_t* dst = front        + (uint64_t)py * pitch + x_off;
         mem_copy(dst, src, row_len);
     }
 
