@@ -6,8 +6,10 @@
 #include "lwip/etharp.h"
 #include "lwip/dhcp.h"
 #include "timer.h"
+#include "kernel.h"
 
 static net_status_t g_net_status = {0u, 0u, 0u, 0u, 0u, 0u};
+static uint64_t g_last_net_poll_tsc = 0;
 
 u32_t sys_now(void) {
     // Ядро WoOS по умолчанию инициализирует таймер на 20Гц (timer_init(20)).
@@ -21,6 +23,14 @@ void net_init(void) {
 }
 
 void net_poll(void) {
+    // Опрашиваем сеть не чаще раза в 5 мс, чтобы избежать огромного оверхеда
+    // от вызова sys_check_timeouts() на каждой итерации бесконечного цикла kmain.
+    uint64_t current_tsc = rdtsc();
+    if (g_last_net_poll_tsc != 0 && (current_tsc - g_last_net_poll_tsc) < (5ULL * g_tsc_per_ms)) {
+        return;
+    }
+    g_last_net_poll_tsc = current_tsc;
+
     virtio_net_poll();
     
     // В NO_SYS режиме нужно вручную опрашивать таймеры lwip

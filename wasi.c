@@ -355,6 +355,8 @@ m3ApiRawFunction(wasi_socket_accept) {
     
     int32_t client_sock = net_socket_accept(sock);
     if (client_sock < 0) {
+        extern void thread_yield(void);
+        thread_yield();
         m3ApiReturn(-1);
     }
     

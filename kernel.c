@@ -178,10 +178,10 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             input_init();
             serial_printf("[WoOS Kernel] Input queue initialized.\n");
             sched_init();
-            thread_create(task1);
-            thread_create(task2);
+            // thread_create(task1);
+            // thread_create(task2);
             thread_create(wasm_runner_thread);
-            serial_printf("[WoOS Kernel] Scheduler started with 3 threads.\n");
+            serial_printf("[WoOS Kernel] Scheduler started.\n");
             break;
         case INIT_UI:
             serial_printf("[WoOS Kernel] Launching UI...\n");
@@ -320,8 +320,8 @@ void kmain(video_info_t* video) {
             }
         }
 
-        // Усыпляем процессор до следующего прерывания
-        __asm__ __volatile__("hlt");
+        // Уступаем квант времени другим потокам
+        thread_yield();
     }
 }
 
