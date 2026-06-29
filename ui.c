@@ -711,8 +711,8 @@ void ui_render_dirty(video_info_t* info) {
     uint64_t end_total = rdtsc();
     uint64_t total_time = (end_total - start_total) / g_tsc_per_ms;
     
-    // Если отрисовка кадра заняла больше 2 миллисекунд, логируем детали
-    if (total_time >= 2) {
+    // Если отрисовка кадра заняла больше 16 миллисекунд (60 FPS), логируем детали
+    if (total_time >= 16) {
         uint64_t draw_time = (end_draw - start_draw) / g_tsc_per_ms;
         uint64_t present_time = (end_present - start_present) / g_tsc_per_ms;
         serial_printf("[Perf Warning] render_dirty took %u ms (draw: %u ms, present: %u ms) for %u rects\n",

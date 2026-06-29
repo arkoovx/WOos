@@ -315,7 +315,7 @@ void kmain(video_info_t* video) {
             end = rdtsc();
             last_render_tsc = end;
             uint64_t render_time = (end - start) / g_tsc_per_ms;
-            if (render_time >= 2) {
+            if (render_time >= 16) {
                 serial_printf("[Perf Warning] ui_render_dirty took %u ms\n", (uint32_t)render_time);
             }
         }
