@@ -683,18 +683,29 @@ void ui_render_dirty(video_info_t* info) {
     uint64_t start_present = rdtsc();
     uint8_t cursor_presented = 0;
 
-    for (uint16_t i = 0; i < present_count; i++) {
-        fb_present_rect(info, present_queue[i].x, present_queue[i].y, present_queue[i].w, present_queue[i].h);
-        if (g_cursor.visible && should_refresh_cursor && rect_intersects(&present_queue[i], &cursor_rect)) {
+    if (virtio_gpu_renderer_is_active() && present_count > 0) {
+        ui_dirty_rect_t union_rect = present_queue[0];
+        for (uint16_t i = 1; i < present_count; i++) {
+            union_rect = rect_union(&union_rect, &present_queue[i]);
+        }
+        if (g_cursor.visible && should_refresh_cursor) {
+            union_rect = rect_union(&union_rect, &cursor_rect);
             cursor_presented = 1;
+        }
+        fb_present_rect(info, union_rect.x, union_rect.y, union_rect.w, union_rect.h);
+    } else {
+        for (uint16_t i = 0; i < present_count; i++) {
+            fb_present_rect(info, present_queue[i].x, present_queue[i].y, present_queue[i].w, present_queue[i].h);
+            if (g_cursor.visible && should_refresh_cursor && rect_intersects(&present_queue[i], &cursor_rect)) {
+                cursor_presented = 1;
+            }
+        }
+        if (g_cursor.visible && should_refresh_cursor && !cursor_presented) {
+            fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
         }
     }
 
     g_dirty_count = 0;
-
-    if (g_cursor.visible && should_refresh_cursor && !cursor_presented) {
-        fb_present_rect(info, g_cursor.x, g_cursor.y, CURSOR_W, CURSOR_H);
-    }
     uint64_t end_present = rdtsc();
 
     uint64_t end_total = rdtsc();

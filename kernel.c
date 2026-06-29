@@ -273,6 +273,8 @@ void kmain(video_info_t* video) {
 
     calibrate_tsc();
 
+    uint64_t last_render_tsc = 0;
+
     while (1) {
         uint64_t start, end;
 
@@ -305,12 +307,17 @@ void kmain(video_info_t* video) {
             serial_printf("[Perf Warning] vfs_probe took %u ms\n", (uint32_t)vfs_time);
         }
 
-        start = rdtsc();
-        ui_render_dirty(video);
-        end = rdtsc();
-        uint64_t render_time = (end - start) / g_tsc_per_ms;
-        if (render_time >= 2) {
-            serial_printf("[Perf Warning] ui_render_dirty took %u ms\n", (uint32_t)render_time);
+        // Ограничение кадров до 60 FPS (не чаще раза в 16 мс)
+        uint64_t current_tsc = rdtsc();
+        if (last_render_tsc == 0 || (current_tsc - last_render_tsc) >= (16ULL * g_tsc_per_ms)) {
+            start = rdtsc();
+            ui_render_dirty(video);
+            end = rdtsc();
+            last_render_tsc = end;
+            uint64_t render_time = (end - start) / g_tsc_per_ms;
+            if (render_time >= 2) {
+                serial_printf("[Perf Warning] ui_render_dirty took %u ms\n", (uint32_t)render_time);
+            }
         }
 
         // Усыпляем процессор до следующего прерывания
