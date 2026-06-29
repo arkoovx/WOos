@@ -1,6 +1,6 @@
 import os
 
-wasm_path = "external/wasm3/test/wasi/simple/test-opt.wasm"
+wasm_path = "http_server.wasm"
 h_path = "test_wasm.h"
 
 if os.path.exists(wasm_path):

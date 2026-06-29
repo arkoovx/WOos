@@ -1,6 +1,7 @@
 #include "wasi.h"
 #include "serial.h"
 #include "vfs.h"
+#include "net_socket.h"
 
 // Структура WASI iovec
 typedef struct wasi_iovec_t {
@@ -302,44 +303,145 @@ m3ApiRawFunction(wasi_fd_seek) {
     m3ApiReturn(0);
 }
 
+m3ApiRawFunction(wasi_socket_create) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, type)
+    m3ApiReturn(net_socket_create((uint8_t)type));
+}
+
+m3ApiRawFunction(wasi_socket_bind) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, sock)
+    m3ApiGetArg(uint32_t, port)
+    m3ApiReturn(net_socket_bind(sock, (uint16_t)port));
+}
+
+m3ApiRawFunction(wasi_socket_listen) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, sock)
+    m3ApiReturn(net_socket_listen(sock));
+}
+
+m3ApiRawFunction(wasi_socket_accept) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, sock)
+    m3ApiReturn(net_socket_accept(sock));
+}
+
+m3ApiRawFunction(wasi_socket_connect) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, sock)
+    m3ApiGetArgMem(const char*, ip)
+    m3ApiGetArg(uint32_t, port)
+    
+    char ip_buf[64];
+    uint32_t i = 0;
+    while (i < 63 && ip[i] != '\0') {
+        ip_buf[i] = ip[i];
+        i++;
+    }
+    ip_buf[i] = '\0';
+    m3ApiReturn(net_socket_connect(sock, ip_buf, (uint16_t)port));
+}
+
+m3ApiRawFunction(wasi_socket_send) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, sock)
+    m3ApiGetArgMem(const void*, data)
+    m3ApiGetArg(uint32_t, len)
+    m3ApiCheckMem(data, len);
+    m3ApiReturn(net_socket_send(sock, data, len));
+}
+
+m3ApiRawFunction(wasi_socket_recv) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, sock)
+    m3ApiGetArgMem(void*, buf)
+    m3ApiGetArg(uint32_t, len)
+    m3ApiCheckMem(buf, len);
+    m3ApiReturn(net_socket_recv(sock, buf, len));
+}
+
+m3ApiRawFunction(wasi_socket_close) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, sock)
+    net_socket_close(sock);
+    m3ApiReturn(0);
+}
+
+extern int strcmp(const char* s1, const char* s2);
+
+static M3Result link_raw_func(IM3Module module, const char* const moduleName, const char* const functionName, const char* const signature, M3RawCall function) {
+    M3Result res = m3_LinkRawFunction(module, moduleName, functionName, signature, function);
+    if (res && strcmp(res, "function lookup failed") != 0) {
+        return res;
+    }
+    return m3Err_none;
+}
+
 M3Result link_wasi(IM3Module module) {
-    M3Result res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "fd_write", "i(i*i*)", &wasi_fd_write);
+    M3Result res = link_raw_func(module, "wasi_snapshot_preview1", "fd_write", "i(i*i*)", &wasi_fd_write);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "proc_exit", "v(i)", &wasi_proc_exit);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "proc_exit", "v(i)", &wasi_proc_exit);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "clock_time_get", "i(iI*)", &wasi_clock_time_get);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "clock_time_get", "i(iI*)", &wasi_clock_time_get);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "fd_read", "i(i*i*)", &wasi_fd_read);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "fd_read", "i(i*i*)", &wasi_fd_read);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "fd_close", "i(i)", &wasi_fd_close);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "fd_close", "i(i)", &wasi_fd_close);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "fd_prestat_get", "i(i*)", &wasi_fd_prestat_get);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "fd_prestat_get", "i(i*)", &wasi_fd_prestat_get);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "fd_prestat_dir_name", "i(i*i)", &wasi_fd_prestat_dir_name);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "fd_prestat_dir_name", "i(i*i)", &wasi_fd_prestat_dir_name);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "fd_fdstat_get", "i(i*)", &wasi_fd_fdstat_get);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "fd_fdstat_get", "i(i*)", &wasi_fd_fdstat_get);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "path_open", "i(ii*iiIIi*)", &wasi_path_open);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "path_open", "i(ii*iiIIi*)", &wasi_path_open);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "args_sizes_get", "i(**)", &wasi_args_sizes_get);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "args_sizes_get", "i(**)", &wasi_args_sizes_get);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "args_get", "i(**)", &wasi_args_get);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "args_get", "i(**)", &wasi_args_get);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "random_get", "i(*i)", &wasi_random_get);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "random_get", "i(*i)", &wasi_random_get);
     if (res) return res;
 
-    res = m3_LinkRawFunction(module, "wasi_snapshot_preview1", "fd_seek", "i(iIi*)", &wasi_fd_seek);
+    res = link_raw_func(module, "wasi_snapshot_preview1", "fd_seek", "i(iIi*)", &wasi_fd_seek);
+    if (res) return res;
+
+    // Ссылка на сетевые функции WoOS в пространстве env
+    res = link_raw_func(module, "env", "woos_socket_create", "i(i)", &wasi_socket_create);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_socket_bind", "i(ii)", &wasi_socket_bind);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_socket_listen", "i(i)", &wasi_socket_listen);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_socket_accept", "i(i)", &wasi_socket_accept);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_socket_connect", "i(i*i)", &wasi_socket_connect);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_socket_send", "i(i*i)", &wasi_socket_send);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_socket_recv", "i(i*i)", &wasi_socket_recv);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_socket_close", "i(i)", &wasi_socket_close);
     if (res) return res;
 
     return m3Err_none;

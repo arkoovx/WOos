@@ -13,6 +13,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "pmm.h"
 #include "storage.h"
 #include "vfs.h"
+#include "net_socket.h"
 #include "net.h"
 #include "serial.h"
 #include "sched.h"
@@ -117,6 +118,22 @@ void task2(void) {
     }
 }
 
+void wasm_runner_thread(void) {
+    serial_printf("[WASM Runner] Waiting for network to be active...\n");
+    while (1) {
+        const net_status_t* st = net_get_status();
+        if (st->active && st->link_up) break;
+        net_poll();
+        for (volatile int d = 0; d < 500000; d++);
+        thread_yield();
+    }
+    serial_printf("[WASM Runner] Network active. Starting WASM HTTP Server...\n");
+    wasm_runtime_run(test_wasm, test_wasm_len);
+    while (1) {
+        thread_yield();
+    }
+}
+
 static void run_stage(video_info_t* video, init_stage_t stage) {
     serial_printf("[WoOS Kernel] Starting stage: %d...\n", (int)stage);
     switch (stage) {
@@ -143,53 +160,27 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             serial_printf("[WoOS Kernel] PMM initialized.\n");
             kheap_init();
             serial_printf("[WoOS Kernel] Heap initialized.\n");
-            sched_init();
-            thread_create(task1);
-            thread_create(task2);
-            input_init();
-            serial_printf("[WoOS Kernel] Input queue initialized.\n");
+            // Инициализируем сетевой стек ДО создания потоков —
+            // чтобы tcp_server_thread мог безопасно вызывать net_socket_create
+            net_init();
+            serial_printf("[WoOS Kernel] Net stack initialized.\n");
             storage_init();
             serial_printf("[WoOS Kernel] Storage driver initialized.\n");
             vfs_init();
             serial_printf("[WoOS Kernel] VFS / FAT12 initialized.\n");
-            
-            // Тест записи и последующего чтения в VFS (FatFs)
-            /*
-            {
-                int32_t handle = vfs_open("/WRITE.TXT", VFS_MODE_CREATE | VFS_MODE_WRITE | VFS_MODE_TRUNC);
-                if (handle >= 0) {
-                    const char msg[] = "FatFs read/write test is OK!\n";
-                    vfs_write(handle, msg, sizeof(msg) - 1);
-                    vfs_close(handle);
-                    serial_printf("[VFS Test] /WRITE.TXT written successfully.\n");
-                    
-                    // Читаем обратно для верификации
-                    handle = vfs_open("/WRITE.TXT", VFS_MODE_READ);
-                    if (handle >= 0) {
-                        char read_buf[64];
-                        for (int i = 0; i < 64; i++) read_buf[i] = 0;
-                        uint32_t br = vfs_read(handle, read_buf, sizeof(read_buf) - 1);
-                        vfs_close(handle);
-                        serial_printf("[VFS Test] Read back content: %s (read: %u bytes)\n", read_buf, br);
-                    } else {
-                        serial_printf("[VFS Test] Error: failed to open /WRITE.TXT for reading!\n");
-                    }
-                } else {
-                    serial_printf("[VFS Test] Error: failed to open /WRITE.TXT for writing!\n");
-                }
-            }
-            */
-
-            net_init();
-            serial_printf("[WoOS Kernel] Net stack initialized.\n");
             timer_init(20u);
             serial_printf("[WoOS Kernel] Timer initialized.\n");
             vmm_init();
             tss_init((void*)0x200000);
             syscall_init();
-            // process_create();
             wasm_runtime_init();
-            // wasm_runtime_run(test_wasm, test_wasm_len);
+            input_init();
+            serial_printf("[WoOS Kernel] Input queue initialized.\n");
+            sched_init();
+            thread_create(task1);
+            thread_create(task2);
+            thread_create(wasm_runner_thread);
+            serial_printf("[WoOS Kernel] Scheduler started with 3 threads.\n");
             break;
         case INIT_UI:
             serial_printf("[WoOS Kernel] Launching UI...\n");

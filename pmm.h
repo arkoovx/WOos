@@ -9,6 +9,8 @@
 void pmm_init(const video_info_t* info);
 void* pmm_alloc_page(void);
 void pmm_free_page(void* page);
+void* pmm_alloc_pages_multi(uint32_t count);
+void pmm_free_pages_multi(void* pages, uint32_t count);
 
 uint8_t pmm_is_ready(void);
 uint64_t pmm_total_pages(void);

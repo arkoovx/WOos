@@ -69,17 +69,19 @@ void thread_create(void (*entry_point)(void)) {
         return;
     }
 
-    void* stack_page = pmm_alloc_page();
-    if (!stack_page) {
-        serial_printf("[Scheduler] Error: failed to allocate stack page for new thread!\n");
+    // Выделяем 16 страниц (64 КБ) для стека каждого потока
+    uint32_t stack_pages_count = 16;
+    void* stack_pages = pmm_alloc_pages_multi(stack_pages_count);
+    if (!stack_pages) {
+        serial_printf("[Scheduler] Error: failed to allocate stack pages for new thread!\n");
         return;
     }
 
     thread_t* t = &g_threads[g_num_threads];
     t->id = g_num_threads;
-    t->stack_limit = stack_page;
+    t->stack_limit = stack_pages;
 
-    uint64_t stack_top = (uint64_t)stack_page + 4096;
+    uint64_t stack_top = (uint64_t)stack_pages + (stack_pages_count * 4096);
     context_t* ctx = (context_t*)(stack_top - sizeof(context_t));
 
     // Инициализируем контекст для возврата через iretq
@@ -100,7 +102,7 @@ void thread_create(void (*entry_point)(void)) {
     t->cr3 = g_kernel_cr3;
     t->kernel_stack_top = stack_top;
 
-    serial_printf("[Scheduler] Created thread %d (entry=%p, stack=%p)\n", (int)t->id, entry_point, stack_page);
+    serial_printf("[Scheduler] Created thread %d (entry=%p, stack=%p)\n", (int)t->id, entry_point, stack_pages);
     g_num_threads++;
 }
 

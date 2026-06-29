@@ -64,6 +64,7 @@ KERNEL_OBJS_RAW := \
 	syscall.o \
 	wasi.o \
 	wasm_runtime.o \
+	net_socket.o \
 	external/fatfs/ff.o \
 	external/fatfs/diskio.o
 
@@ -151,4 +152,30 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -f *.bin *.elf *.img woosfs.bin
 
-.PHONY: all clean verify-layout
+# Запуск WoOS в QEMU с виртуальной сетью (user-mode NAT)
+# Порт хоста 8080 → порт ОС 80 (для теста HTTP-сервера)
+run:
+	qemu-system-x86_64 \
+		-drive file=os.img,format=raw,if=floppy \
+		-m 128M \
+		-serial stdio \
+		-vga virtio \
+		-device virtio-net-pci,netdev=net0 \
+		-netdev user,id=net0,hostfwd=tcp::8080-:80 \
+		-no-reboot
+
+# Тихий запуск в фоне — serial log пишется в файл
+run-bg: os.img
+	qemu-system-x86_64 \
+		-drive file=os.img,format=raw,if=floppy \
+		-m 128M \
+		-serial file:serial.log \
+		-vga virtio \
+		-device virtio-net-pci,netdev=net0 \
+		-netdev user,id=net0,hostfwd=tcp::8080-:80 \
+		-no-reboot \
+		-display none &
+	@echo "QEMU started in background. Serial log: serial.log"
+	@echo "Test HTTP server with: curl http://localhost:8080/"
+
+.PHONY: all clean verify-layout run run-bg

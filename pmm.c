@@ -173,6 +173,50 @@ void pmm_free_page(void* page) {
     }
 }
 
+void* pmm_alloc_pages_multi(uint32_t count) {
+    if (!g_pmm.ready || g_pmm.free_pages < count || count == 0) {
+        return 0;
+    }
+
+    uint32_t found_count = 0;
+    uint64_t start_idx = 0;
+
+    for (uint64_t i = 0; i < PMM_MAX_PAGES; i++) {
+        if (!bitmap_test(i)) {
+            if (found_count == 0) {
+                start_idx = i;
+            }
+            found_count++;
+            if (found_count == count) {
+                for (uint64_t j = start_idx; j <= i; j++) {
+                    bitmap_set(j);
+                }
+                g_pmm.free_pages -= count;
+                return (void*)(start_idx * PMM_PAGE_SIZE);
+            }
+        } else {
+            found_count = 0;
+        }
+    }
+
+    return 0;
+}
+
+void pmm_free_pages_multi(void* pages, uint32_t count) {
+    uint64_t page_addr = (uint64_t)pages;
+    if (!g_pmm.ready || pages == 0 || count == 0) {
+        return;
+    }
+    uint64_t page_idx = page_addr / PMM_PAGE_SIZE;
+    for (uint32_t i = 0; i < count; i++) {
+        uint64_t cur_idx = page_idx + i;
+        if (cur_idx < PMM_MAX_PAGES && bitmap_test(cur_idx)) {
+            bitmap_clear(cur_idx);
+            g_pmm.free_pages++;
+        }
+    }
+}
+
 uint8_t pmm_is_ready(void) {
     return g_pmm.ready;
 }
