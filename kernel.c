@@ -42,7 +42,8 @@ void calibrate_tsc(void) {
     }
     
     uint64_t end_tsc = rdtsc();
-    g_tsc_per_ms = (end_tsc - start_tsc) / 100;
+    // 5 тиков при частоте PIT 20 Гц — это 250 мс
+    g_tsc_per_ms = (end_tsc - start_tsc) / 250;
     if (g_tsc_per_ms == 0) {
         g_tsc_per_ms = 2000000ULL;
     }

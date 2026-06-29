@@ -335,7 +335,7 @@ static inline uint8_t bytes_per_pixel(const video_info_t* info) {
 }
 
 static inline uint8_t use_gpu_draw_commands(void) {
-    return virtio_gpu_renderer_is_active();
+    return 0;
 }
 
 uint32_t fb_readpixel(video_info_t* info, uint16_t x, uint16_t y) {
@@ -578,6 +578,58 @@ void fb_draw_text(video_info_t* info, uint16_t x, uint16_t y, const char* text, 
 
 void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
 #if WOOS_ENABLE_DBL_BUFFER
+    if (virtio_gpu_renderer_is_active()) {
+        if (!g_backbuffer_enabled || w == 0 || h == 0) {
+            virtio_gpu_renderer_present_rect(info, x, y, w, h);
+            return;
+        }
+
+        uint16_t x_end = clamp_u16(rect_end(x, w), info->width);
+        uint16_t y_end = clamp_u16(rect_end(y, h), info->height);
+        uint16_t copy_width = (uint16_t)(x_end - x);
+        if (copy_width > 0 && y_end > y) {
+            uint8_t* src_base = g_backbuffer;
+            uint8_t* dst_base = (uint8_t*)(uint64_t)0x01800000ull; // VIRTIO_GPU_DRAW_SURFACE_BASE
+            uint32_t src_pitch = info->pitch;
+            uint32_t dst_pitch = info->width * 4;
+            uint8_t src_bpp = bytes_per_pixel(info);
+
+            if (src_bpp == 3) {
+                for (uint16_t py = y; py < y_end; py++) {
+                    uint8_t* src = src_base + (uint64_t)py * src_pitch + (uint64_t)x * 3;
+                    uint32_t* dst = (uint32_t*)(dst_base + (uint64_t)py * dst_pitch + (uint64_t)x * 4);
+                    for (uint16_t px = 0; px < copy_width; px++) {
+                        uint8_t b = src[0];
+                        uint8_t g = src[1];
+                        uint8_t r = src[2];
+                        dst[px] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+                        src += 3;
+                    }
+                }
+            } else if (src_bpp == 4) {
+                for (uint16_t py = y; py < y_end; py++) {
+                    uint8_t* src = src_base + (uint64_t)py * src_pitch + (uint64_t)x * 4;
+                    uint8_t* dst = dst_base + (uint64_t)py * dst_pitch + (uint64_t)x * 4;
+                    mem_copy(dst, src, copy_width * 4);
+                }
+            } else if (src_bpp == 2) {
+                for (uint16_t py = y; py < y_end; py++) {
+                    uint16_t* src = (uint16_t*)(src_base + (uint64_t)py * src_pitch + (uint64_t)x * 2);
+                    uint32_t* dst = (uint32_t*)(dst_base + (uint64_t)py * dst_pitch + (uint64_t)x * 4);
+                    for (uint16_t px = 0; px < copy_width; px++) {
+                        uint16_t packed = src[px];
+                        uint8_t r = (uint8_t)(((packed >> 11) & 0x1Fu) << 3);
+                        uint8_t g = (uint8_t)(((packed >> 5) & 0x3Fu) << 2);
+                        uint8_t b = (uint8_t)((packed & 0x1Fu) << 3);
+                        dst[px] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+                    }
+                }
+            }
+        }
+        virtio_gpu_renderer_present_rect(info, x, y, w, h);
+        return;
+    }
+
     if (use_gpu_draw_commands() || !g_backbuffer_enabled || w == 0 || h == 0) {
         virtio_gpu_renderer_present_rect(info, x, y, w, h);
         return;
