@@ -94,14 +94,14 @@ entry_point:
 
     ; Set VBE Mode to 1280x1024x32 directly
     mov ax, 0x4F01
-    mov cx, 0x144 ; 1280x1024x32
+    mov cx, 0x145 ; 1280x1024x32
     mov di, vbe_mode_info
     int 0x10
     cmp ax, 0x004F
     jne .use_fallback_mode
 
     mov ax, 0x4F02
-    mov bx, 0x144 | 0x4000 ; Enable LFB
+    mov bx, 0x145 | 0x4000 ; Enable LFB
     int 0x10
     cmp ax, 0x004F
     je .vbe_done
