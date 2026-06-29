@@ -156,7 +156,7 @@ clean:
 # Порт хоста 8080 → порт ОС 80 (для теста HTTP-сервера)
 run:
 	qemu-system-x86_64 \
-		-drive file=os.img,format=raw,if=floppy \
+		-drive file=os.img,format=raw,index=0,media=disk \
 		-m 128M \
 		-serial stdio \
 		-vga virtio \
@@ -167,7 +167,7 @@ run:
 # Тихий запуск в фоне — serial log пишется в файл
 run-bg: os.img
 	qemu-system-x86_64 \
-		-drive file=os.img,format=raw,if=floppy \
+		-drive file=os.img,format=raw,index=0,media=disk \
 		-m 128M \
 		-serial file:serial.log \
 		-vga virtio \

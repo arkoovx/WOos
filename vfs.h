@@ -15,9 +15,16 @@ typedef struct vfs_dirent {
     uint32_t size;
 } vfs_dirent_t;
 
+// Типы дескрипторов VFS
+#define VFS_HANDLE_FILE   0
+#define VFS_HANDLE_DIR    1
+#define VFS_HANDLE_SOCKET 2
+
 void vfs_init(void);
 uint8_t vfs_is_ready(void);
 int32_t vfs_open(const char* path, uint8_t mode);
+int32_t vfs_create_socket_handle(int32_t socket_id);
+int32_t vfs_get_socket_id(int32_t handle);
 uint32_t vfs_read(int32_t handle, void* buffer, uint32_t bytes);
 uint32_t vfs_write(int32_t handle, const void* buffer, uint32_t bytes);
 int32_t vfs_seek(int32_t handle, uint32_t offset);

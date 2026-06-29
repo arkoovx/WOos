@@ -306,33 +306,77 @@ m3ApiRawFunction(wasi_fd_seek) {
 m3ApiRawFunction(wasi_socket_create) {
     m3ApiReturnType(int32_t)
     m3ApiGetArg(uint32_t, type)
-    m3ApiReturn(net_socket_create((uint8_t)type));
+    
+    int32_t sock = net_socket_create((uint8_t)type);
+    if (sock < 0) {
+        m3ApiReturn(-1);
+    }
+    
+    extern int32_t vfs_create_socket_handle(int32_t socket_id);
+    int32_t handle = vfs_create_socket_handle(sock);
+    if (handle < 0) {
+        net_socket_close(sock);
+        m3ApiReturn(-1);
+    }
+    
+    m3ApiReturn(handle + 4);
 }
 
 m3ApiRawFunction(wasi_socket_bind) {
     m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, sock)
+    m3ApiGetArg(int32_t, fd)
     m3ApiGetArg(uint32_t, port)
+    
+    extern int32_t vfs_get_socket_id(int32_t handle);
+    int32_t sock = vfs_get_socket_id(fd - 4);
+    if (sock < 0) m3ApiReturn(-1);
+    
     m3ApiReturn(net_socket_bind(sock, (uint16_t)port));
 }
 
 m3ApiRawFunction(wasi_socket_listen) {
     m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, sock)
+    m3ApiGetArg(int32_t, fd)
+    
+    extern int32_t vfs_get_socket_id(int32_t handle);
+    int32_t sock = vfs_get_socket_id(fd - 4);
+    if (sock < 0) m3ApiReturn(-1);
+    
     m3ApiReturn(net_socket_listen(sock));
 }
 
 m3ApiRawFunction(wasi_socket_accept) {
     m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, sock)
-    m3ApiReturn(net_socket_accept(sock));
+    m3ApiGetArg(int32_t, fd)
+    
+    extern int32_t vfs_get_socket_id(int32_t handle);
+    int32_t sock = vfs_get_socket_id(fd - 4);
+    if (sock < 0) m3ApiReturn(-1);
+    
+    int32_t client_sock = net_socket_accept(sock);
+    if (client_sock < 0) {
+        m3ApiReturn(-1);
+    }
+    
+    extern int32_t vfs_create_socket_handle(int32_t socket_id);
+    int32_t client_handle = vfs_create_socket_handle(client_sock);
+    if (client_handle < 0) {
+        net_socket_close(client_sock);
+        m3ApiReturn(-1);
+    }
+    
+    m3ApiReturn(client_handle + 4);
 }
 
 m3ApiRawFunction(wasi_socket_connect) {
     m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, sock)
+    m3ApiGetArg(int32_t, fd)
     m3ApiGetArgMem(const char*, ip)
     m3ApiGetArg(uint32_t, port)
+    
+    extern int32_t vfs_get_socket_id(int32_t handle);
+    int32_t sock = vfs_get_socket_id(fd - 4);
+    if (sock < 0) m3ApiReturn(-1);
     
     char ip_buf[64];
     uint32_t i = 0;
@@ -346,26 +390,38 @@ m3ApiRawFunction(wasi_socket_connect) {
 
 m3ApiRawFunction(wasi_socket_send) {
     m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, sock)
+    m3ApiGetArg(int32_t, fd)
     m3ApiGetArgMem(const void*, data)
     m3ApiGetArg(uint32_t, len)
     m3ApiCheckMem(data, len);
+    
+    extern int32_t vfs_get_socket_id(int32_t handle);
+    int32_t sock = vfs_get_socket_id(fd - 4);
+    if (sock < 0) m3ApiReturn(-1);
+    
     m3ApiReturn(net_socket_send(sock, data, len));
 }
 
 m3ApiRawFunction(wasi_socket_recv) {
     m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, sock)
+    m3ApiGetArg(int32_t, fd)
     m3ApiGetArgMem(void*, buf)
     m3ApiGetArg(uint32_t, len)
     m3ApiCheckMem(buf, len);
+    
+    extern int32_t vfs_get_socket_id(int32_t handle);
+    int32_t sock = vfs_get_socket_id(fd - 4);
+    if (sock < 0) m3ApiReturn(-1);
+    
     m3ApiReturn(net_socket_recv(sock, buf, len));
 }
 
 m3ApiRawFunction(wasi_socket_close) {
     m3ApiReturnType(int32_t)
-    m3ApiGetArg(int32_t, sock)
-    net_socket_close(sock);
+    m3ApiGetArg(int32_t, fd)
+    
+    extern void vfs_close(int32_t handle);
+    vfs_close(fd - 4);
     m3ApiReturn(0);
 }
 

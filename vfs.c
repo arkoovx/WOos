@@ -2,15 +2,17 @@
 #include "storage.h"
 #include "ff.h"
 #include "serial.h"
+#include "net_socket.h"
 
 #define VFS_MAX_HANDLES 8u
 #define VFS_BOOT_SECTORS 1u
 
 typedef struct vfs_handle {
     uint8_t in_use;
-    uint8_t is_dir;
+    uint8_t type;       // VFS_HANDLE_FILE, VFS_HANDLE_DIR, VFS_HANDLE_SOCKET
     FIL fil;
     DIR dir;
+    int32_t socket_id;
 } vfs_handle_t;
 
 // Глобальная переменная для LBA начала раздела FAT12 (используется в diskio.c)
@@ -88,11 +90,26 @@ static int32_t allocate_handle(void) {
     for (uint8_t i = 0u; i < VFS_MAX_HANDLES; i++) {
         if (!g_handles[i].in_use) {
             g_handles[i].in_use = 1u;
-            g_handles[i].is_dir = 0u;
+            g_handles[i].type = VFS_HANDLE_FILE;
+            g_handles[i].socket_id = -1;
             return (int32_t)i;
         }
     }
     return -1;
+}
+
+int32_t vfs_create_socket_handle(int32_t socket_id) {
+    int32_t h = allocate_handle();
+    if (h < 0) return -1;
+    g_handles[h].type = VFS_HANDLE_SOCKET;
+    g_handles[h].socket_id = socket_id;
+    return h;
+}
+
+int32_t vfs_get_socket_id(int32_t handle) {
+    if (handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) return -1;
+    if (!g_handles[handle].in_use || g_handles[handle].type != VFS_HANDLE_SOCKET) return -1;
+    return g_handles[handle].socket_id;
 }
 
 int32_t vfs_open(const char* path, uint8_t mode) {
@@ -111,7 +128,7 @@ int32_t vfs_open(const char* path, uint8_t mode) {
     if (path_len == 1 && path[0] == '/') {
         FRESULT res = f_opendir(&g_handles[h].dir, path);
         if (res == FR_OK) {
-            g_handles[h].is_dir = 1u;
+            g_handles[h].type = VFS_HANDLE_DIR;
             return h;
         }
         g_handles[h].in_use = 0u;
@@ -139,7 +156,7 @@ int32_t vfs_open(const char* path, uint8_t mode) {
 
     FRESULT res = f_open(&g_handles[h].fil, path, fat_mode);
     if (res == FR_OK) {
-        g_handles[h].is_dir = 0u;
+        g_handles[h].type = VFS_HANDLE_FILE;
         return h;
     }
 
@@ -147,7 +164,7 @@ int32_t vfs_open(const char* path, uint8_t mode) {
     // Попробуем открыть как директорию.
     res = f_opendir(&g_handles[h].dir, path);
     if (res == FR_OK) {
-        g_handles[h].is_dir = 1u;
+        g_handles[h].type = VFS_HANDLE_DIR;
         return h;
     }
 
@@ -161,7 +178,14 @@ uint32_t vfs_read(int32_t handle, void* buffer, uint32_t bytes) {
     }
 
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->is_dir) return 0u;
+    if (!h->in_use) return 0u;
+
+    if (h->type == VFS_HANDLE_SOCKET) {
+        int32_t res = net_socket_recv(h->socket_id, buffer, bytes);
+        return (res < 0) ? 0u : (uint32_t)res;
+    }
+
+    if (h->type != VFS_HANDLE_FILE) return 0u;
 
     UINT br = 0;
     FRESULT res = f_read(&h->fil, buffer, (UINT)bytes, &br);
@@ -177,7 +201,14 @@ uint32_t vfs_write(int32_t handle, const void* buffer, uint32_t bytes) {
     }
 
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->is_dir) return 0u;
+    if (!h->in_use) return 0u;
+
+    if (h->type == VFS_HANDLE_SOCKET) {
+        int32_t res = net_socket_send(h->socket_id, buffer, bytes);
+        return (res < 0) ? 0u : (uint32_t)res;
+    }
+
+    if (h->type != VFS_HANDLE_FILE) return 0u;
 
     UINT bw = 0;
     FRESULT res = f_write(&h->fil, buffer, (UINT)bytes, &bw);
@@ -193,7 +224,7 @@ int32_t vfs_seek(int32_t handle, uint32_t offset) {
     }
 
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->is_dir) return -1;
+    if (!h->in_use || h->type != VFS_HANDLE_FILE) return -1;
 
     FRESULT res = f_lseek(&h->fil, (FSIZE_t)offset);
     if (res == FR_OK) {
@@ -208,7 +239,7 @@ uint32_t vfs_tell(int32_t handle) {
     }
 
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->is_dir) return 0;
+    if (!h->in_use || h->type != VFS_HANDLE_FILE) return 0;
 
     return (uint32_t)f_tell(&h->fil);
 }
@@ -219,7 +250,7 @@ uint32_t vfs_size(int32_t handle) {
     }
 
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->is_dir) return 0;
+    if (!h->in_use || h->type != VFS_HANDLE_FILE) return 0;
 
     return (uint32_t)f_size(&h->fil);
 }
@@ -230,7 +261,7 @@ int32_t vfs_readdir(int32_t handle, vfs_dirent_t* out_entry) {
     }
 
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || !h->is_dir) return -1;
+    if (!h->in_use || h->type != VFS_HANDLE_DIR) return -1;
 
     FILINFO fno;
     FRESULT res = f_readdir(&h->dir, &fno);
@@ -252,12 +283,15 @@ void vfs_close(int32_t handle) {
     vfs_handle_t* h = &g_handles[handle];
     if (!h->in_use) return;
 
-    if (h->is_dir) {
+    if (h->type == VFS_HANDLE_SOCKET) {
+        net_socket_close(h->socket_id);
+    } else if (h->type == VFS_HANDLE_DIR) {
         f_closedir(&h->dir);
     } else {
         f_close(&h->fil);
     }
 
     h->in_use = 0u;
-    h->is_dir = 0u;
+    h->type = VFS_HANDLE_FILE;
+    h->socket_id = -1;
 }
