@@ -40,6 +40,10 @@ ALIGN 16
 vbe_mode_info:
     times 256 db 0
 
+ALIGN 16
+vbe_controller_info:
+    times 512 db 0
+
 GLOBAL gdt64
 GLOBAL gdt64_descriptor
 
@@ -88,16 +92,74 @@ entry_point:
 
     call collect_e820_map
 
-    ; Set VBE Mode
+    ; Find a VBE mode supporting 1280x1024x32
+    ; Get VBE Controller Information
+    mov ax, 0x4F00
+    mov di, vbe_controller_info
+    mov dword [di], 0x41534556 ; 'VESA' signature
+    int 0x10
+    cmp ax, 0x004F
+    jne .use_fallback_mode
+
+    ; Check if mode list pointer is valid
+    mov si, [vbe_controller_info + 14]
+    mov ax, [vbe_controller_info + 16]
+    test ax, ax
+    jz .use_fallback_mode
+    mov fs, ax
+
+.search_loop:
+    mov cx, [fs:si]
+    cmp cx, 0xFFFF
+    je .use_fallback_mode
+
+    ; Get VBE Mode Information
+    push si
     mov ax, 0x4F01
-    mov cx, VBE_MODE_1280x1024x24
     mov di, vbe_mode_info
     int 0x10
-    
+    pop si
+
+    cmp ax, 0x004F
+    jne .next_mode
+
+    ; Check resolution and bpp
+    cmp word [vbe_mode_info + 16], 1280 ; XResolution
+    jne .next_mode
+    cmp word [vbe_mode_info + 18], 1024 ; YResolution
+    jne .next_mode
+    cmp byte [vbe_mode_info + 25], 32   ; BitsPerPixel
+    jne .next_mode
+
+    ; Check if LFB (Linear Frame Buffer) is supported
+    mov ax, [vbe_mode_info]
+    test ax, 0x0080
+    jz .next_mode
+
+    ; Found it! Set the mode in cx
     mov ax, 0x4F02
-    mov bx, VBE_MODE_1280x1024x24 | VBE_SET_LINEAR
+    mov bx, cx
+    or bx, 0x4000 ; Enable LFB
+    int 0x10
+    cmp ax, 0x004F
+    je .vbe_done
+
+.next_mode:
+    add si, 2
+    jmp .search_loop
+
+.use_fallback_mode:
+    ; Fallback to 1280x1024x24 (0x11B)
+    mov ax, 0x4F01
+    mov cx, 0x11B
+    mov di, vbe_mode_info
     int 0x10
 
+    mov ax, 0x4F02
+    mov bx, 0x11B | 0x4000
+    int 0x10
+
+.vbe_done:
     ; Fill boot_info from VBE
     mov eax, [vbe_mode_info + 0x28]
     mov [boot_info + 8], eax
