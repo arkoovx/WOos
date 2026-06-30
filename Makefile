@@ -97,7 +97,12 @@ VFS_CPPFLAGS := -DWOOS_ENABLE_WOFS=$(WOFS)
 
 all: os.img
 
-woosfs.bin: tools/build_fat.py
+WAT2WASM := /home/arkoovx/.npm/_npx/b047662f9c5ecf39/node_modules/.bin/wat2wasm
+
+apps/app.wasm: apps/app.wat
+	$(WAT2WASM) apps/app.wat -o apps/app.wasm
+
+woosfs.bin: tools/build_fat.py apps/app.wasm
 	python3 tools/build_fat.py
 
 boot.bin: kernel.bin boot.asm
@@ -150,7 +155,7 @@ verify-layout: os.img
 
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f *.bin *.elf *.img woosfs.bin
+	rm -f *.bin *.elf *.img woosfs.bin apps/*.wasm
 
 # Запуск WoOS в QEMU с виртуальной сетью (user-mode NAT)
 # Порт хоста 8080 → порт ОС 80 (для теста HTTP-сервера)

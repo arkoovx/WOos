@@ -2,6 +2,8 @@
 #include "wasm3.h"
 #include "wasi.h"
 #include "serial.h"
+#include "vfs.h"
+#include "kheap.h"
 
 static IM3Environment g_wasm_env = 0;
 static IM3Runtime g_wasm_runtime = 0;
@@ -70,4 +72,40 @@ void wasm_runtime_run(const uint8_t* wasm_bytes, uint32_t wasm_size) {
     } else {
         serial_printf("[WASM] Module finished execution successfully.\n");
     }
+}
+
+void wasm_runtime_run_file(const char* filepath) {
+    serial_printf("[WASM] Loading executable file %s...\n", filepath);
+    int32_t fd = vfs_open(filepath, VFS_MODE_READ);
+    if (fd < 0) {
+        serial_printf("[WASM] Error: failed to open file %s (code %d)\n", filepath, fd);
+        return;
+    }
+
+    uint32_t size = vfs_size(fd);
+    if (size == 0 || size == 0xFFFFFFFFu) {
+        serial_printf("[WASM] Error: file %s size is invalid (%u)\n", filepath, size);
+        vfs_close(fd);
+        return;
+    }
+
+    uint8_t* wasm_bytes = (uint8_t*)kheap_alloc(size);
+    if (!wasm_bytes) {
+        serial_printf("[WASM] Error: failed to allocate %u bytes for module buffer\n", size);
+        vfs_close(fd);
+        return;
+    }
+
+    uint32_t read_bytes = vfs_read(fd, wasm_bytes, size);
+    if (read_bytes != size) {
+        serial_printf("[WASM] Error: read only %u of %u bytes from file\n", read_bytes, size);
+        kheap_free(wasm_bytes);
+        vfs_close(fd);
+        return;
+    }
+    vfs_close(fd);
+
+    serial_printf("[WASM] File read successfully (%u bytes). Parsing & Running...\n", size);
+    wasm_runtime_run(wasm_bytes, size);
+    kheap_free(wasm_bytes);
 }

@@ -188,10 +188,13 @@ uint32_t vfs_read(int32_t handle, void* buffer, uint32_t bytes) {
     if (h->type != VFS_HANDLE_FILE) return 0u;
 
     UINT br = 0;
+    serial_printf("[VFS] reading from handle %d: type=%d, in_use=%d, fptr=%u, size=%u\n", 
+                  handle, (int)h->type, (int)h->in_use, (uint32_t)h->fil.fptr, (uint32_t)f_size(&h->fil));
     FRESULT res = f_read(&h->fil, buffer, (UINT)bytes, &br);
     if (res == FR_OK) {
         return (uint32_t)br;
     }
+    serial_printf("[VFS] f_read error: %d (handle=%d, bytes=%u)\n", (int)res, handle, bytes);
     return 0u;
 }
 

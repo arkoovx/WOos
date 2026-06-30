@@ -22,7 +22,6 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "tss.h"
 #include "syscall.h"
 #include "wasm_runtime.h"
-#include "test_wasm.h"
 
 uint64_t g_tsc_per_ms = 2000000ULL;
 
@@ -120,16 +119,8 @@ void task2(void) {
 }
 
 void wasm_runner_thread(void) {
-    serial_printf("[WASM Runner] Waiting for network to be active...\n");
-    while (1) {
-        const net_status_t* st = net_get_status();
-        if (st->active && st->link_up) break;
-        net_poll();
-        for (volatile int d = 0; d < 500000; d++);
-        thread_yield();
-    }
-    serial_printf("[WASM Runner] Network active. Starting WASM HTTP Server...\n");
-    wasm_runtime_run(test_wasm, test_wasm_len);
+    serial_printf("[WASM Runner] Starting WASM application /APP.WAS from disk...\n");
+    wasm_runtime_run_file("/APP.WAS");
     while (1) {
         thread_yield();
     }
@@ -250,7 +241,14 @@ static void run_deferred_vfs_probe(void) {
     }
 }
 
+static video_info_t* g_video_info = 0;
+
+video_info_t* get_video_info(void) {
+    return g_video_info;
+}
+
 void kmain(video_info_t* video) {
+    g_video_info = video;
     run_stage(video, INIT_EARLY);
     run_stage(video, INIT_PLATFORM);
     run_stage(video, INIT_DRIVERS);

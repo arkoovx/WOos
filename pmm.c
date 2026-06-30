@@ -54,6 +54,11 @@ static uint8_t page_is_reserved(uint64_t page_addr) {
         return 1u;
     }
 
+    // Резервируем 5 МБ для backbuffer (0x01000000 - 0x01500000)
+    if (range_overlaps(page_addr, page_end, 0x01000000ull, 0x01500000ull)) {
+        return 1u;
+    }
+
     return 0u;
 }
 

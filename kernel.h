@@ -61,4 +61,6 @@ static inline void write_cr3(uint64_t val) {
     __asm__ __volatile__("mov %0, %%cr3" : : "r"(val));
 }
 
+video_info_t* get_video_info(void);
+
 #endif

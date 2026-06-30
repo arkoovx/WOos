@@ -56,7 +56,7 @@ void sched_init(void) {
     main_thread->state = THREAD_RUNNING;
     main_thread->stack_limit = 0; // Не отслеживаем стек для kmain
     main_thread->cr3 = g_kernel_cr3;
-    main_thread->kernel_stack_top = 0x200000; // Стековая вершина загрузки ядра
+    main_thread->kernel_stack_top = 0x0009F000; // Стековая вершина загрузки ядра (в безопасной низкой памяти)
 
     g_num_threads = 1;
     g_sched_ready = 1;

@@ -8,3 +8,6 @@ woosfs.bin
 # Logs and scratch
 serial.log
 .gemini/
+
+# Apps binary
+apps/*.wasm

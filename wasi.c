@@ -2,6 +2,7 @@
 #include "serial.h"
 #include "vfs.h"
 #include "net_socket.h"
+#include "input.h"
 
 // Структура WASI iovec
 typedef struct wasi_iovec_t {
@@ -65,8 +66,127 @@ m3ApiRawFunction(wasi_clock_time_get) {
     (void)clk_id; (void)precision;
 
     extern uint64_t timer_ticks(void);
-    m3ApiWriteMem64(time_out, timer_ticks() * 1000000ull); // ms to ns
+    m3ApiWriteMem64(time_out, timer_ticks() * 50ull * 1000000ull); // 50 ms to ns
     m3ApiReturn(0);
+}
+
+m3ApiRawFunction(wasi_environ_sizes_get) {
+    m3ApiReturnType(uint32_t)
+    m3ApiGetArgMem(uint32_t*, environ_count)
+    m3ApiGetArgMem(uint32_t*, environ_buf_size)
+
+    m3ApiCheckMem(environ_count, sizeof(uint32_t));
+    m3ApiCheckMem(environ_buf_size, sizeof(uint32_t));
+
+    m3ApiWriteMem32(environ_count, 0);
+    m3ApiWriteMem32(environ_buf_size, 0);
+    m3ApiReturn(0);
+}
+
+m3ApiRawFunction(wasi_environ_get) {
+    m3ApiReturnType(uint32_t)
+    m3ApiGetArgMem(uint32_t**, environ)
+    m3ApiGetArgMem(char*, environ_buf)
+
+    (void)environ; (void)environ_buf;
+    m3ApiReturn(0);
+}
+
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint32_t pitch;
+    uint32_t bpp;
+    uint64_t buffer_ptr;
+} woos_graphics_info_t;
+
+m3ApiRawFunction(wasi_graphics_get_info) {
+    m3ApiReturnType(uint32_t)
+    m3ApiGetArgMem(woos_graphics_info_t*, info)
+    m3ApiCheckMem(info, sizeof(woos_graphics_info_t));
+
+    extern video_info_t* get_video_info(void);
+    video_info_t* video = get_video_info();
+    if (!video) {
+        m3ApiReturn(1); // Error
+    }
+
+    info->width = video->width;
+    info->height = video->height;
+    info->pitch = video->pitch;
+    info->bpp = video->bpp;
+    info->buffer_ptr = 0x01000000ull; // g_backbuffer address
+
+    m3ApiReturn(0); // Success
+}
+
+m3ApiRawFunction(wasi_graphics_present_rect) {
+    m3ApiReturnType(uint32_t)
+    m3ApiGetArgMem(const uint8_t*, wasm_buf)
+    m3ApiGetArg(uint32_t, x)
+    m3ApiGetArg(uint32_t, y)
+    m3ApiGetArg(uint32_t, w)
+    m3ApiGetArg(uint32_t, h)
+
+    extern video_info_t* get_video_info(void);
+    video_info_t* video = get_video_info();
+    if (!video || !wasm_buf) {
+        m3ApiReturn(1);
+    }
+
+    uint16_t x_end = (uint16_t)(x + w);
+    if (x_end > video->width) x_end = video->width;
+    uint16_t y_end = (uint16_t)(y + h);
+    if (y_end > video->height) y_end = video->height;
+
+    if (x >= x_end || y >= y_end) {
+        m3ApiReturn(0);
+    }
+
+    uint32_t copy_width = (uint32_t)(x_end - x);
+    uint32_t pitch = video->pitch;
+    uint32_t bytes_per_pixel = video->bpp / 8;
+    uint32_t row_len = copy_width * bytes_per_pixel;
+
+    uint8_t* backbuffer = (uint8_t*)(uint64_t)0x01000000ull;
+    extern void* memcpy(void* dest, const void* src, size_t n);
+
+    for (uint32_t py = y; py < y_end; py++) {
+        uint32_t row_off = py * pitch + x * bytes_per_pixel;
+        memcpy(backbuffer + row_off, wasm_buf + row_off, row_len);
+    }
+
+    extern void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+    fb_present_rect(video, (uint16_t)x, (uint16_t)y, (uint16_t)(x_end - x), (uint16_t)(y_end - y));
+
+    m3ApiReturn(0);
+}
+
+typedef struct {
+    uint32_t type;
+    uint16_t x;
+    uint16_t y;
+    uint8_t buttons;
+} woos_input_event_t;
+
+m3ApiRawFunction(wasi_input_poll_event) {
+    m3ApiReturnType(uint32_t)
+    m3ApiGetArgMem(woos_input_event_t*, event)
+    m3ApiCheckMem(event, sizeof(woos_input_event_t));
+
+    extern uint8_t input_pop(input_event_t* out_event);
+    input_event_t popped;
+    if (input_pop(&popped)) {
+        event->type = (uint32_t)popped.type;
+        event->x = popped.x;
+        event->y = popped.y;
+        event->buttons = popped.buttons;
+        m3ApiReturn(1); // Event popped
+    }
+
+    extern void thread_yield(void);
+    thread_yield();
+    m3ApiReturn(0); // Queue empty
 }
 
 m3ApiRawFunction(wasi_fd_read) {
@@ -500,6 +620,21 @@ M3Result link_wasi(IM3Module module) {
     if (res) return res;
 
     res = link_raw_func(module, "env", "woos_socket_close", "i(i)", &wasi_socket_close);
+    if (res) return res;
+
+    res = link_raw_func(module, "wasi_snapshot_preview1", "environ_sizes_get", "i(**)", &wasi_environ_sizes_get);
+    if (res) return res;
+
+    res = link_raw_func(module, "wasi_snapshot_preview1", "environ_get", "i(**)", &wasi_environ_get);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_get_info", "i(*)", &wasi_graphics_get_info);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_present_rect", "i(*iiii)", &wasi_graphics_present_rect);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_input_poll_event", "i(*)", &wasi_input_poll_event);
     if (res) return res;
 
     return m3Err_none;

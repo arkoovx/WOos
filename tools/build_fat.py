@@ -58,6 +58,11 @@ def main():
         ("README.TXT", b"WoOS minimal read-write FAT12 filesystem image.\n")
     ]
 
+    import os
+    if os.path.exists("apps/app.wasm"):
+        with open("apps/app.wasm", "rb") as f:
+            files.append(("APP.WASM", f.read()))
+
     # Write FAT tables (FAT1 & FAT2)
     # First 2 entries: FAT ID (0xF8) + EOF (0xFFF)
     # Byte 0 = 0xF8, Byte 1 = 0xFF, Byte 2 = 0xFF
@@ -81,25 +86,36 @@ def main():
         root_dir[offset : offset + 8] = fname
         root_dir[offset + 8 : offset + 11] = fext
         root_dir[offset + 11] = 0x00  # Attribute (normal file)
-        struct.pack_into("<HI", root_dir, offset + 26, current_cluster, len(content))
+        start_cluster = current_cluster
+        struct.pack_into("<HI", root_dir, offset + 26, start_cluster, len(content))
 
-        # Write data to cluster
-        data_sector = DATA_START + (current_cluster - 2) * SECTORS_PER_CLUSTER
-        data_offset = data_sector * SECTOR_SIZE
-        img[data_offset : data_offset + len(content)] = content
+        # Calculate number of clusters needed (SECTORS_PER_CLUSTER = 1)
+        num_clusters = (len(content) + SECTOR_SIZE * SECTORS_PER_CLUSTER - 1) // (SECTOR_SIZE * SECTORS_PER_CLUSTER)
 
-        # Update FAT entry for this cluster (set to 0xFFF = EOF)
-        # Entry 2C and 2C+1 pack helper
-        entry_idx = current_cluster
-        byte_pos = (entry_idx * 3) // 2
-        if entry_idx % 2 == 0:
-            fat_data[byte_pos] = 0xFF
-            fat_data[byte_pos + 1] |= 0x0F
-        else:
-            fat_data[byte_pos] |= 0xF0
-            fat_data[byte_pos + 1] = 0xFF
+        for i in range(num_clusters):
+            clust = start_cluster + i
+            slice_start = i * SECTOR_SIZE * SECTORS_PER_CLUSTER
+            slice_end = min((i + 1) * SECTOR_SIZE * SECTORS_PER_CLUSTER, len(content))
+            slice_data = content[slice_start:slice_end]
 
-        current_cluster += 1
+            # Write slice to disk sector
+            data_sector = DATA_START + (clust - 2) * SECTORS_PER_CLUSTER
+            data_offset = data_sector * SECTOR_SIZE
+            img[data_offset : data_offset + len(slice_data)] = slice_data
+
+            # FAT entry value: EOF (0xFFF) or next cluster index
+            next_val = 0xFFF if i == num_clusters - 1 else clust + 1
+
+            # Pack 12-bit entry into 8-bit FAT array
+            byte_pos = (clust * 3) // 2
+            if clust % 2 == 0:
+                fat_data[byte_pos] = next_val & 0xFF
+                fat_data[byte_pos + 1] = (fat_data[byte_pos + 1] & 0xF0) | ((next_val >> 8) & 0x0F)
+            else:
+                fat_data[byte_pos] = (fat_data[byte_pos] & 0x0F) | ((next_val << 4) & 0xF0)
+                fat_data[byte_pos + 1] = (next_val >> 4) & 0xFF
+
+        current_cluster += num_clusters
 
     # Copy FAT tables to image
     img[FAT1_START * SECTOR_SIZE : (FAT1_START + SECTORS_PER_FAT) * SECTOR_SIZE] = fat_data
