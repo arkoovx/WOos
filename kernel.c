@@ -24,6 +24,7 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "wasm_runtime.h"
 
 uint64_t g_tsc_per_ms = 2000000ULL;
+volatile uint8_t g_wasm_ui_active = 0;
 
 void calibrate_tsc(void) {
     uint32_t start_ticks = timer_ticks();
@@ -119,6 +120,7 @@ void task2(void) {
 }
 
 void wasm_runner_thread(void) {
+    g_wasm_ui_active = 1;
     serial_printf("[WASM Runner] Starting WASM application /APP.WAS from disk...\n");
     wasm_runtime_run_file("/APP.WAS");
     while (1) {
@@ -287,13 +289,15 @@ void kmain(video_info_t* video) {
         start = rdtsc();
         input_event_t next_event;
         uint32_t event_count = 0;
-        while (input_pop(&next_event)) {
-            dispatch_input_event(video, &next_event);
-            event_count++;
+        if (!g_wasm_ui_active) {
+            while (input_pop(&next_event)) {
+                dispatch_input_event(video, &next_event);
+                event_count++;
+            }
         }
         end = rdtsc();
         uint64_t input_time = (end - start) / g_tsc_per_ms;
-        if (input_time >= 2) {
+        if (input_time >= 2 && event_count > 0) {
             serial_printf("[Perf Warning] input dispatch (%u events) took %u ms\n", event_count, (uint32_t)input_time);
         }
 
@@ -307,14 +311,16 @@ void kmain(video_info_t* video) {
 
         // Ограничение кадров до 60 FPS (не чаще раза в 16 мс)
         uint64_t current_tsc = rdtsc();
-        if (last_render_tsc == 0 || (current_tsc - last_render_tsc) >= (16ULL * g_tsc_per_ms)) {
-            start = rdtsc();
-            ui_render_dirty(video);
-            end = rdtsc();
-            last_render_tsc = end;
-            uint64_t render_time = (end - start) / g_tsc_per_ms;
-            if (render_time >= 16) {
-                serial_printf("[Perf Warning] ui_render_dirty took %u ms\n", (uint32_t)render_time);
+        if (!g_wasm_ui_active) {
+            if (last_render_tsc == 0 || (current_tsc - last_render_tsc) >= (16ULL * g_tsc_per_ms)) {
+                start = rdtsc();
+                ui_render_dirty(video);
+                end = rdtsc();
+                last_render_tsc = end;
+                uint64_t render_time = (end - start) / g_tsc_per_ms;
+                if (render_time >= 16) {
+                    serial_printf("[Perf Warning] ui_render_dirty took %u ms\n", (uint32_t)render_time);
+                }
             }
         }
 

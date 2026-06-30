@@ -167,7 +167,7 @@ typedef struct {
     uint16_t x;
     uint16_t y;
     uint8_t buttons;
-} woos_input_event_t;
+} __attribute__((packed)) woos_input_event_t;
 
 m3ApiRawFunction(wasi_input_poll_event) {
     m3ApiReturnType(uint32_t)
