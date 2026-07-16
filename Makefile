@@ -96,7 +96,7 @@ VFS_CPPFLAGS := -DWOOS_ENABLE_WOFS=$(WOFS)
 
 all: os.img
 
-WAT2WASM := /home/arkoovx/.npm/_npx/b047662f9c5ecf39/node_modules/.bin/wat2wasm
+WAT2WASM := $(shell which wat2wasm 2>/dev/null || echo "npx -y -p wabt wat2wasm")
 
 apps/compositor.wasm: apps/compositor.wat
 	$(WAT2WASM) apps/compositor.wat -o apps/compositor.wasm
