@@ -12,9 +12,12 @@ static net_status_t g_net_status = {0u, 0u, 0u, 0u, 0u, 0u};
 static uint64_t g_last_net_poll_tsc = 0;
 
 u32_t sys_now(void) {
-    // Ядро WoOS по умолчанию инициализирует таймер на 20Гц (timer_init(20)).
-    // 1 тик = 50мс.
-    return timer_ticks() * 50u;
+    extern uint32_t timer_frequency_hz(void);
+    uint32_t hz = timer_frequency_hz();
+    if (hz == 0u) {
+        hz = 20u;
+    }
+    return (timer_ticks() * 1000u) / hz;
 }
 
 void net_init(void) {

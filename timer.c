@@ -103,7 +103,14 @@ uint32_t timer_frequency_hz(void) {
 
 void timer_handler(void) {
     g_ticks++;
-    input_event_t tick_event = {INPUT_EVENT_TIMER_TICK, 0, 0, 0};
-    input_push(&tick_event);
+    uint32_t divisor = g_tick_hz / 2u;
+    if (divisor == 0u) {
+        divisor = 1u;
+    }
+    // Only push wake-up tick to input queue every 500ms to update taskbar clock
+    if (g_ticks % divisor == 0u) {
+        input_event_t tick_event = {INPUT_EVENT_TIMER_TICK, 0, 0, 0};
+        input_push(&tick_event);
+    }
 }
 

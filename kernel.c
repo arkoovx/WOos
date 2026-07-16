@@ -5,7 +5,6 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "kernel.h"
 #include "fb.h"
 #include "input.h"
-#include "ui.h"
 #include "idt.h"
 #include "timer.h"
 #include "mouse.h"
@@ -24,7 +23,6 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 #include "wasm_runtime.h"
 
 uint64_t g_tsc_per_ms = 2000000ULL;
-volatile uint8_t g_wasm_ui_active = 0;
 
 void calibrate_tsc(void) {
     uint32_t start_ticks = timer_ticks();
@@ -120,9 +118,8 @@ void task2(void) {
 }
 
 void wasm_runner_thread(void) {
-    g_wasm_ui_active = 1;
-    serial_printf("[WASM Runner] Starting WASM application /APP.WAS from disk...\n");
-    wasm_runtime_run_file("/APP.WAS");
+    serial_printf("[WASM Runner] Starting WASM compositor /COMPOSIT.WAS from disk...\n");
+    wasm_runtime_run_file("/COMPOSIT.WAS");
     while (1) {
         thread_yield();
     }
@@ -162,7 +159,7 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             serial_printf("[WoOS Kernel] Storage driver initialized.\n");
             vfs_init();
             serial_printf("[WoOS Kernel] VFS / FAT12 initialized.\n");
-            timer_init(20u);
+            timer_init(100u);
             serial_printf("[WoOS Kernel] Timer initialized.\n");
             vmm_init();
             tss_init((void*)0x200000);
@@ -174,55 +171,20 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             // thread_create(task1);
             // thread_create(task2);
             thread_create(wasm_runner_thread);
+            extern void process_create(void);
+            process_create();
             serial_printf("[WoOS Kernel] Scheduler started.\n");
             break;
         case INIT_UI:
-            serial_printf("[WoOS Kernel] Launching UI...\n");
-            ui_render_desktop(video);
-            serial_printf("[WoOS Kernel] UI rendering finished. Kernel entering loop.\n");
+            serial_printf("[WoOS Kernel] Graphics shell will be launched from WASM...\n");
             break;
     }
 }
 
-
-static void refresh_runtime_stats(video_info_t* video, uint16_t dirty_count);
-
-static void dispatch_input_event(video_info_t* video, const input_event_t* event) {
-
-    switch (event->type) {
-        case INPUT_EVENT_MOUSE_MOVE:
-            ui_handle_mouse_move(video, event->x, event->y, event->buttons);
-            break;
-        case INPUT_EVENT_MOUSE_BUTTON:
-            ui_handle_mouse_button(video, event->buttons);
-            break;
-        case INPUT_EVENT_TIMER_TICK:
-            ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
-            ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
-            ui_set_memory_stats(video, pmm_is_ready(), pmm_total_pages(), pmm_free_pages());
-            ui_set_storage_stats(video, storage_is_ready(), storage_last_read_ok(), storage_last_lba(), storage_boot_signature_valid());
-            const net_status_t* net = net_get_status();
-            ui_set_net_status(video, net->ready, net->active, net->link_up, net->ip_addr);
-            refresh_runtime_stats(video, ui_last_dirty_count());
-            break;
-
-    }
-}
-
-static void refresh_runtime_stats(video_info_t* video, uint16_t dirty_count) {
-    const virtio_gpu_renderer_status_t* renderer = virtio_gpu_renderer_status();
-    ui_set_runtime_stats(
-        video,
-        dirty_count,
-        kheap_used_bytes(),
-        kheap_free_bytes(),
-        renderer->detected,
-        renderer->active
-    );
-}
 
 static void run_deferred_vfs_probe(void) {
-    if (g_vfs_probe_done || timer_ticks() < 20u) {
+    extern uint32_t timer_frequency_hz(void);
+    if (g_vfs_probe_done || timer_ticks() < timer_frequency_hz()) {
         return;
     }
 
@@ -255,13 +217,6 @@ void kmain(video_info_t* video) {
     run_stage(video, INIT_PLATFORM);
     run_stage(video, INIT_DRIVERS);
     run_stage(video, INIT_UI);
-    ui_set_kernel_health(video, idt_is_ready(), timer_ticks());
-    ui_set_irq_stats(video, idt_keyboard_irq_count(), idt_mouse_irq_count());
-    ui_set_memory_stats(video, pmm_is_ready(), pmm_total_pages(), pmm_free_pages());
-    ui_set_storage_stats(video, storage_is_ready(), storage_last_read_ok(), storage_last_lba(), storage_boot_signature_valid());
-    const net_status_t* net = net_get_status();
-    ui_set_net_status(video, net->ready, net->active, net->link_up, net->ip_addr);
-    refresh_runtime_stats(video, 0u);
 
     uint16_t cursor_x = (uint16_t)(video->width / 2);
     uint16_t cursor_y = (uint16_t)(video->height / 2);
@@ -272,8 +227,6 @@ void kmain(video_info_t* video) {
 #endif
 
     calibrate_tsc();
-
-    uint64_t last_render_tsc = 0;
 
     while (1) {
         uint64_t start, end;
@@ -287,21 +240,6 @@ void kmain(video_info_t* video) {
         }
 
         start = rdtsc();
-        input_event_t next_event;
-        uint32_t event_count = 0;
-        if (!g_wasm_ui_active) {
-            while (input_pop(&next_event)) {
-                dispatch_input_event(video, &next_event);
-                event_count++;
-            }
-        }
-        end = rdtsc();
-        uint64_t input_time = (end - start) / g_tsc_per_ms;
-        if (input_time >= 2 && event_count > 0) {
-            serial_printf("[Perf Warning] input dispatch (%u events) took %u ms\n", event_count, (uint32_t)input_time);
-        }
-
-        start = rdtsc();
         run_deferred_vfs_probe();
         end = rdtsc();
         uint64_t vfs_time = (end - start) / g_tsc_per_ms;
@@ -309,20 +247,9 @@ void kmain(video_info_t* video) {
             serial_printf("[Perf Warning] vfs_probe took %u ms\n", (uint32_t)vfs_time);
         }
 
-        // Ограничение кадров до 60 FPS (не чаще раза в 16 мс)
-        uint64_t current_tsc = rdtsc();
-        if (!g_wasm_ui_active) {
-            if (last_render_tsc == 0 || (current_tsc - last_render_tsc) >= (16ULL * g_tsc_per_ms)) {
-                start = rdtsc();
-                ui_render_dirty(video);
-                end = rdtsc();
-                last_render_tsc = end;
-                uint64_t render_time = (end - start) / g_tsc_per_ms;
-                if (render_time >= 16) {
-                    serial_printf("[Perf Warning] ui_render_dirty took %u ms\n", (uint32_t)render_time);
-                }
-            }
-        }
+#if !WOOS_ENABLE_HW_INTERRUPTS
+        mouse_poll();
+#endif
 
         // Уступаем квант времени другим потокам
         thread_yield();

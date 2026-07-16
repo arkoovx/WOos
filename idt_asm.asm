@@ -66,6 +66,50 @@ idt_load:
     pop rax
 %endmacro
 
+global syscall_user_rsp
+section .data
+syscall_user_rsp: dq 0
+
+section .text
+global syscall_entry
+extern g_current_kernel_stack_top
+syscall_entry:
+    ; 1. Сохраняем пользовательский RSP в память
+    mov [rel syscall_user_rsp], rsp
+
+    ; 2. Загружаем стек ядра текущего потока
+    mov rsp, [rel g_current_kernel_stack_top]
+
+    ; 3. Формируем context_t на стеке
+    push qword 0x23                  ; User SS
+    push qword [rel syscall_user_rsp] ; User RSP
+    push r11                          ; User RFLAGS
+    push qword 0x33                  ; User CS
+    push rcx                          ; User RIP
+
+    PUSH_GPRS
+
+    ; 4. Вызов C-обработчика
+    mov rdi, rsp
+    mov r15, rsp
+    and rsp, -16
+    sub rsp, 8
+    call syscall_handler
+    mov rsp, r15
+
+    ; Сохраняем возвращенный rax в сохраненный кадр rax
+    mov [rsp + 112], rax
+
+    POP_GPRS
+
+    ; Восстанавливаем RCX (User RIP), R11 (User RFLAGS) и RSP (User RSP)
+    mov rcx, [rsp]
+    mov r11, [rsp + 16]
+    mov rsp, [rsp + 24]
+
+    ; sysretq (REX.W sysret)
+    db 0x48, 0x0f, 0x07
+
 extern syscall_handler
 idt_stub_syscall:
     PUSH_GPRS
@@ -104,18 +148,24 @@ idt_stub_syscall:
 %macro IRQ_STUB 2
 %1:
     PUSH_GPRS
-    ; IRQ может прийти в любой точке C-кода, поэтому текущий RSP
-    ; не обязан соответствовать SysV ABI для вызова функции.
-    ; Выравниваем стек вручную перед вызовом C-обработчика,
-    ; иначе возможен #GP внутри пролога и дальнейший triple fault.
+    
+    mov rdi, rsp
+    mov rsi, %2
+    
     mov r15, rsp
     and rsp, -16
-    ; Для SysV ABI перед call нужно состояние rsp % 16 == 8,
-    ; чтобы в теле C-функции стек был выровнен на 16 байт.
     sub rsp, 8
-    mov edi, %2
-    call idt_handle_irq
+    
+    extern schedule_irq
+    call schedule_irq
+    
+    test rax, rax
+    jz %%no_switch
+    mov rsp, rax
+    jmp %%done
+%%no_switch:
     mov rsp, r15
+%%done:
     POP_GPRS
     iretq
 %endmacro

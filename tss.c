@@ -27,11 +27,11 @@ void tss_init(void* kernel_stack_top) {
 
     uint64_t entry_high = (tss_base >> 32);
 
-    gdt64[6] = entry_low;
-    gdt64[7] = entry_high;
+    gdt64[7] = entry_low;
+    gdt64[8] = entry_high;
 
     // 3. Загружаем TSS с помощью инструкции ltr
-    __asm__ __volatile__("ltr %%ax" : : "a"((uint16_t)0x30));
+    __asm__ __volatile__("ltr %%ax" : : "a"((uint16_t)0x38));
     
     serial_printf("[TSS] TSS loaded. Base: %p, Limit: %u, RSP0: %p\n", 
                   (void*)tss_base, tss_limit, (void*)g_tss.rsp0);

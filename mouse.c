@@ -151,6 +151,22 @@ void mouse_init(uint16_t start_x, uint16_t start_y) {
         return;
     }
 
+    // Set sample rate to 200 Hz
+    if (!mouse_write(0xF3u)) {
+        return;
+    }
+    if (!mouse_write(200u)) {
+        return;
+    }
+
+    // Set resolution to 8 counts/mm
+    if (!mouse_write(0xE8u)) {
+        return;
+    }
+    if (!mouse_write(3u)) {
+        return;
+    }
+
     if (!mouse_write(0xF4u)) {
         return;
     }
@@ -164,26 +180,40 @@ uint8_t mouse_is_ready(void) {
 
 // Разбор стандартного 3-байтового PS/2 пакета и публикация нормализованных input-событий.
 static void handle_mouse_packet(const uint8_t packet[MOUSE_PACKET_SIZE]) {
+    extern woos_perf_t g_perf_stats;
+    g_perf_stats.mouse_recv++;
+
     if ((packet[0] & 0x08u) == 0u) {
+        g_perf_stats.mouse_drop_align++;
         return;
     }
 
     if (packet[0] & 0xC0u) {
+        g_perf_stats.mouse_drop_overflow++;
         return;
     }
 
-    int16_t dx = (int16_t)(int8_t)packet[1];
-    int16_t dy = (int16_t)(int8_t)packet[2];
+    int16_t dx = (int16_t)(int8_t)packet[1] * 3;
+    int16_t dy = (int16_t)(int8_t)packet[2] * 3;
 
     if (dx != 0 || dy != 0) {
         int32_t next_x = (int32_t)g_mouse.x + dx;
         int32_t next_y = (int32_t)g_mouse.y - dy;
 
+        video_info_t* video = get_video_info();
+        uint16_t screen_w = video ? video->width : (uint16_t)1280;
+        uint16_t screen_h = video ? video->height : (uint16_t)1024;
+
         if (next_x < 0) {
             next_x = 0;
+        } else if (next_x >= (int32_t)screen_w) {
+            next_x = (int32_t)screen_w - 1;
         }
+
         if (next_y < 0) {
             next_y = 0;
+        } else if (next_y >= (int32_t)screen_h) {
+            next_y = (int32_t)screen_h - 1;
         }
 
         g_mouse.x = (uint16_t)next_x;
@@ -191,13 +221,20 @@ static void handle_mouse_packet(const uint8_t packet[MOUSE_PACKET_SIZE]) {
 
         input_event_t move_event = {INPUT_EVENT_MOUSE_MOVE, g_mouse.x, g_mouse.y, g_mouse.buttons};
         input_push(&move_event);
+        g_perf_stats.mouse_push++;
     }
 
     uint8_t next_buttons = (uint8_t)(packet[0] & 0x07u);
     if (next_buttons != g_mouse.buttons) {
+        uint8_t old_buttons = g_mouse.buttons;
         g_mouse.buttons = next_buttons;
-        input_event_t button_event = {INPUT_EVENT_MOUSE_BUTTON, g_mouse.x, g_mouse.y, g_mouse.buttons};
-        input_push(&button_event);
+
+        if ((next_buttons & 1u) != (old_buttons & 1u)) {
+            input_event_type_t ev_type = (next_buttons & 1u) ? INPUT_EVENT_MOUSE_BUTTON : INPUT_EVENT_MOUSE_RELEASE;
+            input_event_t button_event = {ev_type, g_mouse.x, g_mouse.y, g_mouse.buttons};
+            input_push(&button_event);
+            g_perf_stats.mouse_push++;
+        }
     }
 }
 
@@ -207,15 +244,15 @@ void mouse_poll(void) {
         return;
     }
 
-    // Вычитываем больше байтов за одну итерацию цикла ядра, чтобы не терять
-    // PS/2-пакеты при быстрых движениях мыши на стороне хоста/QEMU.
-    for (uint8_t i = 0; i < MOUSE_POLL_MAX_BYTES; i++) {
+    uint8_t bytes_read = 0;
+    while (bytes_read < MOUSE_POLL_MAX_BYTES) {
         uint8_t status = inb(PS2_STATUS_PORT);
         if ((status & PS2_STATUS_OUTPUT_FULL) == 0u) {
             return;
         }
 
         uint8_t data = inb(PS2_DATA_PORT);
+        bytes_read++;
 
         if ((status & PS2_STATUS_AUX_DATA) == 0u) {
             continue;
@@ -230,6 +267,7 @@ void mouse_poll(void) {
         if (g_mouse.packet_index == MOUSE_PACKET_SIZE) {
             handle_mouse_packet(g_mouse.packet);
             g_mouse.packet_index = 0u;
+            return; // Return immediately to yield and allow compositor to render this frame!
         }
     }
 }

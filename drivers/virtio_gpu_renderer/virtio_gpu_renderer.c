@@ -445,18 +445,19 @@ static uint8_t virtio_gpu_submit_request(void* req, uint32_t req_len, void* resp
 
     virtio_gpu_notify_queue();
 
+    extern void thread_yield(void);
     uint32_t spin = 0u;
     while (g_queue.used.idx == g_transport.last_used_idx) {
         spin++;
-        // На части конфигураций QEMU (`-monitor stdio`, другая SDL/GL нагрузка,
-        // менее удачный scheduling хоста) ответ от virtqueue может приходить
-        // заметно позже базового happy-path. Слишком маленький timeout здесь
-        // даёт ложный "device failed" и визуально проявляется как чёрный экран.
         if (spin > 100000000u) {
             serial_printf("[Virtio-GPU] Request timed out! last_used=%d, used_idx=%d\n", g_transport.last_used_idx, g_queue.used.idx);
             return 0u;
         }
-        __asm__ __volatile__("pause");
+        if (spin % 1000u == 0u) {
+            thread_yield();
+        } else {
+            __asm__ __volatile__("pause");
+        }
     }
 
     g_transport.last_used_idx = g_queue.used.idx;
@@ -748,6 +749,19 @@ void virtio_gpu_renderer_init(video_info_t* info) {
     g_renderer.active = 1u;
 }
 
+static volatile uint32_t g_gpu_lock = 0;
+
+static void gpu_lock(void) {
+    while (__sync_lock_test_and_set(&g_gpu_lock, 1)) {
+        extern void thread_yield(void);
+        thread_yield();
+    }
+}
+
+static void gpu_unlock(void) {
+    __sync_lock_release(&g_gpu_lock);
+}
+
 void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     if (!g_transport.ready || w == 0u || h == 0u) {
         return;
@@ -766,6 +780,8 @@ void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y
         return;
     }
 
+    gpu_lock();
+
     // Dirty rectangle отправляем в control virtqueue: transfer + flush.
     g_req_transfer.req.hdr.type = VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D;
     g_req_transfer.req.hdr.flags = 0u;
@@ -781,6 +797,7 @@ void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y
     g_req_transfer.req.padding = 0u;
 
     if (!virtio_gpu_submit_request(&g_req_transfer, sizeof(g_req_transfer), &g_resp_transfer, sizeof(g_resp_transfer))) {
+        gpu_unlock();
         virtio_gpu_set_failed();
         return;
     }
@@ -798,8 +815,12 @@ void virtio_gpu_renderer_present_rect(video_info_t* info, uint16_t x, uint16_t y
     g_req_flush.req.padding = 0u;
 
     if (!virtio_gpu_submit_request(&g_req_flush, sizeof(g_req_flush), &g_resp_flush, sizeof(g_resp_flush))) {
+        gpu_unlock();
         virtio_gpu_set_failed();
+        return;
     }
+
+    gpu_unlock();
 }
 
 uint8_t virtio_gpu_renderer_is_active(void) {

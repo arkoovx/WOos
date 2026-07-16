@@ -1,8 +1,15 @@
 #include "wasi.h"
 #include "serial.h"
 #include "vfs.h"
+#include "sched.h"
 #include "net_socket.h"
 #include "input.h"
+#include "timer.h"
+#include "pmm.h"
+#include "kheap.h"
+#include "idt.h"
+#include "storage.h"
+#include "net.h"
 
 // Структура WASI iovec
 typedef struct wasi_iovec_t {
@@ -65,8 +72,14 @@ m3ApiRawFunction(wasi_clock_time_get) {
     m3ApiCheckMem(time_out, sizeof(uint64_t));
     (void)clk_id; (void)precision;
 
-    extern uint64_t timer_ticks(void);
-    m3ApiWriteMem64(time_out, timer_ticks() * 50ull * 1000000ull); // 50 ms to ns
+    extern uint32_t timer_ticks(void);
+    extern uint32_t timer_frequency_hz(void);
+    uint32_t hz = timer_frequency_hz();
+    if (hz == 0u) {
+        hz = 20u;
+    }
+    uint64_t ms_per_tick = 1000ull / hz;
+    m3ApiWriteMem64(time_out, (uint64_t)timer_ticks() * ms_per_tick * 1000000ull);
     m3ApiReturn(0);
 }
 
@@ -184,9 +197,210 @@ m3ApiRawFunction(wasi_input_poll_event) {
         m3ApiReturn(1); // Event popped
     }
 
-    extern void thread_yield(void);
-    thread_yield();
     m3ApiReturn(0); // Queue empty
+}
+
+m3ApiRawFunction(wasi_input_wait_event) {
+    m3ApiReturnType(int32_t)
+    extern uint32_t input_queue_size(void);
+    if (input_queue_size() == 0) {
+        extern void sched_block_current(void);
+        sched_block_current();
+    }
+    m3ApiReturn(0);
+}
+
+typedef struct {
+    uint32_t uptime_ms;
+    uint32_t total_pages;
+    uint32_t free_pages;
+    uint64_t heap_used;
+    uint64_t heap_free;
+    uint32_t keyboard_irq_count;
+    uint32_t mouse_irq_count;
+    uint32_t storage_last_lba;
+    uint32_t ip_addr;
+    uint8_t storage_ready;
+    uint8_t storage_read_ok;
+    uint8_t net_ready;
+    uint8_t net_active;
+    uint8_t net_link_up;
+} __attribute__((packed)) woos_system_status_t;
+
+m3ApiRawFunction(wasi_system_get_status) {
+    m3ApiReturnType(uint32_t)
+    m3ApiGetArgMem(woos_system_status_t*, status)
+    m3ApiCheckMem(status, sizeof(woos_system_status_t));
+
+    extern uint32_t timer_ticks(void);
+    extern uint32_t timer_frequency_hz(void);
+    uint32_t hz = timer_frequency_hz();
+    if (hz == 0u) {
+        hz = 20u;
+    }
+    status->uptime_ms = (timer_ticks() * 1000u) / hz;
+    status->total_pages = (uint32_t)pmm_total_pages();
+    status->free_pages = (uint32_t)pmm_free_pages();
+    status->heap_used = kheap_used_bytes();
+    status->heap_free = kheap_free_bytes();
+    status->keyboard_irq_count = idt_keyboard_irq_count();
+    status->mouse_irq_count = idt_mouse_irq_count();
+    status->storage_last_lba = storage_last_lba();
+
+    const net_status_t* net = net_get_status();
+    status->ip_addr = net->ip_addr;
+    status->storage_ready = storage_is_ready();
+    status->storage_read_ok = storage_last_read_ok();
+    status->net_ready = net->ready;
+    status->net_active = net->active;
+    status->net_link_up = net->link_up;
+
+    m3ApiReturn(0); // success
+}
+
+m3ApiRawFunction(wasi_debug_print) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, val1)
+    m3ApiGetArg(uint32_t, val2)
+    m3ApiGetArg(uint32_t, val3)
+    m3ApiGetArg(uint32_t, val4)
+    m3ApiGetArg(uint32_t, val5)
+    serial_printf("[WASM Debug] %d, %d, %d, %d, %d\n", (int)val1, (int)val2, (int)val3, (int)val4, (int)val5);
+    m3ApiReturn(0);
+}
+
+m3ApiRawFunction(wasi_graphics_create_window) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, w)
+    m3ApiGetArg(uint32_t, h)
+    
+    extern int32_t woos_graphics_create_window(uint32_t w, uint32_t h);
+    int32_t res = woos_graphics_create_window(w, h);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_blit_window) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, window_id)
+    m3ApiGetArgMem(const uint32_t*, wasm_buf)
+    m3ApiGetArg(uint32_t, w)
+    m3ApiGetArg(uint32_t, h)
+    
+    m3ApiCheckMem(wasm_buf, w * h * 4);
+    
+    extern int32_t woos_graphics_blit_window(uint32_t window_id, const uint32_t* wasm_buf, uint32_t w, uint32_t h);
+    int32_t res = woos_graphics_blit_window(window_id, wasm_buf, w, h);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_set_window_pos) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, window_id)
+    m3ApiGetArg(int32_t, x)
+    m3ApiGetArg(int32_t, y)
+    
+    extern int32_t woos_graphics_set_window_pos(uint32_t window_id, int32_t x, int32_t y);
+    int32_t res = woos_graphics_set_window_pos(window_id, x, y);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_get_window_count) {
+    m3ApiReturnType(uint32_t)
+    
+    extern uint32_t woos_graphics_get_window_count(void);
+    uint32_t res = woos_graphics_get_window_count();
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_get_window_info) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, index)
+    m3ApiGetArgMem(woos_window_t*, info)
+    
+    m3ApiCheckMem(info, sizeof(woos_window_t));
+    
+    extern int32_t woos_graphics_get_window_info(uint32_t index, woos_window_t* info);
+    int32_t res = woos_graphics_get_window_info(index, info);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_draw_window_to_screen) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, window_id)
+    
+    extern int32_t woos_graphics_draw_window_to_screen(uint32_t window_id);
+    int32_t res = woos_graphics_draw_window_to_screen(window_id);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_draw_window_to_buffer) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, window_id)
+    m3ApiGetArgMem(uint32_t*, dst_buf)
+    m3ApiGetArg(uint32_t, dst_w)
+    m3ApiGetArg(uint32_t, dst_h)
+    
+    m3ApiCheckMem(dst_buf, dst_w * dst_h * 4);
+    
+    extern int32_t woos_graphics_draw_window_to_buffer(uint32_t window_id, uint32_t* dst_buf, uint32_t dst_w, uint32_t dst_h);
+    int32_t res = woos_graphics_draw_window_to_buffer(window_id, dst_buf, dst_w, dst_h);
+    m3ApiReturn(res);
+}
+
+
+m3ApiRawFunction(wasi_ipc_send) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, dest_id)
+    m3ApiGetArg(uint32_t, type)
+    m3ApiGetArg(uint32_t, arg1)
+    m3ApiGetArg(uint32_t, arg2)
+    m3ApiGetArg(uint32_t, arg3)
+    m3ApiGetArg(uint32_t, arg4)
+    m3ApiGetArg(uint32_t, arg5)
+    
+    extern int32_t woos_ipc_send(uint32_t dest_id, uint32_t type, uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4, uint32_t arg5);
+    int32_t res = woos_ipc_send(dest_id, type, arg1, arg2, arg3, arg4, arg5);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_ipc_recv) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(woos_ipc_msg_t*, msg)
+    
+    m3ApiCheckMem(msg, sizeof(woos_ipc_msg_t));
+    
+    extern int32_t woos_ipc_recv(woos_ipc_msg_t* msg);
+    int32_t res = woos_ipc_recv(msg);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_ipc_wait_message) {
+    m3ApiReturnType(int32_t)
+    extern uint32_t woos_ipc_pending(void);
+    if (woos_ipc_pending() == 0) {
+        extern void sched_block_current(void);
+        sched_block_current();
+    }
+    m3ApiReturn(0);
+}
+
+m3ApiRawFunction(wasi_thread_get_id) {
+    m3ApiReturnType(uint32_t)
+    
+    extern uint32_t sched_current_thread_id(void);
+    uint32_t res = sched_current_thread_id();
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_system_spawn) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, path)
+    
+    m3ApiCheckMem(path, 1);
+    
+    extern int32_t woos_system_spawn(const char* path);
+    int32_t res = woos_system_spawn(path);
+    m3ApiReturn(res);
 }
 
 m3ApiRawFunction(wasi_fd_read) {
@@ -635,6 +849,52 @@ M3Result link_wasi(IM3Module module) {
     if (res) return res;
 
     res = link_raw_func(module, "env", "woos_input_poll_event", "i(*)", &wasi_input_poll_event);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_system_get_status", "i(*)", &wasi_system_get_status);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_debug_print", "i(iiiii)", &wasi_debug_print);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_create_window", "i(ii)", &wasi_graphics_create_window);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_blit_window", "i(i*ii)", &wasi_graphics_blit_window);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_set_window_pos", "i(iii)", &wasi_graphics_set_window_pos);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_get_window_count", "i()", &wasi_graphics_get_window_count);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_get_window_info", "i(i*)", &wasi_graphics_get_window_info);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_draw_window_to_screen", "i(i)", &wasi_graphics_draw_window_to_screen);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_draw_window_to_buffer", "i(i*ii)", &wasi_graphics_draw_window_to_buffer);
+    if (res) return res;
+
+
+    res = link_raw_func(module, "env", "woos_ipc_send", "i(iiiiiii)", &wasi_ipc_send);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_ipc_recv", "i(*)", &wasi_ipc_recv);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_input_wait_event", "i()", &wasi_input_wait_event);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_ipc_wait_message", "i()", &wasi_ipc_wait_message);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_thread_get_id", "i()", &wasi_thread_get_id);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_system_spawn", "i(*)", &wasi_system_spawn);
     if (res) return res;
 
     return m3Err_none;

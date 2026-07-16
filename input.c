@@ -56,6 +56,9 @@ uint8_t input_push(const input_event_t* event) {
     g_queue.tail = (uint16_t)((g_queue.tail + 1u) % g_queue.capacity);
     g_queue.size++;
 
+    extern void sched_unblock_all(void);
+    sched_unblock_all();
+
     restore_interrupts(flags);
     return 1;
 }
@@ -82,5 +85,9 @@ uint16_t input_dropped_events(void) {
 
 uint8_t input_uses_heap_queue(void) {
     return g_queue.uses_heap;
+}
+
+uint32_t input_queue_size(void) {
+    return g_queue.size;
 }
 

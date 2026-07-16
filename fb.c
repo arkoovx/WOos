@@ -1,5 +1,6 @@
 #include "fb.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
+#include "serial.h"
 
 #define FONT_W 8
 #define FONT_H 8
@@ -576,7 +577,7 @@ void fb_draw_text(video_info_t* info, uint16_t x, uint16_t y, const char* text, 
     }
 }
 
-void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+void fb_present_rect_internal(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
 #if WOOS_ENABLE_DBL_BUFFER
     if (virtio_gpu_renderer_is_active()) {
         if (!g_backbuffer_enabled || w == 0 || h == 0) {
@@ -654,3 +655,215 @@ void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uin
     virtio_gpu_renderer_present_rect(info, x, y, w, h);
 #endif
 }
+
+#include "kheap.h"
+
+static woos_window_t g_windows[MAX_WINDOWS];
+static uint32_t g_window_count = 0;
+static uint32_t g_next_window_id = 1;
+
+extern uint32_t sched_current_thread_id(void);
+extern void* memset(void* s, int c, size_t n);
+extern void* memcpy(void* dest, const void* src, size_t n);
+
+int32_t woos_graphics_create_window(uint32_t w, uint32_t h) {
+    if (g_window_count >= MAX_WINDOWS) {
+        serial_printf("[WinMgr] Error: MAX_WINDOWS reached!\n");
+        return -1;
+    }
+    
+    uint32_t* buf = (uint32_t*)kheap_alloc(w * h * 4);
+    if (!buf) {
+        serial_printf("[WinMgr] Error: failed to allocate window buffer of size %d\n", w * h * 4);
+        return -1;
+    }
+    memset(buf, 0, w * h * 4);
+    
+    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
+        if (!g_windows[i].active) {
+            g_windows[i].id = g_next_window_id++;
+            g_windows[i].thread_id = sched_current_thread_id();
+            g_windows[i].x = 100 + (g_windows[i].id * 40) % 400;
+            g_windows[i].y = 100 + (g_windows[i].id * 30) % 300;
+            g_windows[i].w = w;
+            g_windows[i].h = h;
+            g_windows[i].buffer = buf;
+            g_windows[i].active = 1;
+            
+            g_window_count++;
+            serial_printf("[WinMgr] Created window %d (%dx%d) for thread %d\n", 
+                          g_windows[i].id, w, h, g_windows[i].thread_id);
+            return (int32_t)g_windows[i].id;
+        }
+    }
+    kheap_free(buf);
+    return -1;
+}
+
+int32_t woos_graphics_blit_window_internal(uint32_t window_id, const uint32_t* wasm_buf, uint32_t w, uint32_t h) {
+    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
+        if (g_windows[i].active && g_windows[i].id == window_id) {
+            uint32_t copy_w = (w < g_windows[i].w) ? w : g_windows[i].w;
+            uint32_t copy_h = (h < g_windows[i].h) ? h : g_windows[i].h;
+            
+            for (uint32_t r = 0; r < copy_h; r++) {
+                const uint32_t* src_row = wasm_buf + r * w;
+                uint32_t* dst_row = g_windows[i].buffer + r * g_windows[i].w;
+                memcpy(dst_row, src_row, copy_w * 4);
+            }
+            
+            // Draw window to backbuffer
+            woos_graphics_draw_window_to_screen(window_id);
+            
+            // Present window region
+            video_info_t* info = get_video_info();
+            if (info) {
+                fb_present_rect(info, g_windows[i].x, g_windows[i].y, g_windows[i].w, g_windows[i].h);
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int32_t woos_graphics_set_window_pos(uint32_t window_id, int32_t x, int32_t y) {
+    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
+        if (g_windows[i].active && g_windows[i].id == window_id) {
+            g_windows[i].x = x;
+            g_windows[i].y = y;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+uint32_t woos_graphics_get_window_count(void) {
+    return g_window_count;
+}
+
+int32_t woos_graphics_get_window_info(uint32_t index, woos_window_t* info) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
+        if (g_windows[i].active) {
+            if (count == index) {
+                memcpy(info, &g_windows[i], sizeof(woos_window_t));
+                return 0;
+            }
+            count++;
+        }
+    }
+    return -1;
+}
+
+int32_t woos_graphics_draw_window_to_screen_internal(uint32_t window_id) {
+    video_info_t* info = get_video_info();
+    if (!info) return -1;
+    
+    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
+        if (g_windows[i].active && g_windows[i].id == window_id) {
+            int32_t win_x = g_windows[i].x;
+            int32_t win_y = g_windows[i].y;
+            uint32_t win_w = g_windows[i].w;
+            uint32_t win_h = g_windows[i].h;
+            
+            int32_t start_y = (win_y < 0) ? -win_y : 0;
+            int32_t end_y = (win_y + (int32_t)win_h > (int32_t)info->height) ? (int32_t)info->height - win_y : (int32_t)win_h;
+            int32_t start_x = (win_x < 0) ? -win_x : 0;
+            int32_t end_x = (win_x + (int32_t)win_w > (int32_t)info->width) ? (int32_t)info->width - win_x : (int32_t)win_w;
+            
+            if (start_x >= end_x || start_y >= end_y) {
+                return 0;
+            }
+            
+            uint32_t copy_width = (uint32_t)(end_x - start_x);
+            uint8_t* screen_base = g_backbuffer;
+            uint32_t screen_pitch = info->pitch;
+            uint8_t screen_bpp = bytes_per_pixel(info);
+            
+            for (int32_t cy = start_y; cy < end_y; cy++) {
+                uint32_t* src_row = g_windows[i].buffer + cy * win_w + start_x;
+                uint8_t* dst_row = screen_base + (uint64_t)(win_y + cy) * screen_pitch + (uint64_t)(win_x + start_x) * screen_bpp;
+                
+                if (screen_bpp == 4) {
+                    memcpy(dst_row, src_row, copy_width * 4);
+                } else if (screen_bpp == 3) {
+                    uint8_t* dst = dst_row;
+                    for (uint32_t cx = 0; cx < copy_width; cx++) {
+                        uint32_t color = src_row[cx];
+                        dst[0] = (uint8_t)(color & 0xFF);
+                        dst[1] = (uint8_t)((color >> 8) & 0xFF);
+                        dst[2] = (uint8_t)((color >> 16) & 0xFF);
+                        dst += 3;
+                    }
+                } else if (screen_bpp == 2) {
+                    uint16_t* dst = (uint16_t*)dst_row;
+                    for (uint32_t cx = 0; cx < copy_width; cx++) {
+                        uint32_t color = src_row[cx];
+                        uint8_t r = (uint8_t)((color >> 16) & 0xFF);
+                        uint8_t g = (uint8_t)((color >> 8) & 0xFF);
+                        uint8_t b = (uint8_t)(color & 0xFF);
+                        dst[cx] = (uint16_t)(((uint16_t)(r >> 3) << 11) | ((uint16_t)(g >> 2) << 5) | (uint16_t)(b >> 3));
+                    }
+                }
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+
+woos_perf_t g_perf_stats = {0};
+
+void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    uint64_t start = rdtsc();
+    fb_present_rect_internal(info, x, y, w, h);
+    g_perf_stats.present_count++;
+    g_perf_stats.present_cycles += (rdtsc() - start);
+}
+
+int32_t woos_graphics_blit_window(uint32_t window_id, const uint32_t* wasm_buf, uint32_t w, uint32_t h) {
+    uint64_t start = rdtsc();
+    int32_t res = woos_graphics_blit_window_internal(window_id, wasm_buf, w, h);
+    g_perf_stats.blit_count++;
+    g_perf_stats.blit_cycles += (rdtsc() - start);
+    return res;
+}
+
+int32_t woos_graphics_draw_window_to_screen(uint32_t window_id) {
+    uint64_t start = rdtsc();
+    int32_t res = woos_graphics_draw_window_to_screen_internal(window_id);
+    g_perf_stats.draw_win_count++;
+    g_perf_stats.draw_win_cycles += (rdtsc() - start);
+    return res;
+}
+
+int32_t woos_graphics_draw_window_to_buffer(uint32_t window_id, uint32_t* dst_buf, uint32_t dst_w, uint32_t dst_h) {
+    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
+        if (g_windows[i].active && g_windows[i].id == window_id) {
+            int32_t win_x = g_windows[i].x;
+            int32_t win_y = g_windows[i].y;
+            uint32_t win_w = g_windows[i].w;
+            uint32_t win_h = g_windows[i].h;
+            
+            int32_t start_y = (win_y < 0) ? -win_y : 0;
+            int32_t end_y = (win_y + (int32_t)win_h > (int32_t)dst_h) ? (int32_t)dst_h - win_y : (int32_t)win_h;
+            int32_t start_x = (win_x < 0) ? -win_x : 0;
+            int32_t end_x = (win_x + (int32_t)win_w > (int32_t)dst_w) ? (int32_t)dst_w - win_x : (int32_t)win_w;
+            
+            if (start_x >= end_x || start_y >= end_y) {
+                return 0;
+            }
+            
+            uint32_t copy_width = (uint32_t)(end_x - start_x);
+            
+            for (int32_t cy = start_y; cy < end_y; cy++) {
+                uint32_t* src_row = g_windows[i].buffer + cy * win_w + start_x;
+                uint32_t* dst_row = dst_buf + (win_y + cy) * dst_w + (win_x + start_x);
+                memcpy(dst_row, src_row, copy_width * 4);
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+

@@ -59,9 +59,12 @@ def main():
     ]
 
     import os
-    if os.path.exists("apps/app.wasm"):
-        with open("apps/app.wasm", "rb") as f:
-            files.append(("APP.WASM", f.read()))
+    if os.path.exists("apps/compositor.wasm"):
+        with open("apps/compositor.wasm", "rb") as f:
+            files.append(("COMPOSIT.WASM", f.read()))
+    if os.path.exists("apps/calc.wasm"):
+        with open("apps/calc.wasm", "rb") as f:
+            files.append(("CALC.WASM", f.read()))
 
     # Write FAT tables (FAT1 & FAT2)
     # First 2 entries: FAT ID (0xF8) + EOF (0xFFF)

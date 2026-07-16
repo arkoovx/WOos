@@ -50,13 +50,14 @@ GLOBAL gdt64_descriptor
 ALIGN 16
 gdt64:
     dq 0x0000000000000000          ; 0x00: null
-    dq 0x00CF9A000000FFFF          ; 0x08: 32-bit code
-    dq 0x00CF92000000FFFF          ; 0x10: 32-bit data
-    dq 0x00AF9A000000FFFF          ; 0x18: 64-bit code (L=1)
-    dq 0x00AFF2000000FFFF          ; 0x20: 64-bit data Ring 3
-    dq 0x00AFFA000000FFFF          ; 0x28: 64-bit code Ring 3
-    dq 0x0000000000000000          ; 0x30: TSS descriptor low
-    dq 0x0000000000000000          ; 0x38: TSS descriptor high
+    dq 0x00CF9A000000FFFF          ; 0x08: 32-bit code (compatibility)
+    dq 0x00CF92000000FFFF          ; 0x10: 32-bit data (compatibility)
+    dq 0x00AF9A000000FFFF          ; 0x18: 64-bit code (L=1, Kernel Code)
+    dq 0x00AF92000000FFFF          ; 0x20: 64-bit data (Kernel Data)
+    dq 0x00AFF2000000FFFF          ; 0x28: 64-bit data (User Data, Ring 3)
+    dq 0x00AFFA000000FFFF          ; 0x30: 64-bit code (User Code, Ring 3)
+    dq 0x0000000000000000          ; 0x38: TSS descriptor low
+    dq 0x0000000000000000          ; 0x40: TSS descriptor high
 gdt64_end:
 
 gdt64_descriptor:

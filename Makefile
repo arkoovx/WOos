@@ -43,7 +43,6 @@ KERNEL_OBJS_RAW := \
 	idt_asm.o \
 	kernel.o \
 	fb.o \
-	ui.o \
 	input.o \
 	idt.o \
 	timer.o \
@@ -99,17 +98,20 @@ all: os.img
 
 WAT2WASM := /home/arkoovx/.npm/_npx/b047662f9c5ecf39/node_modules/.bin/wat2wasm
 
-apps/app.wasm: apps/app.wat
-	$(WAT2WASM) apps/app.wat -o apps/app.wasm
+apps/compositor.wasm: apps/compositor.wat
+	$(WAT2WASM) apps/compositor.wat -o apps/compositor.wasm
 
-woosfs.bin: tools/build_fat.py apps/app.wasm
+apps/calc.wasm: apps/calc.wat
+	$(WAT2WASM) apps/calc.wat -o apps/calc.wasm
+
+woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm
 	python3 tools/build_fat.py
 
 boot.bin: kernel.bin boot.asm
 	$(NASM) -f bin -DKERNEL_SECTORS=$(shell expr $$(stat -c%s kernel.bin) / 512) boot.asm -o boot.bin
 
 # Специфические правила для файлов со спецфлагами
-$(BUILD_DIR)/kernel.o: kernel.c kernel.h ui.h input.h idt.h timer.h mouse.h kheap.h pmm.h storage.h vfs.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
+$(BUILD_DIR)/kernel.o: kernel.c kernel.h input.h idt.h timer.h mouse.h kheap.h pmm.h storage.h vfs.h drivers/virtio_gpu_renderer/virtio_gpu_renderer.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(KERNEL_CPPFLAGS) -c $< -o $@
 

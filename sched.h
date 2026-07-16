@@ -5,6 +5,29 @@
 
 #define MAX_THREADS 16
 
+typedef struct context {
+    uint64_t r15;
+    uint64_t r14;
+    uint64_t r13;
+    uint64_t r12;
+    uint64_t r11;
+    uint64_t r10;
+    uint64_t r9;
+    uint64_t r8;
+    uint64_t rdi;
+    uint64_t rsi;
+    uint64_t rbp;
+    uint64_t rbx;
+    uint64_t rdx;
+    uint64_t rcx;
+    uint64_t rax;
+    uint64_t rip;
+    uint64_t cs;
+    uint64_t rflags;
+    uint64_t rsp;
+    uint64_t ss;
+} __attribute__((packed)) context_t;
+
 typedef enum thread_state {
     THREAD_READY,
     THREAD_RUNNING,
@@ -27,5 +50,25 @@ void process_create(void);
 uint64_t schedule_interrupt(uint64_t current_rsp);
 void thread_yield(void);
 void thread_exit(int status);
+
+typedef struct {
+    uint32_t sender_id;
+    uint32_t dest_id;
+    uint32_t type;
+    uint32_t arg1;
+    uint32_t arg2;
+    uint32_t arg3;
+    uint32_t arg4;
+    uint32_t arg5;
+} __attribute__((packed)) woos_ipc_msg_t;
+
+uint32_t sched_current_thread_id(void);
+int32_t woos_ipc_send(uint32_t dest_id, uint32_t type, uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t arg4, uint32_t arg5);
+int32_t woos_ipc_recv(woos_ipc_msg_t* msg);
+int32_t woos_system_spawn(const char* path);
+
+void sched_block_current(void);
+void sched_unblock_all(void);
+uint64_t schedule_irq(uint64_t current_rsp, uint64_t vector);
 
 #endif
