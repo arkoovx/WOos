@@ -34,6 +34,7 @@ LWIP_OBJS_RAW := \
 	external/lwip/src/core/timeouts.o \
 	external/lwip/src/core/ip.o \
 	external/lwip/src/core/inet_chksum.o \
+	external/lwip/src/core/dns.o \
 	external/lwip/src/netif/ethernet.o
 
 LWIP_OBJS := $(addprefix $(BUILD_DIR)/, $(LWIP_OBJS_RAW))
@@ -104,7 +105,10 @@ apps/compositor.wasm: apps/compositor.wat
 apps/calc.wasm: apps/calc.wat
 	$(WAT2WASM) apps/calc.wat -o apps/calc.wasm
 
-woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm
+apps/terminal.wasm: apps/terminal.wat
+	$(WAT2WASM) apps/terminal.wat -o apps/terminal.wasm
+
+woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm apps/terminal.wasm
 	python3 tools/build_fat.py
 
 boot.bin: kernel.bin boot.asm

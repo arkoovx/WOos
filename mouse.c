@@ -302,3 +302,11 @@ void mouse_handler(void) {
     }
 }
 
+uint16_t mouse_get_x(void) {
+    return g_mouse.x;
+}
+
+uint16_t mouse_get_y(void) {
+    return g_mouse.y;
+}
+

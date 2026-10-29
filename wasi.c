@@ -133,6 +133,12 @@ m3ApiRawFunction(wasi_graphics_get_info) {
     m3ApiReturn(0); // Success
 }
 
+static uint8_t* g_compositor_wasm_buf = 0;
+
+uint8_t* wasi_get_compositor_buf(void) {
+    return g_compositor_wasm_buf;
+}
+
 m3ApiRawFunction(wasi_graphics_present_rect) {
     m3ApiReturnType(uint32_t)
     m3ApiGetArgMem(const uint8_t*, wasm_buf)
@@ -146,6 +152,8 @@ m3ApiRawFunction(wasi_graphics_present_rect) {
     if (!video || !wasm_buf) {
         m3ApiReturn(1);
     }
+
+    g_compositor_wasm_buf = (uint8_t*)wasm_buf;
 
     uint16_t x_end = (uint16_t)(x + w);
     if (x_end > video->width) x_end = video->width;
@@ -167,6 +175,17 @@ m3ApiRawFunction(wasi_graphics_present_rect) {
     for (uint32_t py = y; py < y_end; py++) {
         uint32_t row_off = py * pitch + x * bytes_per_pixel;
         memcpy(backbuffer + row_off, wasm_buf + row_off, row_len);
+    }
+
+    // Draw mouse cursor on backbuffer if cursor intersects this presented rect
+    extern uint16_t mouse_get_x(void);
+    extern uint16_t mouse_get_y(void);
+    int32_t mx = (int32_t)mouse_get_x();
+    int32_t my = (int32_t)mouse_get_y();
+    if (mx >= (int32_t)x - 6 && mx < (int32_t)x_end + 6 &&
+        my >= (int32_t)y - 6 && my < (int32_t)y_end + 6) {
+        extern void fb_draw_cursor_crosshair(uint8_t* dst, uint32_t width, uint32_t height, uint32_t pitch, int32_t cx, int32_t cy, uint32_t color);
+        fb_draw_cursor_crosshair(backbuffer, video->width, video->height, video->pitch, mx, my, 0xE74C3Cu);
     }
 
     extern void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
@@ -345,6 +364,120 @@ m3ApiRawFunction(wasi_graphics_draw_window_to_buffer) {
     extern int32_t woos_graphics_draw_window_to_buffer(uint32_t window_id, uint32_t* dst_buf, uint32_t dst_w, uint32_t dst_h);
     int32_t res = woos_graphics_draw_window_to_buffer(window_id, dst_buf, dst_w, dst_h);
     m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_create_window_ex) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, w)
+    m3ApiGetArg(uint32_t, h)
+    m3ApiGetArgMem(const char*, title)
+    m3ApiGetArg(uint32_t, flags)
+
+    extern int32_t woos_graphics_create_window_ex(uint32_t w, uint32_t h, const char* title, uint32_t flags);
+    int32_t res = woos_graphics_create_window_ex(w, h, title, flags);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_destroy_window) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, window_id)
+
+    extern int32_t woos_graphics_destroy_window(uint32_t window_id);
+    int32_t res = woos_graphics_destroy_window(window_id);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_bring_to_front) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, window_id)
+
+    extern int32_t woos_graphics_bring_to_front(uint32_t window_id);
+    int32_t res = woos_graphics_bring_to_front(window_id);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_toggle_minimize) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, window_id)
+
+    extern int32_t woos_graphics_toggle_minimize(uint32_t window_id);
+    int32_t res = woos_graphics_toggle_minimize(window_id);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_toggle_maximize) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, window_id)
+
+    extern int32_t woos_graphics_toggle_maximize(uint32_t window_id);
+    int32_t res = woos_graphics_toggle_maximize(window_id);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_set_window_title) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, window_id)
+    m3ApiGetArgMem(const char*, title)
+
+    extern int32_t woos_graphics_set_window_title(uint32_t window_id, const char* title);
+    int32_t res = woos_graphics_set_window_title(window_id, title);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_set_window_flags) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(uint32_t, window_id)
+    m3ApiGetArg(uint32_t, flags)
+
+    extern int32_t woos_graphics_set_window_flags(uint32_t window_id, uint32_t flags);
+    int32_t res = woos_graphics_set_window_flags(window_id, flags);
+    m3ApiReturn(res);
+}
+
+m3ApiRawFunction(wasi_graphics_draw_text_to_buffer) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(uint32_t*, dst_buf)
+    m3ApiGetArg(uint32_t, dst_w)
+    m3ApiGetArg(uint32_t, dst_h)
+    m3ApiGetArg(int32_t, x)
+    m3ApiGetArg(int32_t, y)
+    m3ApiGetArgMem(const char*, text)
+    m3ApiGetArg(uint32_t, color)
+
+    m3ApiCheckMem(dst_buf, dst_w * dst_h * 4);
+    extern void woos_graphics_draw_text_to_buffer(uint32_t* dst_buf, uint32_t dst_w, uint32_t dst_h, int32_t x, int32_t y, const char* text, uint32_t color);
+    woos_graphics_draw_text_to_buffer(dst_buf, dst_w, dst_h, x, y, text, color);
+    m3ApiReturn(0);
+}
+
+m3ApiRawFunction(wasi_graphics_get_focused_tid) {
+    m3ApiReturnType(int32_t)
+    extern int32_t woos_graphics_get_focused_tid(void);
+    m3ApiReturn(woos_graphics_get_focused_tid());
+}
+
+m3ApiRawFunction(wasi_net_resolve) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, hostname)
+    m3ApiGetArgMem(char*, out_ip)
+    m3ApiGetArg(uint32_t, max_len)
+
+    m3ApiCheckMem(hostname, 1);
+    m3ApiCheckMem(out_ip, max_len);
+
+    extern int32_t net_resolve_host(const char* hostname, char* out_ip, uint32_t max_len);
+    m3ApiReturn(net_resolve_host(hostname, out_ip, max_len));
+}
+
+m3ApiRawFunction(wasi_net_get_config) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(char*, out_buf)
+    m3ApiGetArg(uint32_t, max_len)
+
+    m3ApiCheckMem(out_buf, max_len);
+    extern void net_get_config(char* out_buf, uint32_t max_len);
+    net_get_config(out_buf, max_len);
+    m3ApiReturn(0);
 }
 
 
@@ -876,6 +1009,39 @@ M3Result link_wasi(IM3Module module) {
     if (res) return res;
 
     res = link_raw_func(module, "env", "woos_graphics_draw_window_to_buffer", "i(i*ii)", &wasi_graphics_draw_window_to_buffer);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_create_window_ex", "i(ii*i)", &wasi_graphics_create_window_ex);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_destroy_window", "i(i)", &wasi_graphics_destroy_window);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_bring_to_front", "i(i)", &wasi_graphics_bring_to_front);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_toggle_minimize", "i(i)", &wasi_graphics_toggle_minimize);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_toggle_maximize", "i(i)", &wasi_graphics_toggle_maximize);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_set_window_title", "i(i*)", &wasi_graphics_set_window_title);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_set_window_flags", "i(ii)", &wasi_graphics_set_window_flags);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_draw_text_to_buffer", "i(*iiii*i)", &wasi_graphics_draw_text_to_buffer);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_graphics_get_focused_tid", "i()", &wasi_graphics_get_focused_tid);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_net_resolve", "i(**i)", &wasi_net_resolve);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_net_get_config", "i(*i)", &wasi_net_get_config);
     if (res) return res;
 
 

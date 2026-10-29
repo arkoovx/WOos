@@ -13,6 +13,7 @@ void fb_frame(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h
 void fb_draw_char(video_info_t* info, uint16_t x, uint16_t y, char c, uint32_t color, uint32_t bg_color);
 void fb_draw_text(video_info_t* info, uint16_t x, uint16_t y, const char* text, uint32_t color, uint32_t bg_color);
 void fb_present_rect(video_info_t* info, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+void fb_draw_cursor_crosshair(uint8_t* dst, uint32_t width, uint32_t height, uint32_t pitch, int32_t cx, int32_t cy, uint32_t color);
 void fb_set_clip(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 void fb_clear_clip(void);
 

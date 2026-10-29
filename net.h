@@ -16,5 +16,7 @@ typedef struct net_status {
 void net_init(void);
 void net_poll(void);
 const net_status_t* net_get_status(void);
+int32_t net_resolve_host(const char* hostname, char* out_ip, uint32_t max_len);
+void net_get_config(char* out_buf, uint32_t max_len);
 
 #endif

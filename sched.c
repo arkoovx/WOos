@@ -43,24 +43,48 @@ void sched_init(void) {
 }
 
 void thread_create(void (*entry_point)(void)) {
-    if (g_num_threads >= MAX_THREADS) {
+    uint32_t slot = g_num_threads;
+    for (uint32_t i = 1; i < g_num_threads; i++) {
+        if (g_threads[i].state == THREAD_TERMINATED) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot >= MAX_THREADS) {
         serial_printf("[Scheduler] Error: MAX_THREADS reached!\n");
         return;
     }
 
-    // Выделяем 16 страниц (64 КБ) для стека каждого потока
-    uint32_t stack_pages_count = 16;
-    void* stack_pages = pmm_alloc_pages_multi(stack_pages_count);
-    if (!stack_pages) {
-        serial_printf("[Scheduler] Error: failed to allocate stack pages for new thread!\n");
-        return;
+    thread_t* t = &g_threads[slot];
+    uint32_t needed_stack_pages = 16;
+
+    // Освобождаем старое PML4 если этот слот был пользовательским процессом
+    if (t->cr3 != 0 && t->cr3 != g_kernel_cr3) {
+        vmm_destroy_address_space((pml4_t*)t->cr3);
+        t->cr3 = g_kernel_cr3;
     }
 
-    thread_t* t = &g_threads[g_num_threads];
-    t->id = g_num_threads;
-    t->stack_limit = stack_pages;
+    // Если размер выделенного ранее стека не совпадает с needed_stack_pages, освобождаем его
+    if (t->stack_limit && t->stack_pages_count != needed_stack_pages) {
+        pmm_free_pages_multi(t->stack_limit, t->stack_pages_count);
+        t->stack_limit = 0;
+        t->stack_pages_count = 0;
+    }
 
-    uint64_t stack_top = (uint64_t)stack_pages + (stack_pages_count * 4096);
+    if (!t->stack_limit) {
+        void* stack_pages = pmm_alloc_pages_multi(needed_stack_pages);
+        if (!stack_pages) {
+            serial_printf("[Scheduler] Error: failed to allocate stack pages for new thread!\n");
+            return;
+        }
+        t->stack_limit = stack_pages;
+        t->stack_pages_count = needed_stack_pages;
+    }
+
+    t->id = slot;
+
+    uint64_t stack_top = (uint64_t)t->stack_limit + (needed_stack_pages * 4096);
     context_t* ctx = (context_t*)(stack_top - sizeof(context_t));
 
     // Инициализируем контекст для возврата через iretq
@@ -81,8 +105,11 @@ void thread_create(void (*entry_point)(void)) {
     t->cr3 = g_kernel_cr3;
     t->kernel_stack_top = stack_top;
 
-    serial_printf("[Scheduler] Created thread %d (entry=%p, stack=%p)\n", (int)t->id, entry_point, stack_pages);
-    g_num_threads++;
+    serial_printf("[Scheduler] Created thread %d (entry=%p, stack=%p, pages=%u)\n", 
+                  (int)t->id, entry_point, t->stack_limit, t->stack_pages_count);
+    if (slot == g_num_threads) {
+        g_num_threads++;
+    }
 }
 
 static volatile uint8_t g_is_yield = 0;
@@ -169,7 +196,6 @@ uint64_t schedule_interrupt(uint64_t current_rsp) {
     }
 
     g_threads[next_idx].state = THREAD_RUNNING;
-    uint32_t old_idx = g_current_thread_idx;
     g_current_thread_idx = next_idx;
     g_current_kernel_stack_top = g_threads[next_idx].kernel_stack_top;
 
@@ -228,7 +254,6 @@ uint64_t schedule_irq(uint64_t current_rsp, uint64_t vector) {
     }
 
     g_threads[best_idx].state = THREAD_RUNNING;
-    uint32_t old_idx = g_current_thread_idx;
     g_current_thread_idx = best_idx;
     g_current_kernel_stack_top = g_threads[best_idx].kernel_stack_top;
 
@@ -248,7 +273,10 @@ void thread_yield(void) {
 
 void thread_exit(int status) {
     serial_printf("[Scheduler] Thread %d exited with status %d\n", (int)g_threads[g_current_thread_idx].id, status);
+    extern int32_t woos_graphics_destroy_thread_windows(uint32_t thread_id);
+    woos_graphics_destroy_thread_windows(g_threads[g_current_thread_idx].id);
     g_threads[g_current_thread_idx].state = THREAD_TERMINATED;
+    sched_unblock_all();
     thread_yield();
     while (1) {
         __asm__ __volatile__("hlt");
@@ -306,19 +334,21 @@ void process_create(void) {
     memset(user_stack_phys, 0, 4096);
     vmm_map_page(pml4, 0x100001000, (uint64_t)user_stack_phys, VMM_PAGE_USER | VMM_PAGE_WRITABLE | VMM_PAGE_PRESENT);
 
-    // 4. Выделяем стек ядра для переключения TSS
-    void* kernel_stack_page = pmm_alloc_page();
+    // 4. Выделяем стек ядра для переключения TSS (16 страниц, как и у всех потоков)
+    uint32_t needed_kernel_pages = 16;
+    void* kernel_stack_page = pmm_alloc_pages_multi(needed_kernel_pages);
     if (!kernel_stack_page) {
         serial_printf("[Scheduler] Error: failed to allocate kernel stack page for process!\n");
         return;
     }
-    memset(kernel_stack_page, 0, 4096);
+    memset(kernel_stack_page, 0, needed_kernel_pages * 4096);
 
-    uint64_t kernel_stack_top = (uint64_t)kernel_stack_page + 4096;
+    uint64_t kernel_stack_top = (uint64_t)kernel_stack_page + (needed_kernel_pages * 4096);
 
     thread_t* t = &g_threads[g_num_threads];
     t->id = g_num_threads;
     t->stack_limit = kernel_stack_page;
+    t->stack_pages_count = needed_kernel_pages;
     t->kernel_stack_top = kernel_stack_top;
     t->cr3 = (uint64_t)pml4;
 
@@ -412,14 +442,11 @@ int32_t woos_ipc_recv(woos_ipc_msg_t* msg) {
     return 0;
 }
 
-static char g_spawn_path[64];
-static volatile uint8_t g_spawn_pending = 0;
-
 void wasm_dynamic_runner_thread(void) {
+    uint32_t current_id = sched_current_thread_id();
     char path[64];
     __asm__ __volatile__("cli");
-    memcpy(path, g_spawn_path, 64);
-    g_spawn_pending = 0;
+    memcpy(path, g_threads[current_id].app_path, 64);
     __asm__ __volatile__("sti");
     
     serial_printf("[WASM Runner] Starting spawned WASM application %s...\n", path);
@@ -429,14 +456,56 @@ void wasm_dynamic_runner_thread(void) {
     thread_exit(0);
 }
 
+static int app_paths_match(const char* p1, const char* p2) {
+    if (!p1 || !p2) return 0;
+    while (*p1 == '/') p1++;
+    while (*p2 == '/') p2++;
+    while (*p1 && *p2) {
+        char c1 = *p1;
+        char c2 = *p2;
+        if (c1 >= 'a' && c1 <= 'z') c1 -= 32;
+        if (c2 >= 'a' && c2 <= 'z') c2 -= 32;
+        if (c1 != c2) return 0;
+        p1++;
+        p2++;
+    }
+    while (*p1 == '/') p1++;
+    while (*p2 == '/') p2++;
+    return (*p1 == '\0' && *p2 == '\0');
+}
+
 int32_t woos_system_spawn(const char* path) {
+    if (!path || path[0] == '\0') return -1;
+
     __asm__ __volatile__("cli");
-    if (g_spawn_pending) {
+    // Check if an instance of path is already running (single-instance application model)
+    for (uint32_t i = 1; i < g_num_threads; i++) {
+        if (g_threads[i].state != THREAD_TERMINATED && app_paths_match(g_threads[i].app_path, path)) {
+            __asm__ __volatile__("sti");
+            extern int32_t woos_graphics_bring_thread_to_front(uint32_t thread_id);
+            woos_graphics_bring_thread_to_front(g_threads[i].id);
+            return 0; // Successfully focused existing instance
+        }
+    }
+
+    uint32_t slot = g_num_threads;
+    for (uint32_t i = 1; i < g_num_threads; i++) {
+        if (g_threads[i].state == THREAD_TERMINATED) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot >= MAX_THREADS) {
         __asm__ __volatile__("sti");
         return -1;
     }
-    memcpy(g_spawn_path, path, 64);
-    g_spawn_pending = 1;
+    
+    uint32_t i = 0;
+    while (i < 63 && path[i] != '\0') {
+        g_threads[slot].app_path[i] = path[i];
+        i++;
+    }
+    g_threads[slot].app_path[i] = '\0';
     __asm__ __volatile__("sti");
     
     thread_create(wasm_dynamic_runner_thread);

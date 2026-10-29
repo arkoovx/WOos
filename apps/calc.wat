@@ -1,24 +1,38 @@
 (module
-  ;; Imports
+  ;; Imports from WoOS host environment
+  (import "env" "woos_graphics_create_window_ex" (func $create_window_ex (param i32 i32 i32 i32) (result i32)))
   (import "env" "woos_graphics_create_window" (func $create_window (param i32 i32) (result i32)))
   (import "env" "woos_graphics_blit_window" (func $blit_window (param i32 i32 i32 i32) (result i32)))
   (import "env" "woos_ipc_recv" (func $ipc_recv (param i32) (result i32)))
   (import "env" "woos_ipc_wait_message" (func $wait_message (result i32)))
   (import "env" "woos_thread_get_id" (func $get_thread_id (result i32)))
+  (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
 
-  ;; Export memory (8 pages = 512KB)
+  ;; Export linear memory: 8 pages = 512 KB
+  ;; 0..31: Reserved
+  ;; 32..63: IPC message struct
+  ;; 64..127: Scratch digit buffer for display formatting
+  ;; 200..230: Title string "Calculator\00"
+  ;; 65536..: Pixel backbuffer (240 x 320 x 4 bytes = 307200 bytes)
   (memory (export "memory") 8)
+  (data (i32.const 200) "Calculator\00")
 
-  ;; Globals
+  ;; Window Dimensions
   (global $g_window_id (mut i32) (i32.const -1))
-  (global $g_display_value (mut i32) (i32.const 0))
-  (global $g_highlight_btn (mut i32) (i32.const -1)) ;; ID of button currently highlighted (-1 if none)
-
-  ;; Width, Height of Calculator Window
   (global $g_width i32 (i32.const 240))
   (global $g_height i32 (i32.const 320))
 
-  ;; Draw solid rectangle onto local buffer
+  ;; Calculator Engine State
+  (global $g_display_value (mut i32) (i32.const 0))
+  (global $g_accumulator (mut i32) (i32.const 0))
+  (global $g_pending_op (mut i32) (i32.const 0))  ;; 0: None, 1: +, 2: -, 3: *, 4: /
+  (global $g_has_error (mut i32) (i32.const 0))   ;; 1 if divide-by-zero or overflow
+  (global $g_input_mode (mut i32) (i32.const 0))  ;; 0: waiting for first digit, 1: appending digits
+  (global $g_highlight_btn (mut i32) (i32.const -1))
+
+  ;; =========================================================================
+  ;; DRAW RECTANGLE: clipped to (0, 0, g_width, g_height)
+  ;; =========================================================================
   (func $draw_rect (param $x i32) (param $y i32) (param $w i32) (param $h i32) (param $color i32)
     (local $py i32)
     (local $px i32)
@@ -27,15 +41,48 @@
     (local $x_end i32)
     (local $y_end i32)
 
+    ;; x_end = min(x + w, g_width)
     local.get $x
     local.get $w
     i32.add
     local.set $x_end
+    local.get $x_end
+    global.get $g_width
+    i32.gt_s
+    if
+      global.get $g_width
+      local.set $x_end
+    end
 
+    ;; y_end = min(y + h, g_height)
     local.get $y
     local.get $h
     i32.add
     local.set $y_end
+    local.get $y_end
+    global.get $g_height
+    i32.gt_s
+    if
+      global.get $g_height
+      local.set $y_end
+    end
+
+    ;; Clamp start x, y to >= 0
+    local.get $x
+    i32.const 0
+    i32.lt_s
+    if
+      i32.const 0
+      local.set $x
+    end
+
+    local.get $y
+    i32.const 0
+    i32.lt_s
+    if
+      i32.const 0
+      local.set $y
+    end
 
     local.get $y
     local.set $py
@@ -46,6 +93,7 @@
         i32.ge_s
         br_if $break_y
 
+        ;; row_offset = py * g_width * 4
         local.get $py
         global.get $g_width
         i32.mul
@@ -62,7 +110,7 @@
             i32.ge_s
             br_if $break_x
 
-            ;; Buffer starts at 65536
+            ;; pixel_ptr = 65536 + row_offset + px * 4
             i32.const 65536
             local.get $row_offset
             i32.add
@@ -93,101 +141,125 @@
     )
   )
 
-  ;; Renders a 3x5 pixel digit at (x, y) where each pixel is block_size x block_size
-  (func $draw_digit (param $digit i32) (param $x i32) (param $y i32) (param $size i32) (param $color i32)
+  ;; =========================================================================
+  ;; 3x5 FONT GLYPH RENDERER
+  ;; Supports:
+  ;; 0..9: Digits
+  ;; 10: 'C' (Clear)
+  ;; 11: '<-' (Backspace)
+  ;; 12: '+/-' (Plus/Minus)
+  ;; 13: '/' (Divide)
+  ;; 14: '*' (Multiply)
+  ;; 15: '-' (Minus)
+  ;; 16: '+' (Plus)
+  ;; 17: '=' (Equals)
+  ;; 18: 'E' (Error)
+  ;; =========================================================================
+  (func $draw_glyph (param $glyph i32) (param $x i32) (param $y i32) (param $size i32) (param $color i32)
     (local $mask i32)
     (local $row i32)
     (local $col i32)
     (local $bit_idx i32)
-    (local $bit_set i32)
 
-    ;; Digits bitmasks: 0-9 represented as 15-bit values (5 rows of 3 columns)
-    ;; E.g. 0: 111 101 101 101 111 = 0x7B6F
-    ;; 1: 010 010 010 010 010 = 0x1249
-    ;; 2: 111 001 111 100 111 = 0x73E7
-    ;; 3: 111 001 111 001 111 = 0x73CF
-    ;; 4: 101 101 111 001 001 = 0x5B09
-    ;; 5: 111 100 111 001 111 = 0x7CFF
-    ;; 6: 111 100 111 101 111 = 0x7D6F
-    ;; 7: 111 001 001 001 001 = 0x7124
-    ;; 8: 111 101 111 101 111 = 0x7D6F or similar
-    ;; 9: 111 101 111 001 111 = 0x7DCE
-    
     i32.const 0
     local.set $mask
 
-    local.get $digit
+    local.get $glyph
     i32.const 0
     i32.eq
-    if
-      i32.const 0x7B6F
-      local.set $mask
-    end
-    local.get $digit
+    if i32.const 0x7B6F local.set $mask end
+
+    local.get $glyph
     i32.const 1
     i32.eq
-    if
-      i32.const 0x2492
-      local.set $mask
-    end
-    local.get $digit
+    if i32.const 0x2492 local.set $mask end
+
+    local.get $glyph
     i32.const 2
     i32.eq
-    if
-      i32.const 0x73E7
-      local.set $mask
-    end
-    local.get $digit
+    if i32.const 0x73E7 local.set $mask end
+
+    local.get $glyph
     i32.const 3
     i32.eq
-    if
-      i32.const 0x73CF
-      local.set $mask
-    end
-    local.get $digit
+    if i32.const 0x73CF local.set $mask end
+
+    local.get $glyph
     i32.const 4
     i32.eq
-    if
-      i32.const 0x5B29
-      local.set $mask
-    end
-    local.get $digit
+    if i32.const 0x5BC9 local.set $mask end
+
+    local.get $glyph
     i32.const 5
     i32.eq
-    if
-      i32.const 0x79CF
-      local.set $mask
-    end
-    local.get $digit
+    if i32.const 0x79CF local.set $mask end
+
+    local.get $glyph
     i32.const 6
     i32.eq
-    if
-      i32.const 0x79EF
-      local.set $mask
-    end
-    local.get $digit
+    if i32.const 0x79EF local.set $mask end
+
+    local.get $glyph
     i32.const 7
     i32.eq
-    if
-      i32.const 0x7249
-      local.set $mask
-    end
-    local.get $digit
+    if i32.const 0x7249 local.set $mask end
+
+    local.get $glyph
     i32.const 8
     i32.eq
-    if
-      i32.const 0x7BEF
-      local.set $mask
-    end
-    local.get $digit
+    if i32.const 0x7BEF local.set $mask end
+
+    local.get $glyph
     i32.const 9
     i32.eq
-    if
-      i32.const 0x7BCF
-      local.set $mask
-    end
+    if i32.const 0x7BCF local.set $mask end
 
-    ;; Loop rows 0..4
+    local.get $glyph
+    i32.const 10
+    i32.eq
+    if i32.const 0x7927 local.set $mask end ;; 'C'
+
+    local.get $glyph
+    i32.const 11
+    i32.eq
+    if i32.const 0x15D1 local.set $mask end ;; '<-'
+
+    local.get $glyph
+    i32.const 12
+    i32.eq
+    if i32.const 0x2E87 local.set $mask end ;; '+/-'
+
+    local.get $glyph
+    i32.const 13
+    i32.eq
+    if i32.const 0x21C2 local.set $mask end ;; '/'
+
+    local.get $glyph
+    i32.const 14
+    i32.eq
+    if i32.const 0x0AA8 local.set $mask end ;; '*'
+
+    local.get $glyph
+    i32.const 15
+    i32.eq
+    if i32.const 0x01C0 local.set $mask end ;; '-'
+
+    local.get $glyph
+    i32.const 16
+    i32.eq
+    if i32.const 0x05D0 local.set $mask end ;; '+'
+
+    local.get $glyph
+    i32.const 17
+    i32.eq
+    if i32.const 0x0E38 local.set $mask end ;; '='
+
+    local.get $glyph
+    i32.const 18
+    i32.eq
+    if i32.const 0x79E7 local.set $mask end ;; 'E'
+
+    ;; Render 5 rows by 3 columns
     i32.const 0
     local.set $row
     (block $break_y
@@ -197,7 +269,6 @@
         i32.ge_s
         br_if $break_y
 
-        ;; Loop cols 0..2
         i32.const 0
         local.set $col
         (block $break_x
@@ -217,23 +288,19 @@
             i32.sub
             local.set $bit_idx
 
-            ;; bit_set = (mask >> bit_idx) & 1
+            ;; Check if bit is set: (mask >> bit_idx) & 1
             local.get $mask
             local.get $bit_idx
             i32.shr_u
             i32.const 1
             i32.and
-            local.set $bit_set
-
-            local.get $bit_set
             if
-              ;; Draw block at (x + col*size, y + row*size)
               local.get $x
               local.get $col
               local.get $size
               i32.mul
               i32.add
-              
+
               local.get $y
               local.get $row
               local.get $size
@@ -263,206 +330,525 @@
     )
   )
 
-  ;; Redraw entire calculator interface
-  (func $redraw_ui
-    (local $c_btn1 i32)
-    (local $c_btn2 i32)
-    (local $c_btn3 i32)
-    (local $c_btn4 i32)
-    (local $c_btn5 i32)
-    (local $c_btn6 i32)
-    (local $c_btn_c i32)
+  ;; =========================================================================
+  ;; DISPLAY RENDERING (Right-aligned, multi-digit, negative support)
+  ;; =========================================================================
+  (func $draw_display_number (param $val i32)
+    (local $is_neg i32)
+    (local $abs_val i32)
+    (local $digit_count i32)
+    (local $rem i32)
+    (local $cur_x i32)
+    (local $cur_digit i32)
+    (local $idx i32)
 
-    ;; Colors
-    ;; Normal gray button: 0xBDC3C7
-    ;; Highlighted button: 0x3498DB
-    ;; Clear button: 0xE74C3C
-    i32.const 0xBDC3C7
-    local.set $c_btn1
-    i32.const 0xBDC3C7
-    local.set $c_btn2
-    i32.const 0xBDC3C7
-    local.set $c_btn3
-    i32.const 0xBDC3C7
-    local.set $c_btn4
-    i32.const 0xBDC3C7
-    local.set $c_btn5
-    i32.const 0xBDC3C7
-    local.set $c_btn6
-    i32.const 0xC0392B
-    local.set $c_btn_c
+    ;; Error check
+    global.get $g_has_error
+    if
+      i32.const 18 ;; GLYPH_E
+      i32.const 200
+      i32.const 27
+      i32.const 4
+      i32.const 0xC0392B ;; Red
+      call $draw_glyph
+      return
+    end
 
-    ;; Update button colors based on highlight global
-    global.get $g_highlight_btn
+    ;; Check negative
+    local.get $val
+    i32.const 0
+    i32.lt_s
+    if
+      i32.const 1
+      local.set $is_neg
+      i32.const 0
+      local.get $val
+      i32.sub
+      local.set $abs_val
+    else
+      i32.const 0
+      local.set $is_neg
+      local.get $val
+      local.set $abs_val
+    end
+
+    ;; If zero
+    local.get $abs_val
+    i32.eqz
+    if
+      i32.const 0 ;; '0'
+      i32.const 200
+      i32.const 27
+      i32.const 4
+      i32.const 0x2C3E50
+      call $draw_glyph
+      return
+    end
+
+    ;; Extract digits into memory address 64..
+    i32.const 0
+    local.set $digit_count
+    (block $break_digits
+      (loop $loop_digits
+        local.get $abs_val
+        i32.eqz
+        br_if $break_digits
+
+        local.get $abs_val
+        i32.const 10
+        i32.rem_u
+        local.set $rem
+
+        local.get $abs_val
+        i32.const 10
+        i32.div_u
+        local.set $abs_val
+
+        i32.const 64
+        local.get $digit_count
+        i32.add
+        local.get $rem
+        i32.store8
+
+        local.get $digit_count
+        i32.const 1
+        i32.add
+        local.set $digit_count
+        br $loop_digits
+      )
+    )
+
+    ;; Draw digits right to left from cur_x = 200
+    i32.const 200
+    local.set $cur_x
+
+    i32.const 0
+    local.set $idx
+    (block $break_draw
+      (loop $loop_draw
+        local.get $idx
+        local.get $digit_count
+        i32.ge_s
+        br_if $break_draw
+
+        i32.const 64
+        local.get $idx
+        i32.add
+        i32.load8_u
+        local.set $cur_digit
+
+        local.get $cur_digit
+        local.get $cur_x
+        i32.const 27
+        i32.const 4
+        i32.const 0x2C3E50
+        call $draw_glyph
+
+        local.get $cur_x
+        i32.const 16 ;; width 12 + 4 gap
+        i32.sub
+        local.set $cur_x
+
+        local.get $idx
+        i32.const 1
+        i32.add
+        local.set $idx
+        br $loop_draw
+      )
+    )
+
+    ;; If negative, draw '-' before first digit
+    local.get $is_neg
+    if
+      i32.const 15 ;; GLYPH_MINUS
+      local.get $cur_x
+      i32.const 27
+      i32.const 4
+      i32.const 0x2C3E50
+      call $draw_glyph
+    end
+  )
+
+  ;; =========================================================================
+  ;; OPERATOR INDICATOR: Shows active +, -, *, / in top-left of display
+  ;; =========================================================================
+  (func $draw_operator_indicator
+    global.get $g_pending_op
     i32.const 1
     i32.eq
     if
-      i32.const 0x3498DB
-      local.set $c_btn1
+      i32.const 16 ;; '+'
+      i32.const 20
+      i32.const 18
+      i32.const 2
+      i32.const 0x7F8C8D
+      call $draw_glyph
     end
-    global.get $g_highlight_btn
+
+    global.get $g_pending_op
     i32.const 2
     i32.eq
     if
-      i32.const 0x3498DB
-      local.set $c_btn2
+      i32.const 15 ;; '-'
+      i32.const 20
+      i32.const 18
+      i32.const 2
+      i32.const 0x7F8C8D
+      call $draw_glyph
     end
-    global.get $g_highlight_btn
+
+    global.get $g_pending_op
     i32.const 3
     i32.eq
     if
-      i32.const 0x3498DB
-      local.set $c_btn3
+      i32.const 14 ;; '*'
+      i32.const 20
+      i32.const 18
+      i32.const 2
+      i32.const 0x7F8C8D
+      call $draw_glyph
     end
-    global.get $g_highlight_btn
+
+    global.get $g_pending_op
     i32.const 4
     i32.eq
     if
-      i32.const 0x3498DB
-      local.set $c_btn4
+      i32.const 13 ;; '/'
+      i32.const 20
+      i32.const 18
+      i32.const 2
+      i32.const 0x7F8C8D
+      call $draw_glyph
     end
+  )
+
+  ;; =========================================================================
+  ;; BUTTON DRAW HELPER
+  ;; =========================================================================
+  (func $draw_button (param $id i32) (param $x i32) (param $y i32) (param $w i32) (param $h i32)
+                     (param $normal_bg i32) (param $normal_fg i32) (param $hi_bg i32) (param $hi_fg i32)
+    (local $bg i32)
+    (local $fg i32)
+    (local $glyph_x i32)
+    (local $glyph_y i32)
+
     global.get $g_highlight_btn
-    i32.const 5
+    local.get $id
     i32.eq
     if
-      i32.const 0x3498DB
-      local.set $c_btn5
-    end
-    global.get $g_highlight_btn
-    i32.const 6
-    i32.eq
-    if
-      i32.const 0x3498DB
-      local.set $c_btn6
-    end
-    global.get $g_highlight_btn
-    i32.const 0
-    i32.eq
-    if
-      i32.const 0xE74C3C
-      local.set $c_btn_c
+      local.get $hi_bg
+      local.set $bg
+      local.get $hi_fg
+      local.set $fg
+    else
+      local.get $normal_bg
+      local.set $bg
+      local.get $normal_fg
+      local.set $fg
     end
 
-    ;; 1. Draw calculator background panel (dark slate 0x2C3E50)
+    ;; Draw button rectangle
+    local.get $x
+    local.get $y
+    local.get $w
+    local.get $h
+    local.get $bg
+    call $draw_rect
+
+    ;; Center glyph (glyph size = 3: width = 9, height = 15)
+    ;; glyph_x = x + (w - 9) / 2
+    local.get $x
+    local.get $w
+    i32.const 9
+    i32.sub
+    i32.const 2
+    i32.div_s
+    i32.add
+    local.set $glyph_x
+
+    ;; glyph_y = y + (h - 15) / 2
+    local.get $y
+    local.get $h
+    i32.const 15
+    i32.sub
+    i32.const 2
+    i32.div_s
+    i32.add
+    local.set $glyph_y
+
+    local.get $id
+    local.get $glyph_x
+    local.get $glyph_y
+    i32.const 3
+    local.get $fg
+    call $draw_glyph
+  )
+
+  ;; =========================================================================
+  ;; REDRAW FULL INTERFACE
+  ;; =========================================================================
+  (func $redraw_ui
+    ;; 1. Window background
     i32.const 0
     i32.const 0
     global.get $g_width
     global.get $g_height
-    i32.const 0x2C3E50
+    i32.const 0x242F3D ;; Dark slate
     call $draw_rect
 
-    ;; 2. Draw display box (white 0xECF0F1)
-    i32.const 10
-    i32.const 10
-    i32.const 220
-    i32.const 60
-    i32.const 0xECF0F1
-    call $draw_rect
-
-    ;; 3. Draw current value onto display (at center 105, 15, block size 6)
-    global.get $g_display_value
-    i32.const 110
-    i32.const 20
-    i32.const 6
-    i32.const 0x2C3E50
-    call $draw_digit
-
-    ;; 4. Draw Row 1 of buttons: C, 1, 2
-    ;; Clear button 'C' at (10, 80)
-    i32.const 10
-    i32.const 80
-    i32.const 60
-    i32.const 50
-    local.get $c_btn_c
-    call $draw_rect
-
-    ;; Button '1' at (90, 80)
-    i32.const 90
-    i32.const 80
-    i32.const 60
-    i32.const 50
-    local.get $c_btn1
-    call $draw_rect
+    ;; Subtle frame border
+    i32.const 0
+    i32.const 0
+    global.get $g_width
     i32.const 1
-    i32.const 110
-    i32.const 90
-    i32.const 6
-    i32.const 0x2C3E50
-    call $draw_digit
-
-    ;; Button '2' at (170, 80)
-    i32.const 170
-    i32.const 80
-    i32.const 60
-    i32.const 50
-    local.get $c_btn2
+    i32.const 0x1B242F
     call $draw_rect
-    i32.const 2
-    i32.const 190
-    i32.const 90
-    i32.const 6
-    i32.const 0x2C3E50
-    call $draw_digit
 
-    ;; 5. Draw Row 2 of buttons: 3, 4, 5
-    ;; Button '3' at (10, 150)
+    ;; 2. Display box
+    ;; Outer border
+    i32.const 12
+    i32.const 12
+    i32.const 216
+    i32.const 50
+    i32.const 0x7F8C8D
+    call $draw_rect
+
+    ;; Interior
+    i32.const 13
+    i32.const 13
+    i32.const 214
+    i32.const 48
+    i32.const 0xF4F6F7
+    call $draw_rect
+
+    ;; Display contents
+    call $draw_operator_indicator
+    global.get $g_display_value
+    call $draw_display_number
+
+    ;; 3. Buttons
+    ;; Row 0: y=70, h=40
+    ;; [ C ] at (12, 70, 48, 40) - Red
     i32.const 10
-    i32.const 150
-    i32.const 60
-    i32.const 50
-    local.get $c_btn3
-    call $draw_rect
-    i32.const 3
-    i32.const 30
-    i32.const 160
-    i32.const 6
-    i32.const 0x2C3E50
-    call $draw_digit
+    i32.const 12
+    i32.const 70
+    i32.const 48
+    i32.const 40
+    i32.const 0xE74C3C
+    i32.const 0xFFFFFF
+    i32.const 0xC0392B
+    i32.const 0xFFFFFF
+    call $draw_button
 
-    ;; Button '4' at (90, 150)
-    i32.const 90
-    i32.const 150
-    i32.const 60
-    i32.const 50
-    local.get $c_btn4
-    call $draw_rect
+    ;; [ <- ] at (68, 70, 48, 40) - Gray
+    i32.const 11
+    i32.const 68
+    i32.const 70
+    i32.const 48
+    i32.const 40
+    i32.const 0x7F8C8D
+    i32.const 0xFFFFFF
+    i32.const 0x95A5A6
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; [ +/- ] at (124, 70, 48, 40) - Gray
+    i32.const 12
+    i32.const 124
+    i32.const 70
+    i32.const 48
+    i32.const 40
+    i32.const 0x7F8C8D
+    i32.const 0xFFFFFF
+    i32.const 0x95A5A6
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; [ / ] at (180, 70, 48, 40) - Orange
+    i32.const 13
+    i32.const 180
+    i32.const 70
+    i32.const 48
+    i32.const 40
+    i32.const 0xF39C12
+    i32.const 0xFFFFFF
+    i32.const 0xD35400
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; Row 1: y=118, h=40
+    ;; [ 7 ] at (12, 118, 48, 40)
+    i32.const 7
+    i32.const 12
+    i32.const 118
+    i32.const 48
+    i32.const 40
+    i32.const 0xECF0F1
+    i32.const 0x2C3E50
+    i32.const 0x3498DB
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; [ 8 ] at (68, 118, 48, 40)
+    i32.const 8
+    i32.const 68
+    i32.const 118
+    i32.const 48
+    i32.const 40
+    i32.const 0xECF0F1
+    i32.const 0x2C3E50
+    i32.const 0x3498DB
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; [ 9 ] at (124, 118, 48, 40)
+    i32.const 9
+    i32.const 124
+    i32.const 118
+    i32.const 48
+    i32.const 40
+    i32.const 0xECF0F1
+    i32.const 0x2C3E50
+    i32.const 0x3498DB
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; [ * ] at (180, 118, 48, 40) - Orange
+    i32.const 14
+    i32.const 180
+    i32.const 118
+    i32.const 48
+    i32.const 40
+    i32.const 0xF39C12
+    i32.const 0xFFFFFF
+    i32.const 0xD35400
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; Row 2: y=166, h=40
+    ;; [ 4 ] at (12, 166, 48, 40)
     i32.const 4
-    i32.const 110
-    i32.const 160
-    i32.const 6
+    i32.const 12
+    i32.const 166
+    i32.const 48
+    i32.const 40
+    i32.const 0xECF0F1
     i32.const 0x2C3E50
-    call $draw_digit
+    i32.const 0x3498DB
+    i32.const 0xFFFFFF
+    call $draw_button
 
-    ;; Button '5' at (170, 150)
-    i32.const 170
-    i32.const 150
-    i32.const 60
-    i32.const 50
-    local.get $c_btn5
-    call $draw_rect
+    ;; [ 5 ] at (68, 166, 48, 40)
     i32.const 5
-    i32.const 190
-    i32.const 160
-    i32.const 6
+    i32.const 68
+    i32.const 166
+    i32.const 48
+    i32.const 40
+    i32.const 0xECF0F1
     i32.const 0x2C3E50
-    call $draw_digit
+    i32.const 0x3498DB
+    i32.const 0xFFFFFF
+    call $draw_button
 
-    ;; 6. Draw Row 3 of buttons: 6, empty, empty
-    ;; Button '6' at (90, 220)
-    i32.const 90
-    i32.const 220
-    i32.const 60
-    i32.const 50
-    local.get $c_btn6
-    call $draw_rect
+    ;; [ 6 ] at (124, 166, 48, 40)
     i32.const 6
-    i32.const 110
-    i32.const 230
-    i32.const 6
+    i32.const 124
+    i32.const 166
+    i32.const 48
+    i32.const 40
+    i32.const 0xECF0F1
     i32.const 0x2C3E50
-    call $draw_digit
+    i32.const 0x3498DB
+    i32.const 0xFFFFFF
+    call $draw_button
 
-    ;; Blit buffer to window
+    ;; [ - ] at (180, 166, 48, 40) - Orange
+    i32.const 15
+    i32.const 180
+    i32.const 166
+    i32.const 48
+    i32.const 40
+    i32.const 0xF39C12
+    i32.const 0xFFFFFF
+    i32.const 0xD35400
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; Row 3: y=214, h=40
+    ;; [ 1 ] at (12, 214, 48, 40)
+    i32.const 1
+    i32.const 12
+    i32.const 214
+    i32.const 48
+    i32.const 40
+    i32.const 0xECF0F1
+    i32.const 0x2C3E50
+    i32.const 0x3498DB
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; [ 2 ] at (68, 214, 48, 40)
+    i32.const 2
+    i32.const 68
+    i32.const 214
+    i32.const 48
+    i32.const 40
+    i32.const 0xECF0F1
+    i32.const 0x2C3E50
+    i32.const 0x3498DB
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; [ 3 ] at (124, 214, 48, 40)
+    i32.const 3
+    i32.const 124
+    i32.const 214
+    i32.const 48
+    i32.const 40
+    i32.const 0xECF0F1
+    i32.const 0x2C3E50
+    i32.const 0x3498DB
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; [ + ] at (180, 214, 48, 40) - Orange
+    i32.const 16
+    i32.const 180
+    i32.const 214
+    i32.const 48
+    i32.const 40
+    i32.const 0xF39C12
+    i32.const 0xFFFFFF
+    i32.const 0xD35400
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; Row 4: y=262, h=40
+    ;; [ 0 ] (Wide 104x40) at (12, 262)
+    i32.const 0
+    i32.const 12
+    i32.const 262
+    i32.const 104
+    i32.const 40
+    i32.const 0xECF0F1
+    i32.const 0x2C3E50
+    i32.const 0x3498DB
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; [ = ] (Wide 104x40) at (124, 262) - Green
+    i32.const 17
+    i32.const 124
+    i32.const 262
+    i32.const 104
+    i32.const 40
+    i32.const 0x27AE60
+    i32.const 0xFFFFFF
+    i32.const 0x2ECC71
+    i32.const 0xFFFFFF
+    call $draw_button
+
+    ;; 4. Blit backbuffer to window
     global.get $g_window_id
     i32.const 65536
     global.get $g_width
@@ -471,20 +857,509 @@
     drop
   )
 
-  ;; Entry point _start
+  ;; =========================================================================
+  ;; HIT TESTING: Finds button ID from local window coordinate (x, y)
+  ;; =========================================================================
+  (func $find_button_at (param $x i32) (param $y i32) (result i32)
+    ;; Row 0: y in [70, 110)
+    local.get $y
+    i32.const 70
+    i32.ge_s
+    local.get $y
+    i32.const 110
+    i32.lt_s
+    i32.and
+    if
+      local.get $x
+      i32.const 12
+      i32.ge_s
+      local.get $x
+      i32.const 60
+      i32.lt_s
+      i32.and
+      if i32.const 10 return end ;; C
+
+      local.get $x
+      i32.const 68
+      i32.ge_s
+      local.get $x
+      i32.const 116
+      i32.lt_s
+      i32.and
+      if i32.const 11 return end ;; <-
+
+      local.get $x
+      i32.const 124
+      i32.ge_s
+      local.get $x
+      i32.const 172
+      i32.lt_s
+      i32.and
+      if i32.const 12 return end ;; +/-
+
+      local.get $x
+      i32.const 180
+      i32.ge_s
+      local.get $x
+      i32.const 228
+      i32.lt_s
+      i32.and
+      if i32.const 13 return end ;; /
+    end
+
+    ;; Row 1: y in [118, 158)
+    local.get $y
+    i32.const 118
+    i32.ge_s
+    local.get $y
+    i32.const 158
+    i32.lt_s
+    i32.and
+    if
+      local.get $x
+      i32.const 12
+      i32.ge_s
+      local.get $x
+      i32.const 60
+      i32.lt_s
+      i32.and
+      if i32.const 7 return end ;; 7
+
+      local.get $x
+      i32.const 68
+      i32.ge_s
+      local.get $x
+      i32.const 116
+      i32.lt_s
+      i32.and
+      if i32.const 8 return end ;; 8
+
+      local.get $x
+      i32.const 124
+      i32.ge_s
+      local.get $x
+      i32.const 172
+      i32.lt_s
+      i32.and
+      if i32.const 9 return end ;; 9
+
+      local.get $x
+      i32.const 180
+      i32.ge_s
+      local.get $x
+      i32.const 228
+      i32.lt_s
+      i32.and
+      if i32.const 14 return end ;; *
+    end
+
+    ;; Row 2: y in [166, 206)
+    local.get $y
+    i32.const 166
+    i32.ge_s
+    local.get $y
+    i32.const 206
+    i32.lt_s
+    i32.and
+    if
+      local.get $x
+      i32.const 12
+      i32.ge_s
+      local.get $x
+      i32.const 60
+      i32.lt_s
+      i32.and
+      if i32.const 4 return end ;; 4
+
+      local.get $x
+      i32.const 68
+      i32.ge_s
+      local.get $x
+      i32.const 116
+      i32.lt_s
+      i32.and
+      if i32.const 5 return end ;; 5
+
+      local.get $x
+      i32.const 124
+      i32.ge_s
+      local.get $x
+      i32.const 172
+      i32.lt_s
+      i32.and
+      if i32.const 6 return end ;; 6
+
+      local.get $x
+      i32.const 180
+      i32.ge_s
+      local.get $x
+      i32.const 228
+      i32.lt_s
+      i32.and
+      if i32.const 15 return end ;; -
+    end
+
+    ;; Row 3: y in [214, 254)
+    local.get $y
+    i32.const 214
+    i32.ge_s
+    local.get $y
+    i32.const 254
+    i32.lt_s
+    i32.and
+    if
+      local.get $x
+      i32.const 12
+      i32.ge_s
+      local.get $x
+      i32.const 60
+      i32.lt_s
+      i32.and
+      if i32.const 1 return end ;; 1
+
+      local.get $x
+      i32.const 68
+      i32.ge_s
+      local.get $x
+      i32.const 116
+      i32.lt_s
+      i32.and
+      if i32.const 2 return end ;; 2
+
+      local.get $x
+      i32.const 124
+      i32.ge_s
+      local.get $x
+      i32.const 172
+      i32.lt_s
+      i32.and
+      if i32.const 3 return end ;; 3
+
+      local.get $x
+      i32.const 180
+      i32.ge_s
+      local.get $x
+      i32.const 228
+      i32.lt_s
+      i32.and
+      if i32.const 16 return end ;; +
+    end
+
+    ;; Row 4: y in [262, 302)
+    local.get $y
+    i32.const 262
+    i32.ge_s
+    local.get $y
+    i32.const 302
+    i32.lt_s
+    i32.and
+    if
+      local.get $x
+      i32.const 12
+      i32.ge_s
+      local.get $x
+      i32.const 116
+      i32.lt_s
+      i32.and
+      if i32.const 0 return end ;; 0
+
+      local.get $x
+      i32.const 124
+      i32.ge_s
+      local.get $x
+      i32.const 228
+      i32.lt_s
+      i32.and
+      if i32.const 17 return end ;; =
+    end
+
+    i32.const -1
+  )
+
+  ;; =========================================================================
+  ;; EXECUTE PENDING ARITHMETIC OPERATION
+  ;; =========================================================================
+  (func $execute_op (result i32)
+    global.get $g_pending_op
+    i32.const 1 ;; +
+    i32.eq
+    if
+      global.get $g_accumulator
+      global.get $g_display_value
+      i32.add
+      return
+    end
+
+    global.get $g_pending_op
+    i32.const 2 ;; -
+    i32.eq
+    if
+      global.get $g_accumulator
+      global.get $g_display_value
+      i32.sub
+      return
+    end
+
+    global.get $g_pending_op
+    i32.const 3 ;; *
+    i32.eq
+    if
+      global.get $g_accumulator
+      global.get $g_display_value
+      i32.mul
+      return
+    end
+
+    global.get $g_pending_op
+    i32.const 4 ;; /
+    i32.eq
+    if
+      global.get $g_display_value
+      i32.eqz
+      if
+        i32.const 1
+        global.set $g_has_error
+        i32.const 0
+        return
+      end
+      global.get $g_accumulator
+      global.get $g_display_value
+      i32.div_s
+      return
+    end
+
+    global.get $g_display_value
+  )
+
+  ;; =========================================================================
+  ;; BUTTON ACTION HANDLER
+  ;; =========================================================================
+  (func $handle_button_click (param $btn i32)
+    (local $abs_d i32)
+
+    ;; Digits 0..9
+    local.get $btn
+    i32.const 0
+    i32.ge_s
+    local.get $btn
+    i32.const 9
+    i32.le_s
+    i32.and
+    if
+      global.get $g_has_error
+      if
+        i32.const 0
+        global.set $g_has_error
+        i32.const 0
+        global.set $g_input_mode
+      end
+
+      global.get $g_input_mode
+      i32.eqz
+      if
+        local.get $btn
+        global.set $g_display_value
+        i32.const 1
+        global.set $g_input_mode
+      else
+        ;; Guard against overflow: abs(display) < 100,000,000
+        global.get $g_display_value
+        local.set $abs_d
+        local.get $abs_d
+        i32.const 0
+        i32.lt_s
+        if
+          i32.const 0
+          local.get $abs_d
+          i32.sub
+          local.set $abs_d
+        end
+
+        local.get $abs_d
+        i32.const 100000000
+        i32.lt_s
+        if
+          global.get $g_display_value
+          i32.const 0
+          i32.ge_s
+          if
+            global.get $g_display_value
+            i32.const 10
+            i32.mul
+            local.get $btn
+            i32.add
+            global.set $g_display_value
+          else
+            global.get $g_display_value
+            i32.const 10
+            i32.mul
+            local.get $btn
+            i32.sub
+            global.set $g_display_value
+          end
+        end
+      end
+      return
+    end
+
+    ;; Button 10: Clear 'C'
+    local.get $btn
+    i32.const 10
+    i32.eq
+    if
+      i32.const 0
+      global.set $g_display_value
+      i32.const 0
+      global.set $g_accumulator
+      i32.const 0
+      global.set $g_pending_op
+      i32.const 0
+      global.set $g_has_error
+      i32.const 0
+      global.set $g_input_mode
+      return
+    end
+
+    ;; Button 11: Backspace '<-'
+    local.get $btn
+    i32.const 11
+    i32.eq
+    if
+      global.get $g_has_error
+      if
+        i32.const 0
+        global.set $g_has_error
+        i32.const 0
+        global.set $g_display_value
+        i32.const 0
+        global.set $g_input_mode
+        return
+      end
+
+      global.get $g_input_mode
+      if
+        global.get $g_display_value
+        i32.const 10
+        i32.div_s
+        global.set $g_display_value
+        global.get $g_display_value
+        i32.eqz
+        if
+          i32.const 0
+          global.set $g_input_mode
+        end
+      end
+      return
+    end
+
+    ;; Button 12: Negate '+/-'
+    local.get $btn
+    i32.const 12
+    i32.eq
+    if
+      global.get $g_has_error
+      if return end
+      i32.const 0
+      global.get $g_display_value
+      i32.sub
+      global.set $g_display_value
+      return
+    end
+
+    ;; Operators: 13 (/), 14 (*), 15 (-), 16 (+)
+    local.get $btn
+    i32.const 13
+    i32.ge_s
+    local.get $btn
+    i32.const 16
+    i32.le_s
+    i32.and
+    if
+      global.get $g_has_error
+      if return end
+
+      ;; If actively typing and already have a pending op, evaluate first
+      global.get $g_input_mode
+      if
+        global.get $g_pending_op
+        if
+          call $execute_op
+          global.set $g_display_value
+        end
+      end
+
+      global.get $g_has_error
+      if return end
+
+      global.get $g_display_value
+      global.set $g_accumulator
+
+      ;; Assign pending_op: 16(+)->1, 15(-)->2, 14(*)->3, 13(/)->4
+      local.get $btn
+      i32.const 16
+      i32.eq
+      if i32.const 1 global.set $g_pending_op end
+
+      local.get $btn
+      i32.const 15
+      i32.eq
+      if i32.const 2 global.set $g_pending_op end
+
+      local.get $btn
+      i32.const 14
+      i32.eq
+      if i32.const 3 global.set $g_pending_op end
+
+      local.get $btn
+      i32.const 13
+      i32.eq
+      if i32.const 4 global.set $g_pending_op end
+
+      i32.const 0
+      global.set $g_input_mode
+      return
+    end
+
+    ;; Button 17: Equals '='
+    local.get $btn
+    i32.const 17
+    i32.eq
+    if
+      global.get $g_has_error
+      if return end
+
+      global.get $g_pending_op
+      if
+        call $execute_op
+        global.set $g_display_value
+        global.get $g_display_value
+        global.set $g_accumulator
+        i32.const 0
+        global.set $g_pending_op
+        i32.const 0
+        global.set $g_input_mode
+      end
+      return
+    end
+  )
+
+  ;; =========================================================================
+  ;; MAIN ENTRY POINT (_start)
+  ;; =========================================================================
   (func (export "_start")
     (local $event_popped i32)
-    (local $ev_sender i32)
     (local $ev_type i32)
     (local $ev_x i32)
     (local $ev_y i32)
     (local $click_btn i32)
-    (local $need_redraw i32)
+    (local $delay i32)
 
     ;; 1. Register calculator window
     global.get $g_width
     global.get $g_height
-    call $create_window
+    i32.const 200
+    i32.const 0
+    call $create_window_ex
     global.set $g_window_id
 
     global.get $g_window_id
@@ -499,9 +1374,6 @@
 
     ;; 2. Main event loop
     (loop $event_loop
-      i32.const 0
-      local.set $need_redraw
-
       (block $break_events
         (loop $loop_events
           ;; Poll next IPC message (struct resides at address 32)
@@ -513,11 +1385,10 @@
           i32.eqz
           br_if $break_events
 
-          ;; Load message fields
-          i32.const 32
-          i32.load
-          local.set $ev_sender
-
+          ;; Load message fields from struct at address 32:
+          ;; offset 8 (addr 40): type
+          ;; offset 12 (addr 44): arg1 (local x)
+          ;; offset 16 (addr 48): arg2 (local y)
           i32.const 40
           i32.load
           local.set $ev_type
@@ -530,181 +1401,58 @@
           i32.load
           local.set $ev_y
 
+          ;; If type == MSG_CLOSE (3)
+          local.get $ev_type
+          i32.const 3
+          i32.eq
+          if
+            i32.const 0
+            call $proc_exit
+          end
+
           ;; If type == MSG_MOUSE_CLICK (1)
           local.get $ev_type
           i32.const 1
           i32.eq
           if
-            ;; Reset click button
-            i32.const -1
+            local.get $ev_x
+            local.get $ev_y
+            call $find_button_at
             local.set $click_btn
 
-            ;; Check click button bounds:
-            ;; Button C: x=10..70, y=80..130
-            local.get $ev_x
-            i32.const 10
-            i32.ge_s
-            local.get $ev_x
-            i32.const 70
-            i32.le_s
-            i32.and
-            local.get $ev_y
-            i32.const 80
-            i32.ge_s
-            local.get $ev_y
-            i32.const 130
-            i32.le_s
-            i32.and
-            i32.and
-            if
-              i32.const 0
-              local.set $click_btn
-            end
-
-            ;; Button 1: x=90..150, y=80..130
-            local.get $ev_x
-            i32.const 90
-            i32.ge_s
-            local.get $ev_x
-            i32.const 150
-            i32.le_s
-            i32.and
-            local.get $ev_y
-            i32.const 80
-            i32.ge_s
-            local.get $ev_y
-            i32.const 130
-            i32.le_s
-            i32.and
-            i32.and
-            if
-              i32.const 1
-              local.set $click_btn
-            end
-
-            ;; Button 2: x=170..230, y=80..130
-            local.get $ev_x
-            i32.const 170
-            i32.ge_s
-            local.get $ev_x
-            i32.const 230
-            i32.le_s
-            i32.and
-            local.get $ev_y
-            i32.const 80
-            i32.ge_s
-            local.get $ev_y
-            i32.const 130
-            i32.le_s
-            i32.and
-            i32.and
-            if
-              i32.const 2
-              local.set $click_btn
-            end
-
-            ;; Button 3: x=10..70, y=150..200
-            local.get $ev_x
-            i32.const 10
-            i32.ge_s
-            local.get $ev_x
-            i32.const 70
-            i32.le_s
-            i32.and
-            local.get $ev_y
-            i32.const 150
-            i32.ge_s
-            local.get $ev_y
-            i32.const 200
-            i32.le_s
-            i32.and
-            i32.and
-            if
-              i32.const 3
-              local.set $click_btn
-            end
-
-            ;; Button 4: x=90..150, y=150..200
-            local.get $ev_x
-            i32.const 90
-            i32.ge_s
-            local.get $ev_x
-            i32.const 150
-            i32.le_s
-            i32.and
-            local.get $ev_y
-            i32.const 150
-            i32.ge_s
-            local.get $ev_y
-            i32.const 200
-            i32.le_s
-            i32.and
-            i32.and
-            if
-              i32.const 4
-              local.set $click_btn
-            end
-
-            ;; Button 5: x=170..230, y=150..200
-            local.get $ev_x
-            i32.const 170
-            i32.ge_s
-            local.get $ev_x
-            i32.const 230
-            i32.le_s
-            i32.and
-            local.get $ev_y
-            i32.const 150
-            i32.ge_s
-            local.get $ev_y
-            i32.const 200
-            i32.le_s
-            i32.and
-            i32.and
-            if
-              i32.const 5
-              local.set $click_btn
-            end
-
-            ;; Button 6: x=90..150, y=220..270
-            local.get $ev_x
-            i32.const 90
-            i32.ge_s
-            local.get $ev_x
-            i32.const 150
-            i32.le_s
-            i32.and
-            local.get $ev_y
-            i32.const 220
-            i32.ge_s
-            local.get $ev_y
-            i32.const 270
-            i32.le_s
-            i32.and
-            i32.and
-            if
-              i32.const 6
-              local.set $click_btn
-            end
-
-            ;; Handle clicked button
             local.get $click_btn
             i32.const -1
             i32.ne
             if
-              local.get $click_btn
-              global.set $g_display_value
+              ;; Set highlight
               local.get $click_btn
               global.set $g_highlight_btn
 
-              ;; Redraw with highlight
+              ;; Process action
+              local.get $click_btn
+              call $handle_button_click
+
+              ;; Redraw with highlight and updated state
               call $redraw_ui
 
-              ;; Keep highlight for a short moment, then reset it
+              ;; Visible feedback delay (~30-40ms loop)
+              i32.const 600000
+              local.set $delay
+              (loop $delay_loop
+                local.get $delay
+                i32.const 1
+                i32.sub
+                local.set $delay
+                local.get $delay
+                i32.const 0
+                i32.gt_s
+                br_if $delay_loop
+              )
+
+              ;; Clear highlight and redraw
               i32.const -1
               global.set $g_highlight_btn
-              i32.const 1
-              local.set $need_redraw
+              call $redraw_ui
             end
           end
 
@@ -712,12 +1460,7 @@
         )
       )
 
-      local.get $need_redraw
-      if
-        call $redraw_ui
-      end
-
-      ;; Wait for next IPC message (blocks thread)
+      ;; Wait for next IPC message (blocks thread until message arrives)
       call $wait_message
       drop
 
