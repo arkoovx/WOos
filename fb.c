@@ -1,6 +1,7 @@
 #include "fb.h"
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
 #include "serial.h"
+#include "input.h"
 
 #define FONT_W 8
 #define FONT_H 8
@@ -666,7 +667,7 @@ extern uint32_t sched_current_thread_id(void);
 extern void* memset(void* s, int c, size_t n);
 extern void* memcpy(void* dest, const void* src, size_t n);
 
-int32_t woos_graphics_create_window(uint32_t w, uint32_t h) {
+int32_t woos_graphics_create_window_ex(uint32_t w, uint32_t h, const char* title, uint32_t flags) {
     if (g_window_count >= MAX_WINDOWS) {
         serial_printf("[WinMgr] Error: MAX_WINDOWS reached!\n");
         return -1;
@@ -674,51 +675,145 @@ int32_t woos_graphics_create_window(uint32_t w, uint32_t h) {
     
     uint32_t* buf = (uint32_t*)kheap_alloc(w * h * 4);
     if (!buf) {
-        serial_printf("[WinMgr] Error: failed to allocate window buffer of size %d\n", w * h * 4);
+        serial_printf("[WinMgr] Error: failed to allocate window buffer (%dx%d)\n", w, h);
         return -1;
     }
     memset(buf, 0, w * h * 4);
     
-    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
-        if (!g_windows[i].active) {
-            g_windows[i].id = g_next_window_id++;
-            g_windows[i].thread_id = sched_current_thread_id();
-            g_windows[i].x = 100 + (g_windows[i].id * 40) % 400;
-            g_windows[i].y = 100 + (g_windows[i].id * 30) % 300;
-            g_windows[i].w = w;
-            g_windows[i].h = h;
-            g_windows[i].buffer = buf;
-            g_windows[i].active = 1;
-            
-            g_window_count++;
-            serial_printf("[WinMgr] Created window %d (%dx%d) for thread %d\n", 
-                          g_windows[i].id, w, h, g_windows[i].thread_id);
-            return (int32_t)g_windows[i].id;
+    uint32_t id = g_next_window_id++;
+    uint32_t slot = g_window_count;
+
+    // Clear focus from all existing windows
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        g_windows[i].flags &= ~WOOS_WIN_FLAG_FOCUSED;
+    }
+
+    g_windows[slot].id = id;
+    g_windows[slot].thread_id = sched_current_thread_id();
+    g_windows[slot].x = 80 + (id * 35) % 400;
+    g_windows[slot].y = 70 + (id * 25) % 250;
+    g_windows[slot].w = w;
+    g_windows[slot].h = h;
+    g_windows[slot].flags = flags | WOOS_WIN_FLAG_FOCUSED;
+    g_windows[slot].saved_x = g_windows[slot].x;
+    g_windows[slot].saved_y = g_windows[slot].y;
+    g_windows[slot].saved_w = w;
+    g_windows[slot].saved_h = h;
+    g_windows[slot].active = 1;
+    g_windows[slot].buffer = buf;
+
+    memset(g_windows[slot].title, 0, sizeof(g_windows[slot].title));
+    if (title && title[0] != '\0') {
+        uint32_t tlen = 0;
+        while (tlen < (sizeof(g_windows[slot].title) - 1) && title[tlen] != '\0') {
+            g_windows[slot].title[tlen] = title[tlen];
+            tlen++;
+        }
+        g_windows[slot].title[tlen] = '\0';
+    } else {
+        memcpy(g_windows[slot].title, "Application", 12);
+    }
+
+    g_window_count++;
+
+    serial_printf("[WinMgr] Created window %d ('%s', %dx%d, flags=0x%x) for thread %d\n", 
+                  id, g_windows[slot].title, w, h, g_windows[slot].flags, g_windows[slot].thread_id);
+
+    input_event_t ev = { .type = INPUT_EVENT_WINDOW_CHANGE, .x = 0, .y = 0, .buttons = 0 };
+    input_push(&ev);
+    extern void sched_unblock_all(void);
+    sched_unblock_all();
+
+    return (int32_t)id;
+}
+
+int32_t woos_graphics_create_window(uint32_t w, uint32_t h) {
+    return woos_graphics_create_window_ex(w, h, "Window", 0);
+}
+
+int32_t woos_graphics_destroy_window(uint32_t window_id) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].id == window_id) {
+            serial_printf("[WinMgr] Destroying window %d ('%s')\n", window_id, g_windows[i].title);
+            if (g_windows[i].buffer) {
+                kheap_free(g_windows[i].buffer);
+            }
+            for (uint32_t j = i; j + 1 < g_window_count; j++) {
+                g_windows[j] = g_windows[j + 1];
+            }
+            memset(&g_windows[g_window_count - 1], 0, sizeof(woos_window_t));
+            g_window_count--;
+
+            if (g_window_count > 0) {
+                g_windows[g_window_count - 1].flags |= WOOS_WIN_FLAG_FOCUSED;
+            }
+            input_event_t ev = { .type = INPUT_EVENT_WINDOW_CHANGE, .x = 0, .y = 0, .buttons = 0 };
+            input_push(&ev);
+            extern void sched_unblock_all(void);
+            sched_unblock_all();
+            return 0;
         }
     }
-    kheap_free(buf);
     return -1;
 }
 
-int32_t woos_graphics_blit_window_internal(uint32_t window_id, const uint32_t* wasm_buf, uint32_t w, uint32_t h) {
-    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
-        if (g_windows[i].active && g_windows[i].id == window_id) {
-            uint32_t copy_w = (w < g_windows[i].w) ? w : g_windows[i].w;
-            uint32_t copy_h = (h < g_windows[i].h) ? h : g_windows[i].h;
-            
-            for (uint32_t r = 0; r < copy_h; r++) {
-                const uint32_t* src_row = wasm_buf + r * w;
-                uint32_t* dst_row = g_windows[i].buffer + r * g_windows[i].w;
-                memcpy(dst_row, src_row, copy_w * 4);
+int32_t woos_graphics_destroy_thread_windows(uint32_t thread_id) {
+    int32_t destroyed = 0;
+    for (int32_t i = (int32_t)g_window_count - 1; i >= 0; i--) {
+        if (g_windows[i].thread_id == thread_id) {
+            woos_graphics_destroy_window(g_windows[i].id);
+            destroyed++;
+        }
+    }
+    return destroyed;
+}
+
+int32_t woos_graphics_bring_to_front(uint32_t window_id) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].id == window_id) {
+            g_windows[i].flags &= ~WOOS_WIN_FLAG_MINIMIZED;
+            for (uint32_t j = 0; j < g_window_count; j++) {
+                g_windows[j].flags &= ~WOOS_WIN_FLAG_FOCUSED;
             }
-            
-            // Draw window to backbuffer
-            woos_graphics_draw_window_to_screen(window_id);
-            
-            // Present window region
-            video_info_t* info = get_video_info();
-            if (info) {
-                fb_present_rect(info, g_windows[i].x, g_windows[i].y, g_windows[i].w, g_windows[i].h);
+            if (i < g_window_count - 1) {
+                woos_window_t tmp = g_windows[i];
+                for (uint32_t j = i; j + 1 < g_window_count; j++) {
+                    g_windows[j] = g_windows[j + 1];
+                }
+                g_windows[g_window_count - 1] = tmp;
+            }
+            g_windows[g_window_count - 1].flags |= WOOS_WIN_FLAG_FOCUSED;
+
+            input_event_t ev = { .type = INPUT_EVENT_WINDOW_CHANGE, .x = 0, .y = 0, .buttons = 0 };
+            input_push(&ev);
+            extern void sched_unblock_all(void);
+            sched_unblock_all();
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int32_t woos_graphics_bring_thread_to_front(uint32_t thread_id) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].thread_id == thread_id) {
+            return woos_graphics_bring_to_front(g_windows[i].id);
+        }
+    }
+    return -1;
+}
+
+int32_t woos_graphics_set_window_title(uint32_t window_id, const char* title) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].id == window_id) {
+            memset(g_windows[i].title, 0, sizeof(g_windows[i].title));
+            if (title) {
+                uint32_t tlen = 0;
+                while (tlen < (sizeof(g_windows[i].title) - 1) && title[tlen] != '\0') {
+                    g_windows[i].title[tlen] = title[tlen];
+                    tlen++;
+                }
+                g_windows[i].title[tlen] = '\0';
             }
             return 0;
         }
@@ -726,9 +821,74 @@ int32_t woos_graphics_blit_window_internal(uint32_t window_id, const uint32_t* w
     return -1;
 }
 
+int32_t woos_graphics_set_window_flags(uint32_t window_id, uint32_t flags) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].id == window_id) {
+            g_windows[i].flags = flags;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int32_t woos_graphics_toggle_minimize(uint32_t window_id) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].id == window_id) {
+            if (g_windows[i].flags & WOOS_WIN_FLAG_MINIMIZED) {
+                return woos_graphics_bring_to_front(window_id);
+            } else {
+                g_windows[i].flags |= WOOS_WIN_FLAG_MINIMIZED;
+                g_windows[i].flags &= ~WOOS_WIN_FLAG_FOCUSED;
+                for (int32_t j = (int32_t)g_window_count - 1; j >= 0; j--) {
+                    if (!(g_windows[j].flags & WOOS_WIN_FLAG_MINIMIZED)) {
+                        g_windows[j].flags |= WOOS_WIN_FLAG_FOCUSED;
+                        break;
+                    }
+                }
+                input_event_t ev = { .type = INPUT_EVENT_WINDOW_CHANGE, .x = 0, .y = 0, .buttons = 0 };
+                input_push(&ev);
+                extern void sched_unblock_all(void);
+                sched_unblock_all();
+                return 0;
+            }
+        }
+    }
+    return -1;
+}
+
+int32_t woos_graphics_toggle_maximize(uint32_t window_id) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].id == window_id) {
+            if (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) {
+                g_windows[i].x = g_windows[i].saved_x;
+                g_windows[i].y = g_windows[i].saved_y;
+                g_windows[i].w = g_windows[i].saved_w;
+                g_windows[i].h = g_windows[i].saved_h;
+                g_windows[i].flags &= ~WOOS_WIN_FLAG_MAXIMIZED;
+            } else {
+                g_windows[i].saved_x = g_windows[i].x;
+                g_windows[i].saved_y = g_windows[i].y;
+                g_windows[i].saved_w = g_windows[i].w;
+                g_windows[i].saved_h = g_windows[i].h;
+                video_info_t* info = get_video_info();
+                g_windows[i].x = 3;
+                g_windows[i].y = 25;
+                if (info && info->width > 6 && info->height > 64) {
+                    g_windows[i].w = info->width - 6;
+                    g_windows[i].h = info->height - 64;
+                }
+                g_windows[i].flags |= WOOS_WIN_FLAG_MAXIMIZED;
+            }
+            woos_graphics_bring_to_front(window_id);
+            return 0;
+        }
+    }
+    return -1;
+}
+
 int32_t woos_graphics_set_window_pos(uint32_t window_id, int32_t x, int32_t y) {
-    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
-        if (g_windows[i].active && g_windows[i].id == window_id) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].id == window_id) {
             g_windows[i].x = x;
             g_windows[i].y = y;
             return 0;
@@ -742,14 +902,151 @@ uint32_t woos_graphics_get_window_count(void) {
 }
 
 int32_t woos_graphics_get_window_info(uint32_t index, woos_window_t* info) {
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
-        if (g_windows[i].active) {
-            if (count == index) {
-                memcpy(info, &g_windows[i], sizeof(woos_window_t));
-                return 0;
+    if (index < g_window_count && info) {
+        memcpy(info, &g_windows[index], sizeof(woos_window_t));
+        return 0;
+    }
+    return -1;
+}
+
+int32_t woos_graphics_get_focused_tid(void) {
+    for (int32_t i = (int32_t)g_window_count - 1; i >= 0; i--) {
+        if ((g_windows[i].flags & WOOS_WIN_FLAG_FOCUSED) && !(g_windows[i].flags & WOOS_WIN_FLAG_MINIMIZED)) {
+            return (int32_t)g_windows[i].thread_id;
+        }
+    }
+    return -1;
+}
+
+void woos_graphics_draw_text_to_buffer(uint32_t* dst_buf, uint32_t dst_w, uint32_t dst_h, int32_t x, int32_t y, const char* text, uint32_t color) {
+    if (!dst_buf || !text) return;
+    int32_t cur_x = x;
+    while (*text) {
+        char c = *text++;
+        const uint8_t* glyph = glyph_for_char(c);
+        for (int32_t gy = 0; gy < FONT_H; gy++) {
+            int32_t py = y + gy;
+            if (py < 0 || py >= (int32_t)dst_h) continue;
+            uint8_t row = glyph[gy];
+            for (int32_t gx = 0; gx < FONT_W; gx++) {
+                int32_t px = cur_x + gx;
+                if (px < 0 || px >= (int32_t)dst_w) continue;
+                if (row & (0x80 >> gx)) {
+                    dst_buf[py * dst_w + px] = color;
+                }
             }
-            count++;
+        }
+        cur_x += FONT_W;
+    }
+}
+
+void fb_draw_cursor_crosshair(uint8_t* dst, uint32_t width, uint32_t height, uint32_t pitch, int32_t cx, int32_t cy, uint32_t color) {
+    if (!dst) return;
+
+    // Horizontal bar (w=11, h=2): cx - 5 to cx + 5, cy - 1 to cy
+    int32_t hx_start = cx - 5;
+    int32_t hx_end = cx + 6;
+    int32_t hy_start = cy - 1;
+    int32_t hy_end = cy + 1;
+
+    for (int32_t y = hy_start; y <= hy_end; y++) {
+        if (y >= 0 && y < (int32_t)height) {
+            uint8_t* row = dst + (uint64_t)y * pitch;
+            for (int32_t x = hx_start; x < hx_end; x++) {
+                if (x >= 0 && x < (int32_t)width) {
+                    *(uint32_t*)(row + (uint64_t)x * 4) = color;
+                }
+            }
+        }
+    }
+
+    // Vertical bar (w=2, h=11): cx - 1 to cx, cy - 5 to cy + 5
+    int32_t vx_start = cx - 1;
+    int32_t vx_end = cx + 1;
+    int32_t vy_start = cy - 5;
+    int32_t vy_end = cy + 6;
+
+    for (int32_t y = vy_start; y < vy_end; y++) {
+        if (y >= 0 && y < (int32_t)height) {
+            uint8_t* row = dst + (uint64_t)y * pitch;
+            for (int32_t x = vx_start; x <= vx_end; x++) {
+                if (x >= 0 && x < (int32_t)width) {
+                    *(uint32_t*)(row + (uint64_t)x * 4) = color;
+                }
+            }
+        }
+    }
+}
+
+int32_t woos_graphics_blit_window_internal(uint32_t window_id, const uint32_t* wasm_buf, uint32_t w, uint32_t h) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].id == window_id) {
+            uint32_t buf_w = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_w : g_windows[i].w;
+            uint32_t buf_h = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_h : g_windows[i].h;
+
+            uint32_t copy_w = (w < buf_w) ? w : buf_w;
+            uint32_t copy_h = (h < buf_h) ? h : buf_h;
+            
+            for (uint32_t r = 0; r < copy_h; r++) {
+                const uint32_t* src_row = wasm_buf + r * w;
+                uint32_t* dst_row = g_windows[i].buffer + r * buf_w;
+                memcpy(dst_row, src_row, copy_w * 4);
+            }
+            
+            // Present window region if not minimized
+            if (!(g_windows[i].flags & WOOS_WIN_FLAG_MINIMIZED)) {
+                video_info_t* info = get_video_info();
+                if (info) {
+                    extern uint8_t* wasi_get_compositor_buf(void);
+                    uint8_t* comp_buf = wasi_get_compositor_buf();
+                    int32_t win_x = g_windows[i].x;
+                    int32_t win_y = g_windows[i].y;
+                    uint32_t pitch = info->pitch;
+
+                    // 1. Keep compositor's WASM backbuffer in sync with new window pixels
+                    if (comp_buf) {
+                        for (uint32_t r = 0; r < copy_h; r++) {
+                            int32_t py = win_y + (int32_t)r;
+                            if (py >= 0 && py < (int32_t)info->height) {
+                                int32_t px = win_x;
+                                int32_t pw = copy_w;
+                                if (px < 0) {
+                                    pw += px;
+                                    px = 0;
+                                }
+                                if (px + pw > (int32_t)info->width) {
+                                    pw = (int32_t)info->width - px;
+                                }
+                                if (pw > 0) {
+                                    uint8_t* dst = comp_buf + (uint64_t)py * pitch + (uint64_t)px * 4;
+                                    const uint8_t* src = (const uint8_t*)(g_windows[i].buffer + r * buf_w + (px - win_x));
+                                    memcpy(dst, src, pw * 4);
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Draw window to screen backbuffer
+                    woos_graphics_draw_window_to_screen(window_id);
+
+                    // 3. Draw mouse cursor if inside window area
+                    extern uint16_t mouse_get_x(void);
+                    extern uint16_t mouse_get_y(void);
+                    int32_t mx = (int32_t)mouse_get_x();
+                    int32_t my = (int32_t)mouse_get_y();
+                    if (mx >= win_x - 6 && mx < win_x + (int32_t)g_windows[i].w + 6 &&
+                        my >= win_y - 6 && my < win_y + (int32_t)g_windows[i].h + 6) {
+                        fb_draw_cursor_crosshair(g_backbuffer, info->width, info->height, info->pitch, mx, my, 0xE74C3Cu);
+                    }
+
+                    // 4. Present window rectangle
+                    fb_present_rect(info, g_windows[i].x, g_windows[i].y, g_windows[i].w, g_windows[i].h);
+                }
+            }
+
+            extern void sched_unblock_all(void);
+            sched_unblock_all();
+            return 0;
         }
     }
     return -1;
@@ -759,19 +1056,41 @@ int32_t woos_graphics_draw_window_to_screen_internal(uint32_t window_id) {
     video_info_t* info = get_video_info();
     if (!info) return -1;
     
-    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
-        if (g_windows[i].active && g_windows[i].id == window_id) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].id == window_id) {
+            if (g_windows[i].flags & WOOS_WIN_FLAG_MINIMIZED) {
+                return 0;
+            }
             int32_t win_x = g_windows[i].x;
             int32_t win_y = g_windows[i].y;
             uint32_t win_w = g_windows[i].w;
             uint32_t win_h = g_windows[i].h;
             
+            // If maximized, fill client background on screen backbuffer
+            if (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) {
+                uint32_t bg_col = g_windows[i].buffer ? g_windows[i].buffer[0] : 0x1E1E1E;
+                int32_t my_start_y = (win_y < 0) ? -win_y : 0;
+                int32_t my_end_y = (win_y + (int32_t)win_h > (int32_t)info->height) ? (int32_t)info->height - win_y : (int32_t)win_h;
+                int32_t my_start_x = (win_x < 0) ? -win_x : 0;
+                int32_t my_end_x = (win_x + (int32_t)win_w > (int32_t)info->width) ? (int32_t)info->width - win_x : (int32_t)win_w;
+                for (int32_t cy = my_start_y; cy < my_end_y; cy++) {
+                    uint8_t* dst_row = g_backbuffer + (uint64_t)(win_y + cy) * info->pitch + (uint64_t)(win_x + my_start_x) * 4;
+                    uint32_t* dst = (uint32_t*)dst_row;
+                    for (int32_t cx = 0; cx < (my_end_x - my_start_x); cx++) {
+                        dst[cx] = bg_col;
+                    }
+                }
+            }
+
+            uint32_t buf_w = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_w : g_windows[i].w;
+            uint32_t buf_h = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_h : g_windows[i].h;
+
             int32_t start_y = (win_y < 0) ? -win_y : 0;
-            int32_t end_y = (win_y + (int32_t)win_h > (int32_t)info->height) ? (int32_t)info->height - win_y : (int32_t)win_h;
+            int32_t end_y = (win_y + (int32_t)buf_h > (int32_t)info->height) ? (int32_t)info->height - win_y : (int32_t)buf_h;
             int32_t start_x = (win_x < 0) ? -win_x : 0;
-            int32_t end_x = (win_x + (int32_t)win_w > (int32_t)info->width) ? (int32_t)info->width - win_x : (int32_t)win_w;
+            int32_t end_x = (win_x + (int32_t)buf_w > (int32_t)info->width) ? (int32_t)info->width - win_x : (int32_t)buf_w;
             
-            if (start_x >= end_x || start_y >= end_y) {
+            if (start_x >= end_x || start_y >= end_y || !g_windows[i].buffer) {
                 return 0;
             }
             
@@ -781,7 +1100,7 @@ int32_t woos_graphics_draw_window_to_screen_internal(uint32_t window_id) {
             uint8_t screen_bpp = bytes_per_pixel(info);
             
             for (int32_t cy = start_y; cy < end_y; cy++) {
-                uint32_t* src_row = g_windows[i].buffer + cy * win_w + start_x;
+                uint32_t* src_row = g_windows[i].buffer + cy * buf_w + start_x;
                 uint8_t* dst_row = screen_base + (uint64_t)(win_y + cy) * screen_pitch + (uint64_t)(win_x + start_x) * screen_bpp;
                 
                 if (screen_bpp == 4) {
@@ -838,28 +1157,46 @@ int32_t woos_graphics_draw_window_to_screen(uint32_t window_id) {
 }
 
 int32_t woos_graphics_draw_window_to_buffer(uint32_t window_id, uint32_t* dst_buf, uint32_t dst_w, uint32_t dst_h) {
-    for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
-        if (g_windows[i].active && g_windows[i].id == window_id) {
+    for (uint32_t i = 0; i < g_window_count; i++) {
+        if (g_windows[i].id == window_id) {
+            if (g_windows[i].flags & WOOS_WIN_FLAG_MINIMIZED) {
+                return 0;
+            }
             int32_t win_x = g_windows[i].x;
             int32_t win_y = g_windows[i].y;
             uint32_t win_w = g_windows[i].w;
             uint32_t win_h = g_windows[i].h;
             
-            int32_t start_y = (win_y < 0) ? -win_y : 0;
-            int32_t end_y = (win_y + (int32_t)win_h > (int32_t)dst_h) ? (int32_t)dst_h - win_y : (int32_t)win_h;
-            int32_t start_x = (win_x < 0) ? -win_x : 0;
-            int32_t end_x = (win_x + (int32_t)win_w > (int32_t)dst_w) ? (int32_t)dst_w - win_x : (int32_t)win_w;
-            
-            if (start_x >= end_x || start_y >= end_y) {
-                return 0;
+            // If maximized, fill background in compositor backbuffer
+            if (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) {
+                uint32_t bg_col = g_windows[i].buffer ? g_windows[i].buffer[0] : 0x1E1E1E;
+                int32_t my_start_y = (win_y < 0) ? -win_y : 0;
+                int32_t my_end_y = (win_y + (int32_t)win_h > (int32_t)dst_h) ? (int32_t)dst_h - win_y : (int32_t)win_h;
+                int32_t my_start_x = (win_x < 0) ? -win_x : 0;
+                int32_t my_end_x = (win_x + (int32_t)win_w > (int32_t)dst_w) ? (int32_t)dst_w - win_x : (int32_t)win_w;
+                for (int32_t cy = my_start_y; cy < my_end_y; cy++) {
+                    uint32_t* dst_row = dst_buf + (win_y + cy) * dst_w + (win_x + my_start_x);
+                    for (int32_t cx = 0; cx < (my_end_x - my_start_x); cx++) {
+                        dst_row[cx] = bg_col;
+                    }
+                }
             }
+
+            uint32_t buf_w = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_w : g_windows[i].w;
+            uint32_t buf_h = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_h : g_windows[i].h;
+
+            int32_t start_y = (win_y < 0) ? -win_y : 0;
+            int32_t end_y = (win_y + (int32_t)buf_h > (int32_t)dst_h) ? (int32_t)dst_h - win_y : (int32_t)buf_h;
+            int32_t start_x = (win_x < 0) ? -win_x : 0;
+            int32_t end_x = (win_x + (int32_t)buf_w > (int32_t)dst_w) ? (int32_t)dst_w - win_x : (int32_t)buf_w;
             
-            uint32_t copy_width = (uint32_t)(end_x - start_x);
-            
-            for (int32_t cy = start_y; cy < end_y; cy++) {
-                uint32_t* src_row = g_windows[i].buffer + cy * win_w + start_x;
-                uint32_t* dst_row = dst_buf + (win_y + cy) * dst_w + (win_x + start_x);
-                memcpy(dst_row, src_row, copy_width * 4);
+            if (start_x < end_x && start_y < end_y && g_windows[i].buffer) {
+                uint32_t copy_width = (uint32_t)(end_x - start_x);
+                for (int32_t cy = start_y; cy < end_y; cy++) {
+                    uint32_t* src_row = g_windows[i].buffer + cy * buf_w + start_x;
+                    uint32_t* dst_row = dst_buf + (win_y + cy) * dst_w + (win_x + start_x);
+                    memcpy(dst_row, src_row, copy_width * 4);
+                }
             }
             return 0;
         }

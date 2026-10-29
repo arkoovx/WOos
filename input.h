@@ -8,6 +8,9 @@ typedef enum input_event_type {
     INPUT_EVENT_MOUSE_BUTTON = 1,
     INPUT_EVENT_MOUSE_RELEASE = 2,
     INPUT_EVENT_TIMER_TICK = 3,
+    INPUT_EVENT_KEY_DOWN = 4,
+    INPUT_EVENT_KEY_UP = 5,
+    INPUT_EVENT_WINDOW_CHANGE = 6,
 } input_event_type_t;
 
 typedef struct input_event {

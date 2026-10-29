@@ -26,6 +26,7 @@ SECTIONS
     .data : ALIGN(16)
     {
         *(.data .data.*)
+        *(.ldata .ldata.*)
     }
 
     . = 0x100000;
@@ -34,6 +35,7 @@ SECTIONS
     {
         __bss_start = .;
         *(.bss .bss.*)
+        *(.lbss .lbss.*)
         *(COMMON)
         __bss_end = .;
     }

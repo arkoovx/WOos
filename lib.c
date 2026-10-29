@@ -125,6 +125,7 @@ unsigned long strtoul(const char* nptr, char** endptr, int base) {
     if (endptr) *endptr = (char*)nptr;
     return res;
 }
+unsigned long __isoc23_strtoul(const char* nptr, char** endptr, int base) __attribute__((weak, alias("strtoul")));
 
 unsigned long long strtoull(const char* nptr, char** endptr, int base) {
     (void)base;
@@ -136,6 +137,7 @@ unsigned long long strtoull(const char* nptr, char** endptr, int base) {
     if (endptr) *endptr = (char*)nptr;
     return res;
 }
+unsigned long long __isoc23_strtoull(const char* nptr, char** endptr, int base) __attribute__((weak, alias("strtoull")));
 
 int __popcountdi2(uint64_t val) {
     int count = 0;
@@ -171,4 +173,18 @@ char* strrchr(const char* s, int c) {
         return (char*)s;
     }
     return (char*)last;
+}
+
+int tolower(int c) {
+    if (c >= 'A' && c <= 'Z') {
+        return c + ('a' - 'A');
+    }
+    return c;
+}
+
+int toupper(int c) {
+    if (c >= 'a' && c <= 'z') {
+        return c - ('a' - 'A');
+    }
+    return c;
 }

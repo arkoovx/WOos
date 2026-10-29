@@ -68,6 +68,7 @@ void wasm_runtime_run_file(const char* filepath) {
     res = m3_LoadModule(runtime, module);
     if (res) {
         serial_printf("[WASM] Load module error: %s\n", res);
+        m3_FreeModule(module);
         m3_FreeRuntime(runtime);
         m3_FreeEnvironment(env);
         kheap_free(wasm_bytes);

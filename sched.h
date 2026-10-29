@@ -40,8 +40,10 @@ typedef struct thread {
     uint64_t id;               // Уникальный ID потока
     thread_state_t state;      // Состояние потока
     void* stack_limit;         // Нижняя граница выделенной памяти стека
+    uint32_t stack_pages_count;// Количество выделенных страниц стека
     uint64_t cr3;              // Физический адрес PML4 (0 для ядра)
     uint64_t kernel_stack_top; // Вершина стека ядра для переключения TSS
+    char app_path[64];         // Путь к исполняемому WASM приложению
 } thread_t;
 
 void sched_init(void);

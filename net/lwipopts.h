@@ -30,6 +30,9 @@
 #define LWIP_DHCP                       1
 #define LWIP_UDP                        1
 #define LWIP_TCP                        1
+#define LWIP_DNS                        1
+#define DNS_TABLE_SIZE                  4
+#define DNS_MAX_NAME_LENGTH             64
 
 #define LWIP_ACD                        0
 #define LWIP_DHCP_DOES_ACD_CHECK        0

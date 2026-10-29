@@ -343,14 +343,47 @@ void idt_enable_interrupts(void) {
 extern void timer_handler(void);
 extern void mouse_handler(void);
 
+#include "input.h"
+
+static const char kbd_us_lower[128] = {
+    0,  27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
+  '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',
+     0, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
+     0, '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/',   0,
+   '*',   0, ' ',   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
+};
+
+static const char kbd_us_upper[128] = {
+    0,  27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\b',
+  '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n',
+     0, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',
+     0, '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?',   0,
+   '*',   0, ' ',   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
+};
+
+static uint8_t g_kbd_shift = 0;
+
 void idt_handle_irq(uint32_t vector) {
     if (vector == IRQ_VECTOR_BASE_MASTER + 0u) {
         // Обрабатывается планировщиком в idt_stub_irq0 напрямую
     } else if (vector == IRQ_KEYBOARD_VECTOR) {
-        // Для спорадического IRQ1 читаем data-порт только если контроллер
-        // действительно сообщает о готовом байте.
         if (ps2_status() & 0x01u) {
-            (void)ps2_data();
+            uint8_t sc = ps2_data();
+            if (sc == 0x2A || sc == 0x36) {
+                g_kbd_shift = 1;
+            } else if (sc == 0xAA || sc == 0xB6) {
+                g_kbd_shift = 0;
+            } else if (!(sc & 0x80)) {
+                char ascii = g_kbd_shift ? kbd_us_upper[sc] : kbd_us_lower[sc];
+                if (ascii != 0) {
+                    input_event_t ev;
+                    ev.type = INPUT_EVENT_KEY_DOWN;
+                    ev.x = (uint16_t)(uint8_t)ascii;
+                    ev.y = (uint16_t)sc;
+                    ev.buttons = g_kbd_shift;
+                    input_push(&ev);
+                }
+            }
         }
         g_keyboard_irq_count++;
     } else if (vector == IRQ_MOUSE_VECTOR) {
