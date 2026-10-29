@@ -15,7 +15,7 @@ typedef struct vfs_handle {
     int32_t socket_id;
 } vfs_handle_t;
 
-// Глобальная переменная для LBA начала раздела FAT12 (используется в diskio.c)
+// Глобальная переменная для LBA начала раздела FAT (используется в diskio.c)
 uint32_t g_fat_start_lba = VFS_BOOT_SECTORS;
 
 static uint8_t g_vfs_ready = 0u;
@@ -49,27 +49,30 @@ void vfs_init(void) {
         return;
     }
 
-    // Сканируем диск в поисках сигнатуры загрузочного сектора FAT12 (0xEB, 0x3C, 0x90 и 0x55, 0xAA)
+    // Сканируем диск в поисках сигнатуры загрузочного сектора FAT (0xEB, ..., 0x55, 0xAA)
     // Начинаем с LBA 400 (около 200 КБ от начала диска), чтобы гарантированно пропустить начало ядра.
     uint8_t sector_buf[STORAGE_SECTOR_SIZE];
     uint8_t found = 0;
-    for (uint32_t lba = 400; lba < 2880; lba++) {
+    for (uint32_t lba = 400; lba < 4000; lba++) {
         if (storage_read_sectors(lba, 1, sector_buf)) {
-            if (sector_buf[0] == 0xEB && sector_buf[1] == 0x3C && sector_buf[2] == 0x90 &&
+            if (sector_buf[0] == 0xEB && sector_buf[2] == 0x90 &&
                 sector_buf[510] == 0x55 && sector_buf[511] == 0xAA) {
-                g_fat_start_lba = lba;
-                found = 1;
-                break;
+                if ((sector_buf[82] == 'F' && sector_buf[83] == 'A' && sector_buf[84] == 'T') ||
+                    (sector_buf[54] == 'F' && sector_buf[55] == 'A' && sector_buf[56] == 'T')) {
+                    g_fat_start_lba = lba;
+                    found = 1;
+                    break;
+                }
             }
         }
     }
 
     if (!found) {
-        serial_printf("[VFS] Error: FAT12 signature not found on disk!\n");
+        serial_printf("[VFS] Error: FAT signature not found on disk!\n");
         return;
     }
 
-    serial_printf("[VFS] FAT12 start LBA set to %u\n", g_fat_start_lba);
+    serial_printf("[VFS] FAT start LBA set to %u\n", g_fat_start_lba);
 
     // Монтируем файловую систему тома FAT
     FRESULT res = f_mount(&g_fatfs, "", 1);
@@ -79,7 +82,10 @@ void vfs_init(void) {
     }
 
     g_vfs_ready = 1u;
-    serial_printf("[VFS] FAT12 volume mounted successfully.\n");
+    const char* fs_type_str = (g_fatfs.fs_type == FS_FAT32) ? "FAT32" :
+                              (g_fatfs.fs_type == FS_FAT16) ? "FAT16" :
+                              (g_fatfs.fs_type == FS_FAT12) ? "FAT12" : "FAT";
+    serial_printf("[VFS] %s volume mounted successfully.\n", fs_type_str);
 }
 
 uint8_t vfs_is_ready(void) {

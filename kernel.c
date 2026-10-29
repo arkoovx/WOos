@@ -158,7 +158,7 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             storage_init();
             serial_printf("[WoOS Kernel] Storage driver initialized.\n");
             vfs_init();
-            serial_printf("[WoOS Kernel] VFS / FAT12 initialized.\n");
+            serial_printf("[WoOS Kernel] VFS / FatFs initialized.\n");
             timer_init(100u);
             serial_printf("[WoOS Kernel] Timer initialized.\n");
             vmm_init();

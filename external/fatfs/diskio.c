@@ -34,20 +34,38 @@ DRESULT disk_read(BYTE pdrv, BYTE* buff, LBA_t sector, UINT count) {
     if (pdrv != DEV_DISK || count == 0) {
         return RES_PARERR;
     }
-    if (storage_read_sectors(g_fat_start_lba + (uint32_t)sector, (uint8_t)count, buff)) {
-        return RES_OK;
+    BYTE* ptr = buff;
+    LBA_t cur = sector;
+    UINT rem = count;
+    while (rem > 0) {
+        UINT chunk = rem > 128 ? 128 : rem;
+        if (!storage_read_sectors(g_fat_start_lba + (uint32_t)cur, (uint8_t)chunk, ptr)) {
+            return RES_ERROR;
+        }
+        cur += chunk;
+        ptr += chunk * 512;
+        rem -= chunk;
     }
-    return RES_ERROR;
+    return RES_OK;
 }
 
 DRESULT disk_write(BYTE pdrv, const BYTE* buff, LBA_t sector, UINT count) {
     if (pdrv != DEV_DISK || count == 0) {
         return RES_PARERR;
     }
-    if (storage_write_sectors(g_fat_start_lba + (uint32_t)sector, (uint8_t)count, buff)) {
-        return RES_OK;
+    const BYTE* ptr = buff;
+    LBA_t cur = sector;
+    UINT rem = count;
+    while (rem > 0) {
+        UINT chunk = rem > 128 ? 128 : rem;
+        if (!storage_write_sectors(g_fat_start_lba + (uint32_t)cur, (uint8_t)chunk, ptr)) {
+            return RES_ERROR;
+        }
+        cur += chunk;
+        ptr += chunk * 512;
+        rem -= chunk;
     }
-    return RES_ERROR;
+    return RES_OK;
 }
 
 DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* buff) {
@@ -61,7 +79,7 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* buff) {
 
         case GET_SECTOR_COUNT:
             if (!buff) return RES_PARERR;
-            *(LBA_t*)buff = 2880; // 1.44 MB image = 2880 sectors
+            *(LBA_t*)buff = 131072; // 64 MB volume
             return RES_OK;
 
         case GET_SECTOR_SIZE:
