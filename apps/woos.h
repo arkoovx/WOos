@@ -75,20 +75,23 @@ WOOS_API("woos_vfs_size")
 uint32_t woos_vfs_size(int handle);
 
 // Basic libc-like helpers for standalone WASM
-static inline void* memset(void* s, int c, size_t n) {
+__attribute__((used))
+void* memset(void* s, int c, size_t n) {
     uint8_t* p = (uint8_t*)s;
     while (n--) *p++ = (uint8_t)c;
     return s;
 }
 
-static inline void* memcpy(void* dest, const void* src, size_t n) {
+__attribute__((used))
+void* memcpy(void* dest, const void* src, size_t n) {
     uint8_t* d = (uint8_t*)dest;
     const uint8_t* s = (const uint8_t*)src;
     while (n--) *d++ = *s++;
     return dest;
 }
 
-static inline void* memmove(void* dest, const void* src, size_t n) {
+__attribute__((used))
+void* memmove(void* dest, const void* src, size_t n) {
     uint8_t* d = (uint8_t*)dest;
     const uint8_t* s = (const uint8_t*)src;
     if (d < s) {
