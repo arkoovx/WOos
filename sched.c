@@ -530,5 +530,16 @@ void sched_unblock_all(void) {
 }
 
 uint32_t woos_ipc_pending(void) {
-    return (g_ipc_head != g_ipc_tail);
+    uint32_t current_id = sched_current_thread_id();
+    __asm__ __volatile__("cli");
+    uint32_t scan = g_ipc_tail;
+    while (scan != g_ipc_head) {
+        if (g_ipc_queue[scan].dest_id == current_id) {
+            __asm__ __volatile__("sti");
+            return 1;
+        }
+        scan = (scan + 1) % IPC_MAX_MSG;
+    }
+    __asm__ __volatile__("sti");
+    return 0;
 }

@@ -225,10 +225,11 @@ static void int_to_str(int val, char* dst) {
 static void draw_editor(void) {
     scroll();
 
-    // 1. Background
-    fill_rect(g_fb, WIN_W, WIN_H, 0, 0, WIN_W, WIN_H, COLOR_BG);
+    int v_rows = visible_rows();
+    int v_cols = visible_cols();
+    int text_h = WIN_H - TOOLBAR_H - STATUSBAR_H;
 
-    // 2. Toolbar
+    // 1. Toolbar background and border
     fill_rect(g_fb, WIN_W, WIN_H, 0, 0, WIN_W, TOOLBAR_H, COLOR_TOOLBAR);
     fill_rect(g_fb, WIN_W, WIN_H, 0, TOOLBAR_H - 1, WIN_W, 1, COLOR_BORDER);
 
@@ -246,7 +247,7 @@ static void draw_editor(void) {
     char title_buf[80];
     int pos = 0;
     const char* fn = g_filename;
-    while (*fn && pos < 60) title_buf[pos++] = *fn++;
+    while (*fn && pos < 50) title_buf[pos++] = *fn++;
     if (g_dirty) {
         title_buf[pos++] = ' ';
         title_buf[pos++] = '*';
@@ -265,14 +266,14 @@ static void draw_editor(void) {
     title_buf[pos] = '\0';
     woos_draw_text(g_fb, WIN_W, WIN_H, 130, 8, title_buf, 0x003366);
 
-    // 3. Line numbers margin
-    fill_rect(g_fb, WIN_W, WIN_H, 0, TOOLBAR_H, MARGIN_LEFT, WIN_H - TOOLBAR_H - STATUSBAR_H, COLOR_LINE_NUM_BG);
-    fill_rect(g_fb, WIN_W, WIN_H, MARGIN_LEFT - 1, TOOLBAR_H, 1, WIN_H - TOOLBAR_H - STATUSBAR_H, COLOR_BORDER);
+    // 2. Line numbers margin
+    fill_rect(g_fb, WIN_W, WIN_H, 0, TOOLBAR_H, MARGIN_LEFT, text_h, COLOR_LINE_NUM_BG);
+    fill_rect(g_fb, WIN_W, WIN_H, MARGIN_LEFT - 1, TOOLBAR_H, 1, text_h, COLOR_BORDER);
+
+    // 3. Text area background
+    fill_rect(g_fb, WIN_W, WIN_H, MARGIN_LEFT, TOOLBAR_H, WIN_W - MARGIN_LEFT, text_h, COLOR_BG);
 
     // 4. Text rows
-    int v_rows = visible_rows();
-    int v_cols = visible_cols();
-
     for (int y = 0; y < v_rows; y++) {
         int file_row = g_row_off + y;
         int screen_y = TOOLBAR_H + y * LINE_H + 2;
@@ -360,7 +361,7 @@ static void handle_click(int x, int y) {
 
 static void handle_key(int ascii, int scancode) {
     // Ctrl+S: Save
-    if (ascii == 19 || (ascii == 's' && (scancode == 0x1F))) { // 0x13 = Ctrl+S
+    if (ascii == 19 || (ascii == 's' && (scancode == 0x1F))) {
         save_file();
         return;
     }
@@ -380,8 +381,25 @@ static void handle_key(int ascii, int scancode) {
         return;
     }
 
+    // Delete key (scancode 0x53 or ascii 127)
+    if (scancode == 0x53) {
+        int len = g_row_len[g_cy];
+        if (g_cx < len) {
+            row_delete_char(g_cy, g_cx);
+        } else if (g_cy < g_num_rows - 1) {
+            int next_len = g_row_len[g_cy + 1];
+            if (len + next_len < MAX_COLS - 1) {
+                memcpy(&g_rows[g_cy][len], g_rows[g_cy + 1], next_len);
+                g_row_len[g_cy] += next_len;
+                g_rows[g_cy][g_row_len[g_cy]] = '\0';
+                delete_row(g_cy + 1);
+            }
+        }
+        return;
+    }
+
     // Backspace
-    if (ascii == '\b' || ascii == 127 || scancode == 0x0E) {
+    if (ascii == '\b' || scancode == 0x0E) {
         if (g_cx > 0) {
             row_delete_char(g_cy, g_cx - 1);
             g_cx--;
@@ -443,6 +461,20 @@ static void handle_key(int ascii, int scancode) {
         g_cx = g_row_len[g_cy];
         return;
     }
+    // Page Up
+    if (scancode == 0x49) {
+        g_cy -= visible_rows();
+        if (g_cy < 0) g_cy = 0;
+        if (g_cx > g_row_len[g_cy]) g_cx = g_row_len[g_cy];
+        return;
+    }
+    // Page Down
+    if (scancode == 0x51) {
+        g_cy += visible_rows();
+        if (g_cy >= g_num_rows) g_cy = g_num_rows - 1;
+        if (g_cx > g_row_len[g_cy]) g_cx = g_row_len[g_cy];
+        return;
+    }
 
     // Normal printable character
     if (ascii >= 32 && ascii <= 126) {
@@ -464,21 +496,26 @@ void _start(void) {
     woos_msg_t msg;
 
     while (1) {
-        woos_ipc_wait_message();
+        int needs_redraw = 0;
 
-        while (woos_ipc_recv(&msg) == 0) {
+        while (woos_ipc_recv(&msg) > 0) {
             if (msg.type == MSG_CLOSE) {
                 woos_destroy_window(win_id);
                 return;
             } else if (msg.type == MSG_CLICK) {
                 handle_click((int)msg.arg1, (int)msg.arg2);
-                draw_editor();
-                woos_blit_window(win_id, g_fb, WIN_W, WIN_H);
+                needs_redraw = 1;
             } else if (msg.type == MSG_KEY_DOWN) {
                 handle_key((int)msg.arg1, (int)msg.arg2);
-                draw_editor();
-                woos_blit_window(win_id, g_fb, WIN_W, WIN_H);
+                needs_redraw = 1;
             }
         }
+
+        if (needs_redraw) {
+            draw_editor();
+            woos_blit_window(win_id, g_fb, WIN_W, WIN_H);
+        }
+
+        woos_ipc_wait_message();
     }
 }

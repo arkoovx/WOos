@@ -362,6 +362,8 @@ static const char kbd_us_upper[128] = {
 };
 
 static uint8_t g_kbd_shift = 0;
+static uint8_t g_kbd_ctrl = 0;
+static uint8_t g_kbd_extended = 0;
 
 void idt_handle_irq(uint32_t vector) {
     if (vector == IRQ_VECTOR_BASE_MASTER + 0u) {
@@ -369,20 +371,40 @@ void idt_handle_irq(uint32_t vector) {
     } else if (vector == IRQ_KEYBOARD_VECTOR) {
         if (ps2_status() & 0x01u) {
             uint8_t sc = ps2_data();
-            if (sc == 0x2A || sc == 0x36) {
+            if (sc == 0xE0) {
+                g_kbd_extended = 1;
+            } else if (sc == 0x2A || sc == 0x36) {
                 g_kbd_shift = 1;
+                g_kbd_extended = 0;
             } else if (sc == 0xAA || sc == 0xB6) {
                 g_kbd_shift = 0;
+                g_kbd_extended = 0;
+            } else if (sc == 0x1D) {
+                g_kbd_ctrl = 1;
+                g_kbd_extended = 0;
+            } else if (sc == 0x9D) {
+                g_kbd_ctrl = 0;
+                g_kbd_extended = 0;
             } else if (!(sc & 0x80)) {
-                char ascii = g_kbd_shift ? kbd_us_upper[sc] : kbd_us_lower[sc];
-                if (ascii != 0) {
+                char ascii = 0;
+                if (!g_kbd_extended && sc < 128) {
+                    ascii = g_kbd_shift ? kbd_us_upper[sc] : kbd_us_lower[sc];
+                    if (g_kbd_ctrl && ascii >= 'a' && ascii <= 'z') {
+                        ascii = (char)(ascii - 'a' + 1);
+                    }
+                }
+                if (ascii != 0 || sc == 0x48 || sc == 0x50 || sc == 0x4B || sc == 0x4D ||
+                    sc == 0x47 || sc == 0x4F || sc == 0x49 || sc == 0x51 || sc == 0x53 || sc == 0x52) {
                     input_event_t ev;
                     ev.type = INPUT_EVENT_KEY_DOWN;
                     ev.x = (uint16_t)(uint8_t)ascii;
                     ev.y = (uint16_t)sc;
-                    ev.buttons = g_kbd_shift;
+                    ev.buttons = (uint16_t)(g_kbd_shift | (g_kbd_ctrl << 1));
                     input_push(&ev);
                 }
+                g_kbd_extended = 0;
+            } else {
+                g_kbd_extended = 0;
             }
         }
         g_keyboard_irq_count++;
