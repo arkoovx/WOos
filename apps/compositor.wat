@@ -39,6 +39,8 @@
   (data (i32.const 12090) "HEAP\00")
   (data (i32.const 12100) "/TERM.WAS\00")
   (data (i32.const 12120) "Terminal\00")
+  (data (i32.const 12140) "/NOTEPAD.WAS\00")
+  (data (i32.const 12160) "Notepad\00")
 
   ;; Globals
   (global $g_width (mut i32) (i32.const 1280))
@@ -1412,6 +1414,49 @@
     i32.const 0xFFFFFF
     call $draw_str
 
+    ;; Desktop Shortcut 3: Notepad (at 250, 50, 64x64)
+    i32.const 250
+    i32.const 50
+    i32.const 64
+    i32.const 64
+    i32.const 0x2980B9
+    call $draw_rect
+
+    i32.const 254
+    i32.const 54
+    i32.const 56
+    i32.const 56
+    i32.const 0xFFFFFF
+    call $draw_rect
+
+    ;; Notepad lines inside icon
+    i32.const 262
+    i32.const 64
+    i32.const 40
+    i32.const 4
+    i32.const 0x34495E
+    call $draw_rect
+
+    i32.const 262
+    i32.const 74
+    i32.const 40
+    i32.const 4
+    i32.const 0x34495E
+    call $draw_rect
+
+    i32.const 262
+    i32.const 84
+    i32.const 28
+    i32.const 4
+    i32.const 0x34495E
+    call $draw_rect
+
+    i32.const 254
+    i32.const 120
+    i32.const 12160 ;; "Notepad\00"
+    i32.const 0xFFFFFF
+    call $draw_str
+
     ;; 3. Iterate and Draw Windows in z-order
     call $get_window_count
     local.set $win_count
@@ -2488,6 +2533,29 @@
                 ;; Unified single-instance launcher for Terminal
                 i32.const 12100 ;; "/TERM.WAS\00"
                 i32.const 12120 ;; "Terminal\00"
+                call $launch_or_focus
+              end
+
+              ;; 6. Check Desktop Shortcut Icon (Notepad at 250,50, 64x64)
+              global.get $g_cursor_x
+              i32.const 250
+              i32.ge_s
+              global.get $g_cursor_x
+              i32.const 314
+              i32.le_s
+              i32.and
+              global.get $g_cursor_y
+              i32.const 50
+              i32.ge_s
+              global.get $g_cursor_y
+              i32.const 114
+              i32.le_s
+              i32.and
+              i32.and
+              if
+                ;; Unified single-instance launcher for Notepad
+                i32.const 12140 ;; "/NOTEPAD.WAS\00"
+                i32.const 12160 ;; "Notepad\00"
                 call $launch_or_focus
               end
             )

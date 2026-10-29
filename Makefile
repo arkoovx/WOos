@@ -109,7 +109,10 @@ apps/calc.wasm: apps/calc.wat
 apps/terminal.wasm: apps/terminal.wat
 	$(WAT2WASM) apps/terminal.wat -o apps/terminal.wasm
 
-woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm apps/terminal.wasm
+apps/notepad.wasm: apps/notepad.c apps/woos.h
+	clang --target=wasm32 -nostdlib -O2 -Wl,--no-entry apps/notepad.c -o apps/notepad.wasm
+
+woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm apps/terminal.wasm apps/notepad.wasm
 	python3 tools/build_fat.py
 
 boot.bin: kernel.bin boot.asm

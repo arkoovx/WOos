@@ -29,9 +29,9 @@
   ;; Constants and String Data (Top-Level)
   (data (i32.const 500) "Terminal\00")
   (data (i32.const 520) "woos# \00")
-  (data (i32.const 540) "WoOS Terminal (v1.41.0)\00")
+  (data (i32.const 540) "WoOS Terminal (v1.44.0)\00")
   (data (i32.const 590) "Type 'help' for available commands.\00")
-  (data (i32.const 640) "WoOS 1.41.0 #1 SMP PREEMPT x86_64 WoOS Microkernel\00")
+  (data (i32.const 640) "WoOS 1.44.0 #1 SMP PREEMPT x86_64 WoOS Microkernel\00")
   (data (i32.const 710) "Starting /CALC.WAS...\00")
   (data (i32.const 740) "woos: command not found: \00")
   (data (i32.const 780) "/CALC.WAS\00")
@@ -52,9 +52,13 @@
   (data (i32.const 930) "fetch\00")
   (data (i32.const 940) "calc\00")
   (data (i32.const 950) "exit\00")
+  (data (i32.const 960) "notepad\00")
+  (data (i32.const 970) "edit\00")
+  (data (i32.const 980) "/NOTEPAD.WAS\00")
+  (data (i32.const 1000) "Starting /NOTEPAD.WAS...\00")
 
   ;; Files list for ls
-  (data (i32.const 1100) "HELLO.TXT     README.TXT    COMPOSIT.WAS  CALC.WAS      TERM.WAS\00")
+  (data (i32.const 1100) "HELLO.TXT     README.TXT    COMPOSIT.WAS  CALC.WAS      TERM.WAS      NOTEPAD.WAS\00")
 
   ;; Help text lines
   (data (i32.const 1200) "Available commands:\00")
@@ -71,7 +75,8 @@
   (data (i32.const 1730) "  ping <host> - DNS resolution and ping probe\00")
   (data (i32.const 1780) "  fetch <url> - Fetch web page via HTTP client\00")
   (data (i32.const 1830) "  calc        - Launch Calculator application\00")
-  (data (i32.const 1880) "  exit        - Close terminal\00")
+  (data (i32.const 1870) "  notepad     - Launch Notepad text editor\00")
+  (data (i32.const 1910) "  exit        - Close terminal\00")
 
   ;; PS header
   (data (i32.const 1930) "  PID TTY          TIME CMD\00")
@@ -1097,6 +1102,24 @@
       call $term_puts
       call $term_newline
       i32.const 780 ;; "/CALC.WAS\00"
+      call $system_spawn
+      drop
+      return
+    end
+
+    ;; Command: notepad / edit
+    local.get $cmd_ptr
+    i32.const 960 ;; "notepad"
+    call $streq
+    local.get $cmd_ptr
+    i32.const 970 ;; "edit"
+    call $streq
+    i32.or
+    if
+      i32.const 1000 ;; "Starting /NOTEPAD.WAS..."
+      call $term_puts
+      call $term_newline
+      i32.const 980 ;; "/NOTEPAD.WAS\00"
       call $system_spawn
       drop
       return

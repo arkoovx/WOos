@@ -480,6 +480,49 @@ m3ApiRawFunction(wasi_net_get_config) {
     m3ApiReturn(0);
 }
 
+m3ApiRawFunction(wasi_vfs_open) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, path)
+    m3ApiGetArg(uint32_t, mode)
+    extern int32_t vfs_open(const char* path, uint8_t mode);
+    m3ApiReturn(vfs_open(path, (uint8_t)mode));
+}
+
+m3ApiRawFunction(wasi_vfs_read) {
+    m3ApiReturnType(uint32_t)
+    m3ApiGetArg(int32_t, handle)
+    m3ApiGetArgMem(void*, buf)
+    m3ApiGetArg(uint32_t, size)
+    m3ApiCheckMem(buf, size);
+    extern uint32_t vfs_read(int32_t handle, void* buffer, uint32_t bytes);
+    m3ApiReturn(vfs_read(handle, buf, size));
+}
+
+m3ApiRawFunction(wasi_vfs_write) {
+    m3ApiReturnType(uint32_t)
+    m3ApiGetArg(int32_t, handle)
+    m3ApiGetArgMem(const void*, buf)
+    m3ApiGetArg(uint32_t, size)
+    m3ApiCheckMem(buf, size);
+    extern uint32_t vfs_write(int32_t handle, const void* buffer, uint32_t bytes);
+    m3ApiReturn(vfs_write(handle, buf, size));
+}
+
+m3ApiRawFunction(wasi_vfs_close) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, handle)
+    extern void vfs_close(int32_t handle);
+    vfs_close(handle);
+    m3ApiReturn(0);
+}
+
+m3ApiRawFunction(wasi_vfs_size) {
+    m3ApiReturnType(uint32_t)
+    m3ApiGetArg(int32_t, handle)
+    extern uint32_t vfs_size(int32_t handle);
+    m3ApiReturn(vfs_size(handle));
+}
+
 
 m3ApiRawFunction(wasi_ipc_send) {
     m3ApiReturnType(int32_t)
@@ -1042,6 +1085,21 @@ M3Result link_wasi(IM3Module module) {
     if (res) return res;
 
     res = link_raw_func(module, "env", "woos_net_get_config", "i(*i)", &wasi_net_get_config);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_vfs_open", "i(*i)", &wasi_vfs_open);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_vfs_read", "i(i*i)", &wasi_vfs_read);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_vfs_write", "i(i*i)", &wasi_vfs_write);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_vfs_close", "i(i)", &wasi_vfs_close);
+    if (res) return res;
+
+    res = link_raw_func(module, "env", "woos_vfs_size", "i(i)", &wasi_vfs_size);
     if (res) return res;
 
 
