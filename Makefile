@@ -112,7 +112,10 @@ apps/terminal.wasm: apps/terminal.wat
 apps/notepad.wasm: apps/notepad.c apps/woos.h
 	clang --target=wasm32 -nostdlib -O2 -fno-builtin -Wl,--no-entry apps/notepad.c -o apps/notepad.wasm
 
-woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm apps/terminal.wasm apps/notepad.wasm
+apps/explorer.wasm: apps/explorer.c apps/woos.h
+	clang --target=wasm32 -nostdlib -O2 -fno-builtin -Wl,--no-entry apps/explorer.c -o apps/explorer.wasm
+
+woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm apps/terminal.wasm apps/notepad.wasm apps/explorer.wasm
 	python3 tools/build_fat.py
 
 boot.bin: kernel.bin boot.asm

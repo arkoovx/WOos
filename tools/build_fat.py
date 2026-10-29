@@ -86,6 +86,9 @@ def main():
     if os.path.exists("apps/notepad.wasm"):
         with open("apps/notepad.wasm", "rb") as f:
             files.append(("NOTEPAD.WAS", f.read()))
+    if os.path.exists("apps/explorer.wasm"):
+        with open("apps/explorer.wasm", "rb") as f:
+            files.append(("EXPLORER.WAS", f.read()))
 
     current_cluster = 2 + ROOT_DIR_CLUSTERS  # Cluster 6+
 

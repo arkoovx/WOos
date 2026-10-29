@@ -74,6 +74,15 @@ int woos_vfs_close(int handle);
 WOOS_API("woos_vfs_size")
 uint32_t woos_vfs_size(int handle);
 
+typedef struct woos_dirent {
+    char name[24];
+    uint8_t is_dir;
+    uint32_t size;
+} woos_dirent_t;
+
+WOOS_API("woos_vfs_readdir")
+int woos_vfs_readdir(int handle, woos_dirent_t* entry);
+
 // Basic libc-like helpers for standalone WASM
 __attribute__((used))
 void* memset(void* s, int c, size_t n) {
@@ -116,6 +125,13 @@ static inline char* strcpy(char* dest, const char* src) {
     return dest;
 }
 
+static inline char* strcat(char* dest, const char* src) {
+    char* d = dest;
+    while (*d) d++;
+    while ((*d++ = *src++));
+    return dest;
+}
+
 static inline char* strncpy(char* dest, const char* src, size_t n) {
     size_t i;
     for (i = 0; i < n && src[i] != '\0'; i++) dest[i] = src[i];
@@ -147,6 +163,15 @@ static inline void draw_rect(uint32_t* buf, int buf_w, int buf_h, int x, int y, 
     fill_rect(buf, buf_w, buf_h, x, y + rh - 1, rw, 1, color);
     fill_rect(buf, buf_w, buf_h, x, y, 1, rh, color);
     fill_rect(buf, buf_w, buf_h, x + rw - 1, y, 1, rh, color);
+}
+
+static inline void draw_3d_rect(uint32_t* buf, int buf_w, int buf_h, int x, int y, int rw, int rh, int sunken) {
+    uint32_t top_left = sunken ? 0x808080 : 0xFFFFFF;
+    uint32_t bot_right = sunken ? 0xFFFFFF : 0x808080;
+    fill_rect(buf, buf_w, buf_h, x, y, rw, 1, top_left);
+    fill_rect(buf, buf_w, buf_h, x, y, 1, rh, top_left);
+    fill_rect(buf, buf_w, buf_h, x, y + rh - 1, rw, 1, bot_right);
+    fill_rect(buf, buf_w, buf_h, x + rw - 1, y, 1, rh, bot_right);
 }
 
 #endif

@@ -41,6 +41,8 @@
   (data (i32.const 12120) "Terminal\00")
   (data (i32.const 12140) "/NOTEPAD.WAS\00")
   (data (i32.const 12160) "Notepad\00")
+  (data (i32.const 12180) "/EXPLORER.WAS\00")
+  (data (i32.const 12200) "Explorer\00")
 
   ;; Globals
   (global $g_width (mut i32) (i32.const 1280))
@@ -1457,6 +1459,43 @@
     i32.const 0xFFFFFF
     call $draw_str
 
+    ;; Desktop Shortcut 4: Explorer (at 350, 50, 64x64)
+    i32.const 350
+    i32.const 50
+    i32.const 64
+    i32.const 64
+    i32.const 0xD4AC0D
+    call $draw_rect
+
+    i32.const 354
+    i32.const 54
+    i32.const 56
+    i32.const 56
+    i32.const 0xF4D03F
+    call $draw_rect
+
+    ;; Folder front flap
+    i32.const 354
+    i32.const 70
+    i32.const 56
+    i32.const 40
+    i32.const 0xF39C12
+    call $draw_rect
+
+    ;; Folder border
+    i32.const 354
+    i32.const 70
+    i32.const 56
+    i32.const 2
+    i32.const 0xB7950B
+    call $draw_rect
+
+    i32.const 352
+    i32.const 120
+    i32.const 12200 ;; "Explorer\00"
+    i32.const 0xFFFFFF
+    call $draw_str
+
     ;; 3. Iterate and Draw Windows in z-order
     call $get_window_count
     local.set $win_count
@@ -2556,6 +2595,29 @@
                 ;; Unified single-instance launcher for Notepad
                 i32.const 12140 ;; "/NOTEPAD.WAS\00"
                 i32.const 12160 ;; "Notepad\00"
+                call $launch_or_focus
+              end
+
+              ;; 7. Check Desktop Shortcut Icon (Explorer at 350,50, 64x64)
+              global.get $g_cursor_x
+              i32.const 350
+              i32.ge_s
+              global.get $g_cursor_x
+              i32.const 414
+              i32.le_s
+              i32.and
+              global.get $g_cursor_y
+              i32.const 50
+              i32.ge_s
+              global.get $g_cursor_y
+              i32.const 114
+              i32.le_s
+              i32.and
+              i32.and
+              if
+                ;; Unified single-instance launcher for Explorer
+                i32.const 12180 ;; "/EXPLORER.WAS\00"
+                i32.const 12200 ;; "Explorer\00"
                 call $launch_or_focus
               end
             )
