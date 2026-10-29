@@ -57,6 +57,7 @@ KERNEL_OBJS_RAW := \
 	net.o \
 	lib.o \
 	serial.o \
+	drivers/ahci.o \
 	drivers/virtio_gpu_renderer/virtio_gpu_renderer.o \
 	drivers/virtio_net.o \
 	vmm.o \
@@ -191,4 +192,18 @@ run-bg: os.img
 	@echo "QEMU started in background. Serial log: serial.log"
 	@echo "Test HTTP server with: curl http://localhost:8080/"
 
-.PHONY: all clean verify-layout run run-bg
+# Запуск с AHCI (SATA) контроллером и Bus Master DMA
+run-ahci: os.img
+	qemu-system-x86_64 \
+		-accel kvm -accel tcg \
+		-device ich9-ahci,id=ahci \
+		-drive id=disk,file=os.img,format=raw,if=none \
+		-device ide-hd,drive=disk,bus=ahci.0 \
+		-m 128M \
+		-serial stdio \
+		-vga virtio \
+		-device virtio-net-pci,netdev=net0 \
+		-netdev user,id=net0,hostfwd=tcp::8080-:80 \
+		-no-reboot
+
+.PHONY: all clean verify-layout run run-bg run-ahci

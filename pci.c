@@ -13,7 +13,11 @@ static inline uint32_t inl(uint16_t port) {
     return value;
 }
 
-static uint32_t pci_read_config_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+static inline void outw(uint16_t port, uint16_t value) {
+    __asm__ __volatile__("outw %0, %1" : : "a"(value), "Nd"(port));
+}
+
+uint32_t pci_read_config_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address = 0x80000000u
         | ((uint32_t)bus << 16)
         | ((uint32_t)slot << 11)
@@ -22,6 +26,28 @@ static uint32_t pci_read_config_dword(uint8_t bus, uint8_t slot, uint8_t func, u
 
     outl(PCI_CONFIG_ADDRESS_PORT, address);
     return inl(PCI_CONFIG_DATA_PORT);
+}
+
+void pci_write_config_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t value) {
+    uint32_t address = 0x80000000u
+        | ((uint32_t)bus << 16)
+        | ((uint32_t)slot << 11)
+        | ((uint32_t)func << 8)
+        | (uint32_t)(offset & 0xFCu);
+
+    outl(PCI_CONFIG_ADDRESS_PORT, address);
+    outl(PCI_CONFIG_DATA_PORT, value);
+}
+
+void pci_write_config_word(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint16_t value) {
+    uint32_t address = 0x80000000u
+        | ((uint32_t)bus << 16)
+        | ((uint32_t)slot << 11)
+        | ((uint32_t)func << 8)
+        | (uint32_t)(offset & 0xFCu);
+
+    outl(PCI_CONFIG_ADDRESS_PORT, address);
+    outw((uint16_t)(PCI_CONFIG_DATA_PORT + (offset & 2)), value);
 }
 
 static uint16_t pci_vendor_id(uint8_t bus, uint8_t slot, uint8_t func) {
@@ -64,6 +90,34 @@ uint8_t pci_find_device_by_id(uint16_t vendor_id, uint16_t device_id, pci_device
                 uint16_t device = (uint16_t)((id >> 16) & 0xFFFFu);
 
                 if (vendor == vendor_id && device == device_id) {
+                    pci_fill_device_info((uint8_t)bus, slot, func, out);
+                    return 1u;
+                }
+            }
+        }
+    }
+
+    return 0u;
+}
+
+uint8_t pci_find_storage_controller(uint8_t subclass, uint8_t prog_if, pci_device_info_t* out) {
+    for (uint16_t bus = 0; bus < 256; bus++) {
+        for (uint8_t slot = 0; slot < 32; slot++) {
+            for (uint8_t func = 0; func < 8; func++) {
+                uint16_t vendor = pci_vendor_id((uint8_t)bus, slot, func);
+                if (vendor == 0xFFFFu) {
+                    if (func == 0u) {
+                        break;
+                    }
+                    continue;
+                }
+
+                uint32_t class_reg = pci_read_config_dword((uint8_t)bus, slot, func, 0x08u);
+                uint8_t class_code = (uint8_t)((class_reg >> 24) & 0xFFu);
+                uint8_t sub = (uint8_t)((class_reg >> 16) & 0xFFu);
+                uint8_t pif = (uint8_t)((class_reg >> 8) & 0xFFu);
+
+                if (class_code == 0x01u && sub == subclass && (prog_if == 0xFFu || pif == prog_if)) {
                     pci_fill_device_info((uint8_t)bus, slot, func, out);
                     return 1u;
                 }

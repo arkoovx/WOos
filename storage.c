@@ -1,4 +1,6 @@
 #include "storage.h"
+#include "drivers/ahci.h"
+#include "serial.h"
 
 #define ATA_PRIMARY_IO_BASE      0x1F0u
 #define ATA_PRIMARY_CTRL_BASE    0x3F6u
@@ -29,6 +31,7 @@
 #define STORAGE_BOOT_SIG_OFFSET  510u
 
 static uint8_t g_storage_ready = 0u;
+static storage_type_t g_storage_type = STORAGE_TYPE_NONE;
 static uint8_t g_last_read_ok = 0u;
 static uint8_t g_boot_signature_valid = 0u;
 static uint32_t g_last_lba = 0u;
@@ -78,7 +81,7 @@ static uint8_t ata_wait_drq(void) {
     return 0u;
 }
 
-uint8_t storage_read_sectors(uint32_t lba, uint8_t sector_count, void* buffer) {
+static uint8_t ata_pio_read_sectors(uint32_t lba, uint8_t sector_count, void* buffer) {
     uint16_t* words = (uint16_t*)buffer;
 
     if (sector_count == 0u || buffer == 0 || lba > 0x0FFFFFFFu) {
@@ -117,50 +120,6 @@ uint8_t storage_read_sectors(uint32_t lba, uint8_t sector_count, void* buffer) {
     return 1u;
 }
 
-void storage_init(void) {
-    g_storage_ready = 0u;
-    g_last_read_ok = 0u;
-    g_boot_signature_valid = 0u;
-    g_last_lba = 0u;
-
-    outb(ATA_REG_DEVICE_CONTROL, ATA_CTRL_NIEN);
-    outb(ATA_REG_DRIVE_HEAD, ATA_DH_LBA_MASTER);
-    io_wait();
-
-    uint8_t status = inb(ATA_REG_STATUS);
-    if (status == 0x00u || status == 0xFFu) {
-        return;
-    }
-
-    if ((status & (ATA_STATUS_BSY | ATA_STATUS_DRDY)) == ATA_STATUS_BSY && !ata_wait_not_busy()) {
-        return;
-    }
-
-    if (!storage_read_sectors(STORAGE_TEST_LBA, STORAGE_TEST_SECTORS, g_boot_sector)) {
-        return;
-    }
-
-    g_boot_signature_valid = (uint8_t)(g_boot_sector[STORAGE_BOOT_SIG_OFFSET] == 0x55u
-        && g_boot_sector[STORAGE_BOOT_SIG_OFFSET + 1u] == 0xAAu);
-    g_storage_ready = 1u;
-}
-
-uint8_t storage_is_ready(void) {
-    return g_storage_ready;
-}
-
-uint8_t storage_last_read_ok(void) {
-    return g_last_read_ok;
-}
-
-uint32_t storage_last_lba(void) {
-    return g_last_lba;
-}
-
-uint8_t storage_boot_signature_valid(void) {
-    return g_boot_signature_valid;
-}
-
 #define ATA_CMD_WRITE_SECTORS    0x30u
 #define ATA_CMD_FLUSH            0xE7u
 
@@ -168,7 +127,7 @@ static inline void outw(uint16_t port, uint16_t value) {
     __asm__ __volatile__("outw %0, %1" : : "a"(value), "Nd"(port));
 }
 
-uint8_t storage_write_sectors(uint32_t lba, uint8_t sector_count, const void* buffer) {
+static uint8_t ata_pio_write_sectors(uint32_t lba, uint8_t sector_count, const void* buffer) {
     const uint16_t* words = (const uint16_t*)buffer;
 
     if (sector_count == 0u || buffer == 0 || lba > 0x0FFFFFFFu) {
@@ -205,4 +164,101 @@ uint8_t storage_write_sectors(uint32_t lba, uint8_t sector_count, const void* bu
     }
 
     return 1u;
+}
+
+storage_type_t storage_get_type(void) {
+    return g_storage_type;
+}
+
+uint8_t storage_read_sectors(uint32_t lba, uint8_t sector_count, void* buffer) {
+    if (g_storage_type == STORAGE_TYPE_AHCI) {
+        uint8_t ok = ahci_read_sectors(lba, sector_count, buffer);
+        g_last_read_ok = ok;
+        if (ok) g_last_lba = lba + sector_count - 1u;
+        return ok;
+    } else if (g_storage_type == STORAGE_TYPE_ATA_PIO) {
+        return ata_pio_read_sectors(lba, sector_count, buffer);
+    }
+    return 0u;
+}
+
+uint8_t storage_write_sectors(uint32_t lba, uint8_t sector_count, const void* buffer) {
+    if (g_storage_type == STORAGE_TYPE_AHCI) {
+        return ahci_write_sectors(lba, sector_count, buffer);
+    } else if (g_storage_type == STORAGE_TYPE_ATA_PIO) {
+        return ata_pio_write_sectors(lba, sector_count, buffer);
+    }
+    return 0u;
+}
+
+void storage_init(void) {
+    g_storage_ready = 0u;
+    g_last_read_ok = 0u;
+    g_boot_signature_valid = 0u;
+    g_last_lba = 0u;
+    g_storage_type = STORAGE_TYPE_NONE;
+
+    // 1. Try modern AHCI SATA controller first (High-Performance Bus Master DMA)
+    if (ahci_init()) {
+        g_storage_type = STORAGE_TYPE_AHCI;
+        serial_printf("[Storage] AHCI SATA driver active (High-Performance DMA).\n");
+        if (storage_read_sectors(STORAGE_TEST_LBA, STORAGE_TEST_SECTORS, g_boot_sector)) {
+            g_boot_signature_valid = (uint8_t)(g_boot_sector[STORAGE_BOOT_SIG_OFFSET] == 0x55u
+                && g_boot_sector[STORAGE_BOOT_SIG_OFFSET + 1u] == 0xAAu);
+            g_storage_ready = 1u;
+            serial_printf("[Storage] AHCI: Boot sector verified (Signature: 0x%x, 0x%x).\n",
+                          g_boot_sector[STORAGE_BOOT_SIG_OFFSET], g_boot_sector[STORAGE_BOOT_SIG_OFFSET + 1]);
+            return;
+        } else {
+            serial_printf("[Storage] Warning: AHCI test read failed, attempting ATA PIO fallback...\n");
+        }
+    }
+
+    // 2. Fallback to Legacy ATA PIO driver
+    serial_printf("[Storage] Initializing Legacy ATA PIO fallback...\n");
+    g_storage_type = STORAGE_TYPE_ATA_PIO;
+
+    outb(ATA_REG_DEVICE_CONTROL, ATA_CTRL_NIEN);
+    outb(ATA_REG_DRIVE_HEAD, ATA_DH_LBA_MASTER);
+    io_wait();
+
+    uint8_t status = inb(ATA_REG_STATUS);
+    if (status == 0x00u || status == 0xFFu) {
+        serial_printf("[Storage] ATA PIO: No drive detected.\n");
+        g_storage_type = STORAGE_TYPE_NONE;
+        return;
+    }
+
+    if ((status & (ATA_STATUS_BSY | ATA_STATUS_DRDY)) == ATA_STATUS_BSY && !ata_wait_not_busy()) {
+        serial_printf("[Storage] ATA PIO: Drive busy timeout.\n");
+        g_storage_type = STORAGE_TYPE_NONE;
+        return;
+    }
+
+    if (!storage_read_sectors(STORAGE_TEST_LBA, STORAGE_TEST_SECTORS, g_boot_sector)) {
+        serial_printf("[Storage] ATA PIO: Test read failed.\n");
+        g_storage_type = STORAGE_TYPE_NONE;
+        return;
+    }
+
+    g_boot_signature_valid = (uint8_t)(g_boot_sector[STORAGE_BOOT_SIG_OFFSET] == 0x55u
+        && g_boot_sector[STORAGE_BOOT_SIG_OFFSET + 1u] == 0xAAu);
+    g_storage_ready = 1u;
+    serial_printf("[Storage] Legacy ATA PIO active (Boot signature valid: %d).\n", g_boot_signature_valid);
+}
+
+uint8_t storage_is_ready(void) {
+    return g_storage_ready;
+}
+
+uint8_t storage_last_read_ok(void) {
+    return g_last_read_ok;
+}
+
+uint32_t storage_last_lba(void) {
+    return g_last_lba;
+}
+
+uint8_t storage_boot_signature_valid(void) {
+    return g_boot_signature_valid;
 }

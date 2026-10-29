@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.42.0
+- Реализация драйвера накопителей AHCI (SATA) с поддержкой Bus Master DMA (этап P2 Roadmap):
+  - Полнофункциональный драйвер `drivers/ahci.c` / `drivers/ahci.h` стандарта AHCI 1.0 (Advanced Host Controller Interface):
+    - Сканирование шины PCI для обнаружения контроллеров SATA AHCI (Class 0x01, Subclass 0x06, Prog-IF 0x01).
+    - Конфигурация шины PCI: включение режима Memory Space и Bus Master DMA в регистре команд PCI Command Register (offset 0x04).
+    - Отображение регистров ABAR (AHCI Base Address Register / BAR5), обработка протокола BIOS/OS handoff (BOHC) при поддержке контроллером и активация режима AHCI (GHC.AE = bit 31).
+    - Опрос реализованных портов HBA (`pi`), обнаружение подключенных жестких дисков SATA по сигнатуре `SATA_SIG_ATA` (`0x00000101`) при активном статусе физического уровня (`HBA_PORT_DET_PRESENT`, `HBA_PORT_IPM_ACTIVE`).
+    - Инициализация и ребейз структур порта: выделение физических страниц PMM под Command List (выравнивание 1 КБ), Received FIS (выравнивание 256 байт), Command Table (выравнивание 128 байт) и непрерывный DMA bounce buffer.
+    - Асинхронное исполнение дисковых операций чтения и записи с 48-битной адресацией LBA (`ATA_CMD_READ_DMA_EXT` / `ATA_CMD_WRITE_DMA_EXT`) через структуры Register FIS Host-to-Device (0x27) и дескрипторы PRDT (Physical Region Descriptor Table) без нагрузки на процессор.
+- Двухуровневая архитектура подсистемы хранения данных (`storage.c` / `storage.h`):
+  - Модуль `storage_init()` в приоритетном порядке инициализирует AHCI SATA контроллер. При обнаружении контроллера и активного SATA-диска дисковая подсистема переключается в высокопроизводительный режим `STORAGE_TYPE_AHCI` с поддержкой прямого доступа к памяти (DMA).
+  - В случае отсутствия контроллера AHCI или ошибки тестового чтения загрузочного сектора система автоматически выполняет откат на унаследованный драйвер `STORAGE_TYPE_ATA_PIO`.
+  - Унифицированные функции `storage_read_sectors` и `storage_write_sectors` прозрачно диспетчеризуют дисковые операции активному драйверу.
+  - Полная совместимость с файловой системой VFS (FAT12/FatFs): монтирование тома и запуск пользовательских модулей WASM (Compositor, Terminal, Calculator) успешно работают как по шине SATA через DMA, так и через ATA PIO.
+- Дополнения в сборочной конфигурации (`Makefile`):
+  - Включение модуля `drivers/ahci.o` в компоновку `kernel.elf`.
+  - Добавлена сборочная цель `make run-ahci` для запуска операционной системы в эмуляторе QEMU с контроллером Intel ICH9 AHCI (`-device ich9-ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0`).
+
 ## 1.41.0
 - Единая модель Single-Instance на уровне ядра системы (`sched.c`):
   - Системный вызов запуска приложений `woos_system_spawn` теперь выполняет динамическое сопоставление путей (`app_paths_match`) по всем активным потокам планировщика (`state != THREAD_TERMINATED`).
