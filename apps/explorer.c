@@ -1,5 +1,6 @@
 #include "woos.h"
 #include "icons.h"
+#include "woos_dialog.h"
 
 #define WIN_W 640
 #define WIN_H 420
@@ -55,9 +56,8 @@ static char g_clipboard_path[64] = "";
 static int g_clipboard_is_cut = 0;
 
 // Modal Dialogs
-static int g_dialog_mode = 0; // 0 = none, 1 = properties, 2 = rename, 3 = new file, 4 = new folder
-static char g_dialog_input[32] = "";
-static int g_dialog_input_len = 0;
+static int g_dialog_mode = 0; // 0 = none, 1 = properties
+static woos_file_dialog_t g_file_dialog;
 
 static void format_size(uint32_t bytes, char* out) {
     if (bytes < 1024) {
@@ -700,9 +700,11 @@ static void draw_explorer(void) {
     }
 
     // 7. Dialog Popups (Properties / Rename / New)
-    if (g_dialog_mode != 0) {
+    if (g_file_dialog.active) {
+        woos_dialog_draw(g_fb, WIN_W, WIN_H, &g_file_dialog);
+    } else if (g_dialog_mode == 1) {
         int dw = 280;
-        int dh = (g_dialog_mode == 1) ? 200 : 120;
+        int dh = 200;
         int dx = (WIN_W - dw) / 2;
         int dy = (WIN_H - dh) / 2;
 
@@ -711,102 +713,82 @@ static void draw_explorer(void) {
 
         // Header
         fill_rect(g_fb, WIN_W, WIN_H, dx + 2, dy + 2, dw - 4, 20, 0x2A62C9);
-        const char* dtitle = (g_dialog_mode == 1) ? "Properties" :
-                             (g_dialog_mode == 2) ? "Rename" :
-                             (g_dialog_mode == 3) ? "New File" : "New Folder";
-        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 6, dy + 4, dtitle, 0xFFFFFF);
+        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 6, dy + 4, "Properties", 0xFFFFFF);
 
-        if (g_dialog_mode == 1) {
-            if (g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) {
-                file_item_t* it = &g_items[g_ctx_target_idx];
-                woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 32, it->name, 0x000000);
-                fill_rect(g_fb, WIN_W, WIN_H, dx + 16, dy + 52, dw - 32, 1, 0xCCCCCC);
+        if (g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) {
+            file_item_t* it = &g_items[g_ctx_target_idx];
+            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 32, it->name, 0x000000);
+            fill_rect(g_fb, WIN_W, WIN_H, dx + 16, dy + 52, dw - 32, 1, 0xCCCCCC);
 
-                woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 62, get_file_type(it->name, it->is_dir), 0x333333);
-                char pbuf[64] = "In: ";
-                strcat(pbuf, g_current_path);
-                woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 84, pbuf, 0x333333);
+            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 62, get_file_type(it->name, it->is_dir), 0x333333);
+            char pbuf[64] = "In: ";
+            strcat(pbuf, g_current_path);
+            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 84, pbuf, 0x333333);
 
-                char sbuf[32] = "Size: ";
-                char nbuf[16];
-                int_to_str((int)it->size, nbuf);
-                strcat(sbuf, nbuf);
-                strcat(sbuf, " Bytes");
-                woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 106, sbuf, 0x333333);
-            } else {
-                woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 36, "Folder Properties", 0x000000);
-                char pbuf[64] = "Path: ";
-                strcat(pbuf, g_current_path);
-                woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 64, pbuf, 0x333333);
-            }
-
-            draw_3d_rect(g_fb, WIN_W, WIN_H, dx + dw / 2 - 30, dy + dh - 30, 60, 20, 0);
-            fill_rect(g_fb, WIN_W, WIN_H, dx + dw / 2 - 29, dy + dh - 29, 58, 18, 0xE4E2D5);
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + dw / 2 - 8, dy + dh - 26, "OK", 0x000000);
+            char sbuf[32] = "Size: ";
+            char nbuf[16];
+            int_to_str((int)it->size, nbuf);
+            strcat(sbuf, nbuf);
+            strcat(sbuf, " Bytes");
+            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 106, sbuf, 0x333333);
         } else {
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 30, "Enter name:", 0x000000);
-            draw_3d_rect(g_fb, WIN_W, WIN_H, dx + 16, dy + 50, dw - 32, 20, 1);
-            fill_rect(g_fb, WIN_W, WIN_H, dx + 17, dy + 51, dw - 34, 18, 0xFFFFFF);
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 22, dy + 53, g_dialog_input, 0x000000);
-
-            draw_3d_rect(g_fb, WIN_W, WIN_H, dx + dw - 130, dy + dh - 30, 55, 20, 0);
-            fill_rect(g_fb, WIN_W, WIN_H, dx + dw - 129, dy + dh - 29, 53, 18, 0xE4E2D5);
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + dw - 114, dy + dh - 26, "OK", 0x000000);
-
-            draw_3d_rect(g_fb, WIN_W, WIN_H, dx + dw - 68, dy + dh - 30, 55, 20, 0);
-            fill_rect(g_fb, WIN_W, WIN_H, dx + dw - 67, dy + dh - 29, 53, 18, 0xE4E2D5);
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + dw - 57, dy + dh - 26, "Cancel", 0x000000);
+            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 36, "Folder Properties", 0x000000);
+            char pbuf[64] = "Path: ";
+            strcat(pbuf, g_current_path);
+            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 64, pbuf, 0x333333);
         }
+
+        draw_3d_rect(g_fb, WIN_W, WIN_H, dx + dw / 2 - 30, dy + dh - 30, 60, 20, 0);
+        fill_rect(g_fb, WIN_W, WIN_H, dx + dw / 2 - 29, dy + dh - 29, 58, 18, 0xE4E2D5);
+        woos_draw_text(g_fb, WIN_W, WIN_H, dx + dw / 2 - 8, dy + dh - 26, "OK", 0x000000);
+    }
+}
+
+static void apply_explorer_dialog(void) {
+    if (g_file_dialog.input[0]) {
+        char full_new[64];
+        if (strcmp(g_current_path, "/") == 0) {
+            full_new[0] = '/';
+            full_new[1] = '\0';
+            strcat(full_new, g_file_dialog.input);
+        } else {
+            strcpy(full_new, g_current_path);
+            strcat(full_new, "/");
+            strcat(full_new, g_file_dialog.input);
+        }
+
+        if (g_file_dialog.mode == DIALOG_MODE_RENAME && g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) {
+            if (!is_system_item(g_items[g_ctx_target_idx].name)) {
+                char old_p[64];
+                get_item_path(g_ctx_target_idx, old_p);
+                woos_vfs_rename(old_p, full_new);
+            }
+        } else if (g_file_dialog.mode == DIALOG_MODE_NEW) {
+            int h = woos_vfs_open(full_new, VFS_MODE_WRITE | VFS_MODE_CREATE);
+            if (h >= 0) woos_vfs_close(h);
+        } else if (g_file_dialog.mode == 4) { // New Folder
+            woos_vfs_mkdir(full_new);
+        }
+        load_directory(g_current_path);
     }
 }
 
 static void handle_click(int x, int y) {
     // Handle Dialog
-    if (g_dialog_mode != 0) {
+    if (g_file_dialog.active) {
+        int res = woos_dialog_handle_click(&g_file_dialog, WIN_W, WIN_H, x, y);
+        if (res == WOOS_DIALOG_RES_OK) {
+            apply_explorer_dialog();
+        }
+        return;
+    }
+    if (g_dialog_mode == 1) {
         int dw = 280;
-        int dh = (g_dialog_mode == 1) ? 200 : 120;
+        int dh = 200;
         int dx = (WIN_W - dw) / 2;
         int dy = (WIN_H - dh) / 2;
-
-        if (g_dialog_mode == 1) {
-            if (x >= dx + dw / 2 - 30 && x <= dx + dw / 2 + 30 && y >= dy + dh - 30 && y <= dy + dh - 10) {
-                g_dialog_mode = 0;
-            }
-        } else {
-            // OK button
-            if (x >= dx + dw - 130 && x <= dx + dw - 75 && y >= dy + dh - 30 && y <= dy + dh - 10) {
-                if (g_dialog_input[0]) {
-                    char full_new[64];
-                    if (strcmp(g_current_path, "/") == 0) {
-                        full_new[0] = '/';
-                        full_new[1] = '\0';
-                        strcat(full_new, g_dialog_input);
-                    } else {
-                        strcpy(full_new, g_current_path);
-                        strcat(full_new, "/");
-                        strcat(full_new, g_dialog_input);
-                    }
-
-                    if (g_dialog_mode == 2 && g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) { // Rename
-                        if (!is_system_item(g_items[g_ctx_target_idx].name)) {
-                            char old_p[64];
-                            get_item_path(g_ctx_target_idx, old_p);
-                            woos_vfs_rename(old_p, full_new);
-                        }
-                    } else if (g_dialog_mode == 3) { // New File
-                        int h = woos_vfs_open(full_new, VFS_MODE_WRITE | VFS_MODE_CREATE);
-                        if (h >= 0) woos_vfs_close(h);
-                    } else if (g_dialog_mode == 4) { // New Folder
-                        woos_vfs_mkdir(full_new);
-                    }
-                    load_directory(g_current_path);
-                }
-                g_dialog_mode = 0;
-            }
-            // Cancel
-            if (x >= dx + dw - 68 && x <= dx + dw - 13 && y >= dy + dh - 30 && y <= dy + dh - 10) {
-                g_dialog_mode = 0;
-            }
+        if (x >= dx + dw / 2 - 30 && x <= dx + dw / 2 + 30 && y >= dy + dh - 30 && y <= dy + dh - 10) {
+            g_dialog_mode = 0;
         }
         return;
     }
@@ -873,13 +855,9 @@ static void handle_click(int x, int y) {
                     if (h >= 0) woos_vfs_close(h);
                     load_directory(g_current_path);
                 } else if (sidx == 1) { // New File
-                    g_dialog_mode = 3;
-                    strcpy(g_dialog_input, "NEWFILE.TXT");
-                    g_dialog_input_len = (int)strlen(g_dialog_input);
+                    woos_dialog_open(&g_file_dialog, DIALOG_MODE_NEW, "New File", "Enter file name:", "NEWFILE.TXT", "Create");
                 } else if (sidx == 2) { // New Folder
-                    g_dialog_mode = 4;
-                    strcpy(g_dialog_input, "NEWDIR");
-                    g_dialog_input_len = (int)strlen(g_dialog_input);
+                    woos_dialog_open(&g_file_dialog, 4, "New Folder", "Enter folder name:", "NEWDIR", "Create");
                 }
                 g_ctx_open = 0;
                 g_ctx_submenu = 0;
@@ -934,10 +912,7 @@ static void handle_click(int x, int y) {
                         }
                     } else if (item_idx == 5) { // Rename
                         if (!is_sys) {
-                            g_dialog_mode = 2;
-                            strncpy(g_dialog_input, g_items[g_ctx_target_idx].name, 24);
-                            g_dialog_input[23] = '\0';
-                            g_dialog_input_len = (int)strlen(g_dialog_input);
+                            woos_dialog_open(&g_file_dialog, DIALOG_MODE_RENAME, "Rename", "Enter new name:", g_items[g_ctx_target_idx].name, "Rename");
                         }
                     } else if (item_idx == 6) { // Properties
                         g_dialog_mode = 1;
@@ -1013,7 +988,7 @@ static void handle_click(int x, int y) {
 }
 
 static void handle_right_click(int x, int y) {
-    if (g_dialog_mode != 0) return;
+    if (g_file_dialog.active || g_dialog_mode != 0) return;
 
     // Check if right clicked on file item
     int file_list_y = TOOLBAR_H + HEADER_H;
@@ -1048,57 +1023,18 @@ static void handle_right_click(int x, int y) {
 }
 
 static void handle_key(int ascii, int scancode) {
+    if (g_file_dialog.active) {
+        int res = woos_dialog_handle_key(&g_file_dialog, ascii, scancode);
+        if (res == WOOS_DIALOG_RES_OK) {
+            apply_explorer_dialog();
+        }
+        return;
+    }
     if (g_dialog_mode != 0) {
         if (g_dialog_mode == 1) {
             g_dialog_mode = 0;
             return;
         }
-        if (ascii == '\n' || ascii == '\r' || scancode == 0x1C) {
-            if (g_dialog_input[0]) {
-                char full_new[64];
-                if (strcmp(g_current_path, "/") == 0) {
-                    full_new[0] = '/';
-                    full_new[1] = '\0';
-                    strcat(full_new, g_dialog_input);
-                } else {
-                    strcpy(full_new, g_current_path);
-                    strcat(full_new, "/");
-                    strcat(full_new, g_dialog_input);
-                }
-
-                if (g_dialog_mode == 2 && g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) {
-                    if (!is_system_item(g_items[g_ctx_target_idx].name)) {
-                        char old_p[64];
-                        get_item_path(g_ctx_target_idx, old_p);
-                        woos_vfs_rename(old_p, full_new);
-                    }
-                } else if (g_dialog_mode == 3) {
-                    int h = woos_vfs_open(full_new, VFS_MODE_WRITE | VFS_MODE_CREATE);
-                    if (h >= 0) woos_vfs_close(h);
-                } else if (g_dialog_mode == 4) {
-                    woos_vfs_mkdir(full_new);
-                }
-                load_directory(g_current_path);
-            }
-            g_dialog_mode = 0;
-            return;
-        }
-        if (ascii == 27 || scancode == 0x01) {
-            g_dialog_mode = 0;
-            return;
-        }
-        if (ascii == '\b' || scancode == 0x0E) {
-            if (g_dialog_input_len > 0) {
-                g_dialog_input[--g_dialog_input_len] = '\0';
-            }
-            return;
-        }
-        if (ascii >= 32 && ascii <= 126 && g_dialog_input_len < 24) {
-            g_dialog_input[g_dialog_input_len++] = (char)ascii;
-            g_dialog_input[g_dialog_input_len] = '\0';
-            return;
-        }
-        return;
     }
 
     if (ascii == '\n' || ascii == '\r' || scancode == 0x1C) {

@@ -1,5 +1,6 @@
 #include "woos.h"
 #include "icons.h"
+#include "woos_dialog.h"
 
 #define SCREEN_W 1280
 #define SCREEN_H 1024
@@ -93,10 +94,9 @@ static char g_clipboard_path[64] = "";
 static int g_clipboard_is_cut = 0;
 
 // Modal Dialogs (Properties / Rename / New File)
-static int g_dialog_mode = 0; // 0 = none, 1 = Properties, 2 = Rename, 3 = New File, 4 = New Folder
-static char g_dialog_input[32] = "";
-static int g_dialog_input_len = 0;
+static int g_dialog_mode = 0; // 0 = none, 1 = Properties
 static int g_dialog_target_idx = -1;
+static woos_file_dialog_t g_desktop_dialog;
 
 // Single-instance launcher helper
 static void launch_or_focus(const char* path, const char* title) {
@@ -968,9 +968,11 @@ static void render_screen(void) {
     }
 
     // 8. Modal Dialogs (Properties / Rename / New)
-    if (g_dialog_mode != 0) {
+    if (g_desktop_dialog.active) {
+        woos_dialog_draw(g_screen, SCREEN_W, SCREEN_H, &g_desktop_dialog);
+    } else if (g_dialog_mode == 1) {
         int dw = 320;
-        int dh = (g_dialog_mode == 1) ? 220 : 130;
+        int dh = 220;
         int dx = (SCREEN_W - dw) / 2;
         int dy = (SCREEN_H - dh) / 2;
 
@@ -979,55 +981,50 @@ static void render_screen(void) {
 
         // Titlebar
         fill_rect(g_screen, SCREEN_W, SCREEN_H, dx + 2, dy + 2, dw - 4, 20, 0x2A62C9);
-        const char* dtitle = (g_dialog_mode == 1) ? "Properties" :
-                             (g_dialog_mode == 2) ? "Rename File" :
-                             (g_dialog_mode == 3) ? "Create New File" : "Create New Folder";
-        woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 6, dy + 4, dtitle, COLOR_TEXT_WHITE);
+        woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 6, dy + 4, "Properties", COLOR_TEXT_WHITE);
 
-        if (g_dialog_mode == 1) {
-            // Properties details
-            desktop_item_t* it = (g_dialog_target_idx >= 0 && g_dialog_target_idx < g_item_count) ? &g_items[g_dialog_target_idx] : NULL;
-            if (it) {
-                draw_item_icon(it, dx + 16, dy + 32);
-                woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 64, dy + 34, it->name, COLOR_TEXT_BLACK);
-                fill_rect(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 70, dw - 32, 1, 0xCCCCCC);
+        // Properties details
+        desktop_item_t* it = (g_dialog_target_idx >= 0 && g_dialog_target_idx < g_item_count) ? &g_items[g_dialog_target_idx] : NULL;
+        if (it) {
+            draw_item_icon(it, dx + 16, dy + 32);
+            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 64, dy + 34, it->name, COLOR_TEXT_BLACK);
+            fill_rect(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 70, dw - 32, 1, 0xCCCCCC);
 
-                woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 80, "Type: Desktop Item", 0x333333);
-                char pbuf[64] = "Location: ";
-                strcat(pbuf, it->full_path);
-                woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 104, pbuf, 0x333333);
+            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 80, "Type: Desktop Item", 0x333333);
+            char pbuf[64] = "Location: ";
+            strcat(pbuf, it->full_path);
+            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 104, pbuf, 0x333333);
 
-                char sbuf[32] = "Size: ";
-                char nbuf[16];
-                int_to_str((int)it->size, nbuf);
-                strcat(sbuf, nbuf);
-                strcat(sbuf, " Bytes");
-                woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 128, sbuf, 0x333333);
-            } else {
-                woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 34, "Desktop Environment", COLOR_TEXT_BLACK);
-                woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 64, "FileSystem: FAT32 (64 MB)", 0x333333);
-                woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 88, "Resolution: 1280 x 1024", 0x333333);
-            }
-            // OK button
-            draw_3d_rect(g_screen, SCREEN_W, SCREEN_H, dx + dw / 2 - 35, dy + dh - 32, 70, 22, 0);
-            fill_rect(g_screen, SCREEN_W, SCREEN_H, dx + dw / 2 - 34, dy + dh - 31, 68, 20, 0xE4E2D5);
-            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + dw / 2 - 10, dy + dh - 28, "OK", COLOR_TEXT_BLACK);
+            char sbuf[32] = "Size: ";
+            char nbuf[16];
+            int_to_str((int)it->size, nbuf);
+            strcat(sbuf, nbuf);
+            strcat(sbuf, " Bytes");
+            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 128, sbuf, 0x333333);
         } else {
-            // Text input box for Rename / New
-            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 32, "Enter name:", COLOR_TEXT_BLACK);
-            draw_3d_rect(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 52, dw - 32, 22, 1);
-            fill_rect(g_screen, SCREEN_W, SCREEN_H, dx + 17, dy + 53, dw - 34, 20, 0xFFFFFF);
-            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 22, dy + 56, g_dialog_input, COLOR_TEXT_BLACK);
+            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 34, "Desktop Environment", COLOR_TEXT_BLACK);
+            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 64, "FileSystem: FAT32 (64 MB)", 0x333333);
+            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + 16, dy + 88, "Resolution: 1280 x 1024", 0x333333);
+        }
+        // OK button
+        draw_3d_rect(g_screen, SCREEN_W, SCREEN_H, dx + dw / 2 - 35, dy + dh - 32, 70, 22, 0);
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, dx + dw / 2 - 34, dy + dh - 31, 68, 20, 0xE4E2D5);
+        woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + dw / 2 - 10, dy + dh - 28, "OK", COLOR_TEXT_BLACK);
+    }
+}
 
-            // [OK] button
-            draw_3d_rect(g_screen, SCREEN_W, SCREEN_H, dx + dw - 150, dy + dh - 32, 60, 22, 0);
-            fill_rect(g_screen, SCREEN_W, SCREEN_H, dx + dw - 149, dy + dh - 31, 58, 20, 0xE4E2D5);
-            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + dw - 134, dy + dh - 28, "OK", COLOR_TEXT_BLACK);
-
-            // [Cancel] button
-            draw_3d_rect(g_screen, SCREEN_W, SCREEN_H, dx + dw - 80, dy + dh - 32, 64, 22, 0);
-            fill_rect(g_screen, SCREEN_W, SCREEN_H, dx + dw - 79, dy + dh - 31, 62, 20, 0xE4E2D5);
-            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, dx + dw - 72, dy + dh - 28, "Cancel", COLOR_TEXT_BLACK);
+static void apply_desktop_dialog(void) {
+    if (g_desktop_dialog.input[0]) {
+        if (g_desktop_dialog.mode == DIALOG_MODE_RENAME && g_dialog_target_idx >= 0) {
+            char new_p[64];
+            strcpy(new_p, "/DESKTOP/");
+            strcat(new_p, g_desktop_dialog.input);
+            woos_vfs_rename(g_items[g_dialog_target_idx].full_path, new_p);
+            load_desktop_items();
+        } else if (g_desktop_dialog.mode == DIALOG_MODE_NEW) {
+            create_desktop_file(g_desktop_dialog.input, "");
+        } else if (g_desktop_dialog.mode == 4) { // New Folder
+            create_desktop_folder(g_desktop_dialog.input);
         }
     }
 }
@@ -1121,43 +1118,22 @@ void _start(void) {
                 int is_right = (ev.buttons & 2) != 0;
 
                 // Handle Dialog click
-                if (g_dialog_mode != 0) {
+                if (g_desktop_dialog.active) {
+                    int res = woos_dialog_handle_click(&g_desktop_dialog, SCREEN_W, SCREEN_H, ev.x, ev.y);
+                    if (res == WOOS_DIALOG_RES_OK) {
+                        apply_desktop_dialog();
+                    }
+                    need_redraw = 1;
+                    continue;
+                }
+                if (g_dialog_mode == 1) {
                     int dw = 320;
-                    int dh = (g_dialog_mode == 1) ? 220 : 130;
+                    int dh = 220;
                     int dx = (SCREEN_W - dw) / 2;
                     int dy = (SCREEN_H - dh) / 2;
-
-                    if (g_dialog_mode == 1) {
-                        // OK button click
-                        if (ev.x >= dx + dw / 2 - 35 && ev.x <= dx + dw / 2 + 35 && ev.y >= dy + dh - 32 && ev.y <= dy + dh - 10) {
-                            g_dialog_mode = 0;
-                            need_redraw = 1;
-                        }
-                    } else {
-                        // OK button for Rename / New
-                        if (ev.x >= dx + dw - 150 && ev.x <= dx + dw - 90 && ev.y >= dy + dh - 32 && ev.y <= dy + dh - 10) {
-                            if (g_dialog_input[0]) {
-                                if (g_dialog_mode == 2 && g_dialog_target_idx >= 0) {
-                                    // Rename
-                                    char new_p[64];
-                                    strcpy(new_p, "/DESKTOP/");
-                                    strcat(new_p, g_dialog_input);
-                                    woos_vfs_rename(g_items[g_dialog_target_idx].full_path, new_p);
-                                    load_desktop_items();
-                                } else if (g_dialog_mode == 3) {
-                                    create_desktop_file(g_dialog_input, "");
-                                } else if (g_dialog_mode == 4) {
-                                    create_desktop_folder(g_dialog_input);
-                                }
-                            }
-                            g_dialog_mode = 0;
-                            need_redraw = 1;
-                        }
-                        // Cancel button
-                        if (ev.x >= dx + dw - 80 && ev.x <= dx + dw - 16 && ev.y >= dy + dh - 32 && ev.y <= dy + dh - 10) {
-                            g_dialog_mode = 0;
-                            need_redraw = 1;
-                        }
+                    if (ev.x >= dx + dw / 2 - 35 && ev.x <= dx + dw / 2 + 35 && ev.y >= dy + dh - 32 && ev.y <= dy + dh - 10) {
+                        g_dialog_mode = 0;
+                        need_redraw = 1;
                     }
                     continue;
                 }
@@ -1185,10 +1161,8 @@ void _start(void) {
                                 }
                             } else if (it_idx == 5) { // Rename
                                 if (!is_sys) {
-                                    g_dialog_mode = 2;
                                     g_dialog_target_idx = g_ctx_target_item;
-                                    strncpy(g_dialog_input, g_items[g_ctx_target_item].name, 28);
-                                    g_dialog_input_len = (int)strlen(g_dialog_input);
+                                    woos_dialog_open(&g_desktop_dialog, DIALOG_MODE_RENAME, "Rename File", "Enter new name:", g_items[g_ctx_target_item].name, "Rename");
                                 }
                             } else if (it_idx == 6) { // Properties
                                 g_dialog_mode = 1;
@@ -1240,13 +1214,9 @@ void _start(void) {
                                 generate_unique_desktop_name("NEWDOC", ".TXT", doc_name, sizeof(doc_name));
                                 create_desktop_file(doc_name, "");
                             } else if (s_idx == 1) {
-                                g_dialog_mode = 3;
-                                strcpy(g_dialog_input, "NEWFILE.TXT");
-                                g_dialog_input_len = (int)strlen(g_dialog_input);
+                                woos_dialog_open(&g_desktop_dialog, DIALOG_MODE_NEW, "Create New File", "Enter file name:", "NEWFILE.TXT", "Create");
                             } else if (s_idx == 2) {
-                                g_dialog_mode = 4;
-                                strcpy(g_dialog_input, "NEWDIR");
-                                g_dialog_input_len = (int)strlen(g_dialog_input);
+                                woos_dialog_open(&g_desktop_dialog, 4, "Create New Folder", "Enter folder name:", "NEWDIR", "Create");
                             }
                             clicked_menu = 1;
                         }
@@ -1493,46 +1463,16 @@ void _start(void) {
                 int ascii = ev.x;
                 int scancode = ev.y;
 
-                if (g_dialog_mode != 0) {
-                    if (g_dialog_mode == 1) {
-                        // Any key closes properties
-                        g_dialog_mode = 0;
-                        need_redraw = 1;
-                    } else {
-                        // Input box typing
-                        if (ascii == '\n' || ascii == '\r' || scancode == 0x1C) {
-                            // Commit
-                            if (g_dialog_input[0]) {
-                                if (g_dialog_mode == 2 && g_dialog_target_idx >= 0) {
-                                    char new_p[64];
-                                    strcpy(new_p, "/DESKTOP/");
-                                    strcat(new_p, g_dialog_input);
-                                    woos_vfs_rename(g_items[g_dialog_target_idx].full_path, new_p);
-                                    load_desktop_items();
-                                } else if (g_dialog_mode == 3) {
-                                    create_desktop_file(g_dialog_input, "");
-                                } else if (g_dialog_mode == 4) {
-                                    create_desktop_folder(g_dialog_input);
-                                }
-                            }
-                            g_dialog_mode = 0;
-                            need_redraw = 1;
-                        } else if (ascii == 27 || scancode == 0x01) {
-                            // Esc cancels
-                            g_dialog_mode = 0;
-                            need_redraw = 1;
-                        } else if (ascii == '\b' || scancode == 0x0E) {
-                            // Backspace
-                            if (g_dialog_input_len > 0) {
-                                g_dialog_input[--g_dialog_input_len] = '\0';
-                                need_redraw = 1;
-                            }
-                        } else if (ascii >= 32 && ascii <= 126 && g_dialog_input_len < 26) {
-                            g_dialog_input[g_dialog_input_len++] = (char)ascii;
-                            g_dialog_input[g_dialog_input_len] = '\0';
-                            need_redraw = 1;
-                        }
+                if (g_desktop_dialog.active) {
+                    int res = woos_dialog_handle_key(&g_desktop_dialog, ascii, scancode);
+                    if (res == WOOS_DIALOG_RES_OK) {
+                        apply_desktop_dialog();
                     }
+                    need_redraw = 1;
+                } else if (g_dialog_mode == 1) {
+                    // Any key closes properties
+                    g_dialog_mode = 0;
+                    need_redraw = 1;
                 } else {
                     if (scancode == 0x3F) { // F5 key: refresh desktop
                         sync_desktop_items();

@@ -1,5 +1,6 @@
 #include "woos.h"
 #include "image.h"
+#include "woos_dialog.h"
 
 #define WIN_W 680
 #define WIN_H 460
@@ -28,9 +29,7 @@ static int g_last_mouse_x = 0;
 static int g_last_mouse_y = 0;
 static char g_status_msg[64] = "Ready";
 
-static int g_dialog_mode = 0; // 0 = none, 1 = Open, 2 = Save As
-static char g_dialog_input[64] = "";
-static int g_dialog_input_len = 0;
+static woos_file_dialog_t g_dialog;
 
 static inline void set_status(const char* msg) {
     size_t i = 0;
@@ -209,60 +208,8 @@ static void render_screen(void) {
     woos_draw_text(g_fb, WIN_W, WIN_H, 8, sb_y + 5, status_str, COLOR_TEXT_MUTED);
 
     // 4. Modal Dialog (Open / Save As)
-    if (g_dialog_mode != 0) {
-        int dw = 380;
-        int dh = 110;
-        int dx = (WIN_W - dw) / 2;
-        int dy = (WIN_H - dh) / 2;
-
-        // Shadow
-        for (int y = dy + 4; y < dy + dh + 4; y++) {
-            uint32_t* row = g_fb + y * WIN_W;
-            for (int x = dx + 4; x < dx + dw + 4; x++) {
-                uint32_t p = row[x];
-                row[x] = ((p >> 1) & 0x7F7F7F);
-            }
-        }
-
-        // Dialog background
-        for (int y = dy; y < dy + dh; y++) {
-            uint32_t* row = g_fb + y * WIN_W;
-            for (int x = dx; x < dx + dw; x++) {
-                row[x] = 0x2C3A47;
-            }
-        }
-        // Border
-        for (int x = dx; x < dx + dw; x++) {
-            g_fb[dy * WIN_W + x] = 0x718093;
-            g_fb[(dy + dh - 1) * WIN_W + x] = 0x718093;
-        }
-        for (int y = dy; y < dy + dh; y++) {
-            g_fb[y * WIN_W + dx] = 0x718093;
-            g_fb[y * WIN_W + dx + dw - 1] = 0x718093;
-        }
-
-        const char* title = (g_dialog_mode == 1) ? "Open Image (PNG / JPG / BMP)" : "Save As (PNG / JPG / BMP)";
-        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 12, dy + 10, title, COLOR_TEXT_WHITE);
-
-        // Text input box
-        int box_y = dy + 34;
-        int box_h = 24;
-        for (int y = box_y; y < box_y + box_h; y++) {
-            uint32_t* row = g_fb + y * WIN_W;
-            for (int x = dx + 12; x < dx + dw - 12; x++) {
-                row[x] = 0x131B24;
-            }
-        }
-        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, box_y + 6, g_dialog_input, 0x00FF9F);
-        // Blinking cursor
-        int cpos = dx + 16 + g_dialog_input_len * 8;
-        for (int cy = box_y + 4; cy < box_y + box_h - 4; cy++) {
-            g_fb[cy * WIN_W + cpos] = 0x00FF9F;
-        }
-
-        // Action Buttons: [OK] and [Cancel]
-        draw_btn(dx + dw - 140, dy + 70, 56, 24, "OK");
-        draw_btn(dx + dw - 76, dy + 70, 64, 24, "Cancel");
+    if (g_dialog.active) {
+        woos_dialog_draw(g_fb, WIN_W, WIN_H, &g_dialog);
     }
 }
 
@@ -311,52 +258,33 @@ void _start(void) {
                 int mx = (int)msg.arg1;
                 int my = (int)msg.arg2;
 
-                if (g_dialog_mode != 0) {
-                    int dw = 380;
-                    int dh = 110;
-                    int dx = (WIN_W - dw) / 2;
-                    int dy = (WIN_H - dh) / 2;
-
-                    // [OK] button
-                    if (mx >= dx + dw - 140 && mx <= dx + dw - 84 && my >= dy + 70 && my <= dy + 94) {
-                        if (g_dialog_mode == 1) { // Open
-                            load_image(g_dialog_input);
-                        } else if (g_dialog_mode == 2) { // Save As
-                            if (g_current_image && g_dialog_input[0] != '\0') {
-                                if (image_save_file(g_dialog_input, g_current_image->pixels,
+                if (g_dialog.active) {
+                    int res = woos_dialog_handle_click(&g_dialog, WIN_W, WIN_H, mx, my);
+                    if (res == WOOS_DIALOG_RES_OK) {
+                        if (g_dialog.mode == DIALOG_MODE_OPEN) {
+                            load_image(g_dialog.input);
+                        } else if (g_dialog.mode == DIALOG_MODE_SAVE_AS && g_current_image) {
+                            if (g_dialog.input[0] != '\0') {
+                                if (image_save_file(g_dialog.input, g_current_image->pixels,
                                                     g_current_image->width, g_current_image->height, 0) == 0) {
+                                    strncpy(g_image_path, g_dialog.input, sizeof(g_image_path) - 1);
+                                    g_image_path[sizeof(g_image_path) - 1] = '\0';
                                     set_status("Image saved successfully");
                                 } else {
                                     set_status("Error saving image");
                                 }
                             }
                         }
-                        g_dialog_mode = 0;
-                        need_redraw = 1;
                     }
-                    // [Cancel] button
-                    else if (mx >= dx + dw - 76 && mx <= dx + dw - 12 && my >= dy + 70 && my <= dy + 94) {
-                        g_dialog_mode = 0;
-                        need_redraw = 1;
-                    }
+                    need_redraw = 1;
                 } else {
                     // Toolbar buttons (y: 4..26)
                     if (my >= 4 && my <= 26) {
                         if (mx >= 8 && mx <= 68) { // Open
-                            g_dialog_mode = 1;
-                            g_dialog_input[0] = '/';
-                            g_dialog_input[1] = '\0';
-                            g_dialog_input_len = 1;
+                            woos_dialog_open(&g_dialog, DIALOG_MODE_OPEN, "Open Image...", "Enter image path (.png, .jpg, .bmp):", g_image_path, "Open");
                             need_redraw = 1;
                         } else if (mx >= 72 && mx <= 144) { // Save As
-                            g_dialog_mode = 2;
-                            size_t p = 0;
-                            while (g_image_path[p] != '\0' && p + 1 < sizeof(g_dialog_input)) {
-                                g_dialog_input[p] = g_image_path[p];
-                                p++;
-                            }
-                            g_dialog_input[p] = '\0';
-                            g_dialog_input_len = (int)p;
+                            woos_dialog_open(&g_dialog, DIALOG_MODE_SAVE_AS, "Save Image As...", "Enter destination file path (.png, .jpg, .bmp):", g_image_path, "Save");
                             need_redraw = 1;
                         } else if (mx >= 148 && mx <= 204) { // Zoom +
                             g_fit_mode = 0;
@@ -412,36 +340,28 @@ void _start(void) {
             }
 
             if (msg.type == MSG_KEY_DOWN) {
-                uint32_t scancode = msg.arg1;
-                char ch = (char)msg.arg2;
+                int ascii = (int)msg.arg1;
+                int scancode = (int)msg.arg2;
 
-                if (g_dialog_mode != 0) {
-                    if (scancode == 0x01) { // Esc
-                        g_dialog_mode = 0;
-                        need_redraw = 1;
-                    } else if (scancode == 0x1C) { // Enter
-                        if (g_dialog_mode == 1) {
-                            load_image(g_dialog_input);
-                        } else if (g_dialog_mode == 2 && g_current_image) {
-                            if (image_save_file(g_dialog_input, g_current_image->pixels,
-                                                g_current_image->width, g_current_image->height, 0) == 0) {
-                                set_status("Image saved successfully");
-                            } else {
-                                set_status("Error saving image");
+                if (g_dialog.active) {
+                    int res = woos_dialog_handle_key(&g_dialog, ascii, scancode);
+                    if (res == WOOS_DIALOG_RES_OK) {
+                        if (g_dialog.mode == DIALOG_MODE_OPEN) {
+                            load_image(g_dialog.input);
+                        } else if (g_dialog.mode == DIALOG_MODE_SAVE_AS && g_current_image) {
+                            if (g_dialog.input[0] != '\0') {
+                                if (image_save_file(g_dialog.input, g_current_image->pixels,
+                                                    g_current_image->width, g_current_image->height, 0) == 0) {
+                                    strncpy(g_image_path, g_dialog.input, sizeof(g_image_path) - 1);
+                                    g_image_path[sizeof(g_image_path) - 1] = '\0';
+                                    set_status("Image saved successfully");
+                                } else {
+                                    set_status("Error saving image");
+                                }
                             }
                         }
-                        g_dialog_mode = 0;
-                        need_redraw = 1;
-                    } else if (scancode == 0x0E) { // Backspace
-                        if (g_dialog_input_len > 0) {
-                            g_dialog_input[--g_dialog_input_len] = '\0';
-                            need_redraw = 1;
-                        }
-                    } else if (ch >= 32 && ch <= 126 && g_dialog_input_len + 1 < (int)sizeof(g_dialog_input)) {
-                        g_dialog_input[g_dialog_input_len++] = ch;
-                        g_dialog_input[g_dialog_input_len] = '\0';
-                        need_redraw = 1;
                     }
+                    need_redraw = 1;
                 }
             }
         }

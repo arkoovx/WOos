@@ -1,4 +1,5 @@
 #include "woos.h"
+#include "woos_dialog.h"
 
 #define WIN_W 580
 #define WIN_H 380
@@ -40,9 +41,7 @@ static int g_is_untitled = 1;
 static char g_status_msg[128] = "Press Ctrl+S or click [Save] to save file";
 static int g_cursor_blink = 1;
 
-static int g_dialog_mode = 0; // 0 = none, 1 = Save As, 2 = Open File
-static char g_dialog_input[64] = "";
-static int g_dialog_input_len = 0;
+static woos_file_dialog_t g_dialog;
 
 static int visible_rows(void) {
     return (WIN_H - TOOLBAR_H - STATUSBAR_H) / LINE_H;
@@ -352,91 +351,43 @@ static void draw_editor(void) {
     woos_draw_text(g_fb, WIN_W, WIN_H, pos_x, status_y + 6, pos_buf, 0x222222);
 
     // 7. Modal Dialog (Save As / Open)
-    if (g_dialog_mode != 0) {
-        int dw = 380;
-        int dh = 110;
-        int dx = (WIN_W - dw) / 2;
-        int dy = (WIN_H - dh) / 2;
+    if (g_dialog.active) {
+        woos_dialog_draw(g_fb, WIN_W, WIN_H, &g_dialog);
+    }
+}
 
-        // Shadow & Background
-        fill_rect(g_fb, WIN_W, WIN_H, dx - 2, dy - 2, dw + 4, dh + 4, 0x222222);
-        fill_rect(g_fb, WIN_W, WIN_H, dx, dy, dw, dh, 0xF2F2F2);
-        draw_rect(g_fb, WIN_W, WIN_H, dx, dy, dw, dh, 0x0078D7);
-
-        // Header
-        fill_rect(g_fb, WIN_W, WIN_H, dx, dy, dw, 22, 0x0078D7);
-        const char* dtitle = (g_dialog_mode == 1) ? "Save File As..." : "Open File...";
-        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 8, dy + 6, dtitle, 0xFFFFFF);
-
-        // Prompt
-        const char* prompt = (g_dialog_mode == 1) ? "Enter destination path on disk:" : "Enter file path to open:";
-        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 12, dy + 30, prompt, 0x222222);
-
-        // Text input field
-        fill_rect(g_fb, WIN_W, WIN_H, dx + 12, dy + 46, dw - 24, 22, 0xFFFFFF);
-        draw_rect(g_fb, WIN_W, WIN_H, dx + 12, dy + 46, dw - 24, 22, 0x7A7A7A);
-
-        char disp_input[70];
-        strncpy(disp_input, g_dialog_input, 60);
-        disp_input[60] = '\0';
-        int dlen = (int)strlen(disp_input);
-        disp_input[dlen] = '_';
-        disp_input[dlen + 1] = '\0';
-        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 52, disp_input, 0x000000);
-
-        // [OK] button
-        fill_rect(g_fb, WIN_W, WIN_H, dx + dw - 150, dy + dh - 32, 60, 22, 0x0078D7);
-        woos_draw_text(g_fb, WIN_W, WIN_H, dx + dw - 132, dy + dh - 26, "OK", 0xFFFFFF);
-
-        // [Cancel] button
-        fill_rect(g_fb, WIN_W, WIN_H, dx + dw - 80, dy + dh - 32, 60, 22, 0xE0E0E0);
-        draw_rect(g_fb, WIN_W, WIN_H, dx + dw - 80, dy + dh - 32, 60, 22, 0x999999);
-        woos_draw_text(g_fb, WIN_W, WIN_H, dx + dw - 68, dy + dh - 26, "Cancel", 0x333333);
+static void apply_dialog_result(void) {
+    if (g_dialog.input[0]) {
+        if (g_dialog.mode == DIALOG_MODE_SAVE_AS) {
+            if (g_dialog.input[0] != '/') {
+                strcpy(g_filename, "/DESKTOP/");
+                strcat(g_filename, g_dialog.input);
+            } else {
+                strncpy(g_filename, g_dialog.input, sizeof(g_filename) - 1);
+                g_filename[sizeof(g_filename) - 1] = '\0';
+            }
+            g_is_untitled = 0;
+            save_file();
+        } else if (g_dialog.mode == DIALOG_MODE_OPEN) {
+            char open_path[64];
+            if (g_dialog.input[0] != '/') {
+                strcpy(open_path, "/DESKTOP/");
+                strcat(open_path, g_dialog.input);
+            } else {
+                strncpy(open_path, g_dialog.input, sizeof(open_path) - 1);
+                open_path[sizeof(open_path) - 1] = '\0';
+            }
+            load_file(open_path);
+        }
     }
 }
 
 static void handle_click(int x, int y) {
-    if (g_dialog_mode != 0) {
-        int dw = 380;
-        int dh = 110;
-        int dx = (WIN_W - dw) / 2;
-        int dy = (WIN_H - dh) / 2;
-
-        // OK button: dx + dw - 150 to dx + dw - 90, dy + dh - 32 to dy + dh - 10
-        if (x >= dx + dw - 150 && x <= dx + dw - 90 && y >= dy + dh - 32 && y <= dy + dh - 10) {
-            if (g_dialog_input[0]) {
-                if (g_dialog_mode == 1) { // Save As
-                    if (g_dialog_input[0] != '/') {
-                        strcpy(g_filename, "/DESKTOP/");
-                        strcat(g_filename, g_dialog_input);
-                    } else {
-                        strncpy(g_filename, g_dialog_input, sizeof(g_filename) - 1);
-                        g_filename[sizeof(g_filename) - 1] = '\0';
-                    }
-                    g_is_untitled = 0;
-                    save_file();
-                } else if (g_dialog_mode == 2) { // Open File
-                    char open_path[64];
-                    if (g_dialog_input[0] != '/') {
-                        strcpy(open_path, "/DESKTOP/");
-                        strcat(open_path, g_dialog_input);
-                    } else {
-                        strncpy(open_path, g_dialog_input, sizeof(open_path) - 1);
-                        open_path[sizeof(open_path) - 1] = '\0';
-                    }
-                    load_file(open_path);
-                }
-            }
-            g_dialog_mode = 0;
-            return;
+    if (g_dialog.active) {
+        int res = woos_dialog_handle_click(&g_dialog, WIN_W, WIN_H, x, y);
+        if (res == WOOS_DIALOG_RES_OK) {
+            apply_dialog_result();
         }
-
-        // Cancel button: dx + dw - 80 to dx + dw - 20, dy + dh - 32 to dy + dh - 10
-        if (x >= dx + dw - 80 && x <= dx + dw - 20 && y >= dy + dh - 32 && y <= dy + dh - 10) {
-            g_dialog_mode = 0;
-            return;
-        }
-
         return;
     }
 
@@ -444,25 +395,18 @@ static void handle_click(int x, int y) {
         // [Save]
         if (x >= 6 && x <= 52) {
             if (g_is_untitled) {
-                g_dialog_mode = 1;
-                strncpy(g_dialog_input, g_filename, sizeof(g_dialog_input) - 1);
-                g_dialog_input_len = (int)strlen(g_dialog_input);
+                woos_dialog_open(&g_dialog, DIALOG_MODE_SAVE_AS, "Save File As...", "Enter destination path on disk:", g_filename, "Save");
             } else {
                 save_file();
             }
         }
         // [Save As]
         else if (x >= 56 && x <= 122) {
-            g_dialog_mode = 1;
-            strncpy(g_dialog_input, g_filename, sizeof(g_dialog_input) - 1);
-            g_dialog_input_len = (int)strlen(g_dialog_input);
+            woos_dialog_open(&g_dialog, DIALOG_MODE_SAVE_AS, "Save File As...", "Enter destination path on disk:", g_filename, "Save");
         }
         // [Open]
         else if (x >= 126 && x <= 172) {
-            g_dialog_mode = 2;
-            g_dialog_input[0] = '/';
-            g_dialog_input[1] = '\0';
-            g_dialog_input_len = 1;
+            woos_dialog_open(&g_dialog, DIALOG_MODE_OPEN, "Open File...", "Enter file path to open:", "/DESKTOP/", "Open");
         }
         // [Reload]
         else if (x >= 176 && x <= 232) {
@@ -496,66 +440,18 @@ static void handle_click(int x, int y) {
 }
 
 static void handle_key(int ascii, int scancode) {
-    if (g_dialog_mode != 0) {
-        // Enter: Commit dialog
-        if (ascii == '\n' || ascii == '\r' || scancode == 0x1C) {
-            if (g_dialog_input[0]) {
-                if (g_dialog_mode == 1) { // Save As
-                    if (g_dialog_input[0] != '/') {
-                        strcpy(g_filename, "/DESKTOP/");
-                        strcat(g_filename, g_dialog_input);
-                    } else {
-                        strncpy(g_filename, g_dialog_input, sizeof(g_filename) - 1);
-                        g_filename[sizeof(g_filename) - 1] = '\0';
-                    }
-                    g_is_untitled = 0;
-                    save_file();
-                } else if (g_dialog_mode == 2) { // Open
-                    char open_path[64];
-                    if (g_dialog_input[0] != '/') {
-                        strcpy(open_path, "/DESKTOP/");
-                        strcat(open_path, g_dialog_input);
-                    } else {
-                        strncpy(open_path, g_dialog_input, sizeof(open_path) - 1);
-                        open_path[sizeof(open_path) - 1] = '\0';
-                    }
-                    load_file(open_path);
-                }
-            }
-            g_dialog_mode = 0;
-            return;
+    if (g_dialog.active) {
+        int res = woos_dialog_handle_key(&g_dialog, ascii, scancode);
+        if (res == WOOS_DIALOG_RES_OK) {
+            apply_dialog_result();
         }
-
-        // Esc: Cancel dialog
-        if (ascii == 27 || scancode == 0x01) {
-            g_dialog_mode = 0;
-            return;
-        }
-
-        // Backspace
-        if (ascii == '\b' || scancode == 0x0E) {
-            if (g_dialog_input_len > 0) {
-                g_dialog_input[--g_dialog_input_len] = '\0';
-            }
-            return;
-        }
-
-        // Printable input
-        if (ascii >= 32 && ascii <= 126 && g_dialog_input_len < 60) {
-            g_dialog_input[g_dialog_input_len++] = (char)ascii;
-            g_dialog_input[g_dialog_input_len] = '\0';
-            return;
-        }
-
         return;
     }
 
     // Ctrl+S: Save
     if (ascii == 19 || (ascii == 's' && (scancode == 0x1F))) {
         if (g_is_untitled) {
-            g_dialog_mode = 1;
-            strncpy(g_dialog_input, g_filename, sizeof(g_dialog_input) - 1);
-            g_dialog_input_len = (int)strlen(g_dialog_input);
+            woos_dialog_open(&g_dialog, DIALOG_MODE_SAVE_AS, "Save File As...", "Enter destination path on disk:", g_filename, "Save");
         } else {
             save_file();
         }
