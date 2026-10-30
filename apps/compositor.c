@@ -49,6 +49,9 @@ static int g_is_dragging_icon = 0;
 static int g_drag_icon_idx = -1;
 static int g_drag_dx = 0;
 static int g_drag_dy = 0;
+static int g_potential_drag_idx = -1;
+static int g_drag_start_x = 0;
+static int g_drag_start_y = 0;
 
 // Dragging Window
 static int g_drag_win_id = -1;
@@ -57,11 +60,17 @@ static int g_drag_win_h = 320;
 static int g_drag_win_off_x = 0;
 static int g_drag_win_off_y = 0;
 
-// Cursor Coordinates
+// Cursor Coordinates & Dirty Rect Tracking
 static int g_cursor_x = 640;
 static int g_cursor_y = 512;
 static int g_old_x = 640;
 static int g_old_y = 512;
+static int g_mouse_dirty_min_x = 9999;
+static int g_mouse_dirty_max_x = -9999;
+static int g_mouse_dirty_min_y = 9999;
+static int g_mouse_dirty_max_y = -9999;
+static int g_mouse_has_moved = 0;
+static uint32_t g_last_uptime_sec = 0;
 
 // Menus State
 static int g_start_menu_open = 0;
@@ -707,11 +716,33 @@ void _start(void) {
                 g_cursor_x = ev.x;
                 g_cursor_y = ev.y;
 
+                g_mouse_has_moved = 1;
+                int mx1 = (g_old_x < g_cursor_x ? g_old_x : g_cursor_x) - 16;
+                int mx2 = (g_old_x > g_cursor_x ? g_old_x : g_cursor_x) + 16;
+                int my1 = (g_old_y < g_cursor_y ? g_old_y : g_cursor_y) - 16;
+                int my2 = (g_old_y > g_cursor_y ? g_old_y : g_cursor_y) + 16;
+
+                if (mx1 < g_mouse_dirty_min_x) g_mouse_dirty_min_x = mx1;
+                if (mx2 > g_mouse_dirty_max_x) g_mouse_dirty_max_x = mx2;
+                if (my1 < g_mouse_dirty_min_y) g_mouse_dirty_min_y = my1;
+                if (my2 > g_mouse_dirty_max_y) g_mouse_dirty_max_y = my2;
+
                 if (g_drag_win_id != -1) {
                     int ny = g_cursor_y - g_drag_win_off_y;
                     if (ny < 25) ny = 25;
                     woos_graphics_set_window_pos(g_drag_win_id, g_cursor_x - g_drag_win_off_x, ny);
                     need_redraw = 1;
+                } else if (g_potential_drag_idx >= 0 && !g_is_dragging_icon) {
+                    int dx = g_cursor_x - g_drag_start_x;
+                    int dy = g_cursor_y - g_drag_start_y;
+                    if (dx > 6 || dx < -6 || dy > 6 || dy < -6) {
+                        g_is_dragging_icon = 1;
+                        g_drag_icon_idx = g_potential_drag_idx;
+                        desktop_item_t* it = &g_items[g_drag_icon_idx];
+                        g_drag_dx = g_drag_start_x - (GRID_MARGIN_X + it->col * GRID_CELL_W);
+                        g_drag_dy = g_drag_start_y - (GRID_MARGIN_Y + it->row * GRID_CELL_H);
+                        need_redraw = 1;
+                    }
                 } else if (g_is_dragging_icon) {
                     need_redraw = 1;
                 } else if (g_ctx_menu_open) {
@@ -992,18 +1023,21 @@ void _start(void) {
                             // Double Click!
                             launch_item(item_idx);
                             g_last_clicked_icon = -1;
+                            g_potential_drag_idx = -1;
+                            g_is_dragging_icon = 0;
                         } else {
                             g_last_clicked_icon = item_idx;
                             g_last_click_time = st.uptime_ms;
-                            // Start dragging icon
-                            g_is_dragging_icon = 1;
-                            g_drag_icon_idx = item_idx;
-                            desktop_item_t* it = &g_items[item_idx];
-                            g_drag_dx = g_cursor_x - (GRID_MARGIN_X + it->col * GRID_CELL_W);
-                            g_drag_dy = g_cursor_y - (GRID_MARGIN_Y + it->row * GRID_CELL_H);
+                            // Set potential drag idx (requires >6px movement to activate)
+                            g_potential_drag_idx = item_idx;
+                            g_drag_start_x = g_cursor_x;
+                            g_drag_start_y = g_cursor_y;
+                            g_is_dragging_icon = 0;
                         }
                     } else {
                         g_selected_icon_idx = -1;
+                        g_potential_drag_idx = -1;
+                        g_is_dragging_icon = 0;
                     }
                     need_redraw = 1;
                 }
@@ -1044,6 +1078,25 @@ void _start(void) {
                     g_drag_icon_idx = -1;
                     need_redraw = 1;
                 }
+                g_potential_drag_idx = -1;
+                g_is_dragging_icon = 0;
+            }
+
+            // 4. Timer Tick
+            else if (ev.type == 3) {
+                woos_system_status_t st;
+                if (woos_system_get_status(&st) == 0) {
+                    uint32_t sec = st.uptime_ms / 1000;
+                    if (sec != g_last_uptime_sec) {
+                        g_last_uptime_sec = sec;
+                        need_redraw = 1;
+                    }
+                }
+            }
+
+            // 5. Window Change Notification
+            else if (ev.type == 6) {
+                need_redraw = 1;
             }
 
             // 4. Keyboard Input
@@ -1104,6 +1157,27 @@ void _start(void) {
         if (need_redraw) {
             render_screen();
             woos_graphics_present_rect(g_screen, 0, 0, SCREEN_W, SCREEN_H);
+            g_mouse_has_moved = 0;
+            g_mouse_dirty_min_x = 9999;
+            g_mouse_dirty_max_x = -9999;
+            g_mouse_dirty_min_y = 9999;
+            g_mouse_dirty_max_y = -9999;
+        } else if (g_mouse_has_moved) {
+            if (g_mouse_dirty_min_x < 0) g_mouse_dirty_min_x = 0;
+            if (g_mouse_dirty_min_y < 0) g_mouse_dirty_min_y = 0;
+            if (g_mouse_dirty_max_x > SCREEN_W) g_mouse_dirty_max_x = SCREEN_W;
+            if (g_mouse_dirty_max_y > SCREEN_H) g_mouse_dirty_max_y = SCREEN_H;
+
+            int dw = g_mouse_dirty_max_x - g_mouse_dirty_min_x;
+            int dh = g_mouse_dirty_max_y - g_mouse_dirty_min_y;
+            if (dw > 0 && dh > 0) {
+                woos_graphics_present_rect(g_screen, g_mouse_dirty_min_x, g_mouse_dirty_min_y, dw, dh);
+            }
+            g_mouse_has_moved = 0;
+            g_mouse_dirty_min_x = 9999;
+            g_mouse_dirty_max_x = -9999;
+            g_mouse_dirty_min_y = 9999;
+            g_mouse_dirty_max_y = -9999;
         }
 
         woos_input_wait_event();
