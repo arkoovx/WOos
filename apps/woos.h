@@ -83,6 +83,82 @@ typedef struct woos_dirent {
 WOOS_API("woos_vfs_readdir")
 int woos_vfs_readdir(int handle, woos_dirent_t* entry);
 
+// WASI Snapshot Preview 1 Imports
+#define WASI_API(name) __attribute__((import_module("wasi_snapshot_preview1"), import_name(name)))
+
+typedef unsigned long long uint64_t;
+typedef signed long long   int64_t;
+
+typedef struct {
+    uint32_t buf;
+    uint32_t buf_len;
+} wasi_app_iovec_t;
+
+typedef struct {
+    uint64_t dev;
+    uint64_t ino;
+    uint8_t  filetype;
+    uint8_t  pad[7];
+    uint64_t nlink;
+    uint64_t size;
+    uint64_t atim;
+    uint64_t mtim;
+    uint64_t ctim;
+} __attribute__((packed)) wasi_filestat_t;
+
+typedef struct {
+    uint64_t userdata;
+    uint8_t  type;
+    uint8_t  pad[7];
+    union {
+        struct {
+            uint32_t clock_id;
+            uint32_t pad;
+            uint64_t timeout;
+            uint64_t precision;
+            uint16_t sub_flags;
+            uint8_t  pad2[6];
+        } clock;
+        struct { uint32_t fd; } fd_read;
+        struct { uint32_t fd; } fd_write;
+    } u;
+} __attribute__((packed)) wasi_subscription_t;
+
+typedef struct {
+    uint64_t userdata;
+    uint16_t error;
+    uint8_t  type;
+    uint8_t  pad[5];
+    union {
+        struct {
+            uint64_t nbytes;
+            uint16_t flags;
+            uint8_t  pad[6];
+        } fd_readwrite;
+    } u;
+} __attribute__((packed)) wasi_event_t;
+
+WASI_API("clock_time_get")
+uint32_t wasi_clock_time_get(uint32_t clk_id, uint64_t precision, uint64_t* time_out);
+
+WASI_API("poll_oneoff")
+uint32_t wasi_poll_oneoff(const wasi_subscription_t* in_subs, wasi_event_t* out_events, uint32_t nsubscriptions, uint32_t* nevents);
+
+WASI_API("sched_yield")
+uint32_t wasi_sched_yield(void);
+
+WASI_API("path_filestat_get")
+uint32_t wasi_path_filestat_get(uint32_t dirfd, uint32_t flags, const char* path, uint32_t path_len, wasi_filestat_t* buf);
+
+WASI_API("path_create_directory")
+uint32_t wasi_path_create_directory(uint32_t dirfd, const char* path, uint32_t path_len);
+
+WASI_API("path_unlink_file")
+uint32_t wasi_path_unlink_file(uint32_t dirfd, const char* path, uint32_t path_len);
+
+WASI_API("path_rename")
+uint32_t wasi_path_rename(uint32_t old_fd, const char* old_path, uint32_t old_path_len, uint32_t new_fd, const char* new_path, uint32_t new_path_len);
+
 // Basic libc-like helpers for standalone WASM
 __attribute__((used))
 void* memset(void* s, int c, size_t n) {

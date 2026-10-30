@@ -43,6 +43,8 @@
   (data (i32.const 12160) "Notepad\00")
   (data (i32.const 12180) "/EXPLORER.WAS\00")
   (data (i32.const 12200) "Explorer\00")
+  (data (i32.const 12220) "/TESTWASI.WAS\00")
+  (data (i32.const 12240) "WASI Test\00")
 
   ;; Globals
   (global $g_width (mut i32) (i32.const 1280))
@@ -1496,6 +1498,36 @@
     i32.const 0xFFFFFF
     call $draw_str
 
+    ;; --- Desktop Shortcut 5: WASI Test at (450, 50, 64x64) ---
+    i32.const 450
+    i32.const 50
+    i32.const 64
+    i32.const 64
+    i32.const 0x2A1B4E
+    call $draw_rect
+
+    ;; Inner square (purple/violet)
+    i32.const 454
+    i32.const 54
+    i32.const 56
+    i32.const 56
+    i32.const 0x4A235A
+    call $draw_rect
+
+    ;; Cyan badge center
+    i32.const 462
+    i32.const 66
+    i32.const 40
+    i32.const 32
+    i32.const 0x00FFCC
+    call $draw_rect
+
+    i32.const 448
+    i32.const 120
+    i32.const 12240 ;; "WASI Test\00"
+    i32.const 0xFFFFFF
+    call $draw_str
+
     ;; 3. Iterate and Draw Windows in z-order
     call $get_window_count
     local.set $win_count
@@ -2618,6 +2650,29 @@
                 ;; Unified single-instance launcher for Explorer
                 i32.const 12180 ;; "/EXPLORER.WAS\00"
                 i32.const 12200 ;; "Explorer\00"
+                call $launch_or_focus
+              end
+
+              ;; 8. Check Desktop Shortcut Icon (WASI Test at 450,50, 64x64)
+              global.get $g_cursor_x
+              i32.const 450
+              i32.ge_s
+              global.get $g_cursor_x
+              i32.const 514
+              i32.le_s
+              i32.and
+              global.get $g_cursor_y
+              i32.const 50
+              i32.ge_s
+              global.get $g_cursor_y
+              i32.const 114
+              i32.le_s
+              i32.and
+              i32.and
+              if
+                ;; Unified single-instance launcher for WASI Test
+                i32.const 12220 ;; "/TESTWASI.WAS\00"
+                i32.const 12240 ;; "WASI Test\00"
                 call $launch_or_focus
               end
             )

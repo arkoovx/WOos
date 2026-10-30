@@ -31,6 +31,14 @@ int32_t vfs_seek(int32_t handle, uint32_t offset);
 uint32_t vfs_tell(int32_t handle);
 uint32_t vfs_size(int32_t handle);
 int32_t vfs_readdir(int32_t handle, vfs_dirent_t* out_entry);
+int32_t vfs_get_handle_type(int32_t handle);
+int32_t vfs_stat(const char* path, vfs_dirent_t* out_stat);
+int32_t vfs_fstat(int32_t handle, vfs_dirent_t* out_stat);
+int32_t vfs_mkdir(const char* path);
+int32_t vfs_unlink(const char* path);
+int32_t vfs_rename(const char* old_path, const char* new_path);
+int32_t vfs_truncate(int32_t handle, uint32_t size);
+int32_t vfs_sync(int32_t handle);
 void vfs_close(int32_t handle);
 
 #endif

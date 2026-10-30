@@ -27,6 +27,15 @@ static int is_transmit_empty(void) {
     return (int)(inb(PORT_COM1 + 5) & 0x20u);
 }
 
+int serial_has_char(void) {
+    return (int)(inb(PORT_COM1 + 5) & 0x01u);
+}
+
+char serial_read_char(void) {
+    while (!serial_has_char());
+    return (char)inb(PORT_COM1);
+}
+
 void serial_write_char(char c) {
     while (is_transmit_empty() == 0);
     outb(PORT_COM1, (uint8_t)c);

@@ -8,5 +8,7 @@ void serial_init(void);
 void serial_write_char(char c);
 void serial_write_string(const char* str);
 void serial_printf(const char* format, ...);
+int serial_has_char(void);
+char serial_read_char(void);
 
 #endif // WOOS_SERIAL_H

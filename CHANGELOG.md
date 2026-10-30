@@ -1,6 +1,40 @@
 # Changelog
 
-## 1.45.0
+## 1.46.0
+- Полная реализация стандарта WASI Snapshot Preview 1 (45/45 системных вызовов в `wasi.c`):
+  - Файловые дескрипторы и потоки ввода-вывода:
+    - Поддержка стандартного ввода `stdin` (`fd == 0` в `wasi_fd_read`) с чтением из последовательного порта/буфера ввода.
+    - Вызовы произвольного позиционирования и синхронизации: `fd_seek`, `fd_tell` (позиция в файле), `fd_sync` и `fd_datasync` (сброс кэша FAT на диск).
+    - Пакетное и позиционированное чтение/запись: `fd_pread` и `fd_pwrite` с сохранением текущего смещения файла.
+    - Служебные вызовы: `fd_advise`, `fd_allocate`, `fd_renumber` (dup2).
+  - Получение метаданных и прав доступа (Stat / Prestat):
+    - `fd_filestat_get` и `path_filestat_get`: заполнение стандартной 64-байтной структуры `wasi_filestat_t` (размер, метки времени в наносекундах, тип регулярного файла, каталога или сокета).
+    - `fd_filestat_set_size` (усечение файлов / `ftruncate`) и `fd_filestat_set_times` (`utimensat`).
+    - `fd_fdstat_get`, `fd_fdstat_set_flags` (`fcntl`) и `fd_fdstat_set_rights`.
+    - Поддержка предварительно открытых каталогов (`fd_prestat_get` и `fd_prestat_dir_name` для корня `/`).
+  - Файловые операции и каталоги стандарта POSIX:
+    - Стандартное чтение содержимого каталогов `fd_readdir` с сериализацией структуры `wasi_dirent_header_t` и поддержкой постраничных cookie-курсоров для libc (`opendir`/`readdir`).
+    - Создание и удаление: `path_create_directory` (`mkdir`), `path_unlink_file` (`unlink`/`remove`), `path_remove_directory` (`rmdir`).
+    - Перемещение и переименование файлов/папок: `path_rename`.
+    - Заглушки символических ссылок: `path_readlink`, `path_link`, `path_symlink` (возврат `ENOSYS` для FAT32).
+  - Опрос событий, процессы и таймеры высокого разрешения:
+    - Реализация `poll_oneoff` — ключевого примитива ожидания и таймеров WASI: поддержка подписок `CLOCK` (наносекундный `nanosleep`/`usleep`/`sleep`), `FD_READ` и `FD_WRITE`.
+    - Управление процессами: `sched_yield` (передача кванта времени планировщика), `proc_exit` (завершение с кодом возврата), `proc_raise` (обработка сигналов ядра).
+    - Таймеры и случайные числа: `clock_res_get` (разрешение системного таймера в наносекундах), `clock_time_get` (монотонное время аптайма), `random_get` (генератор случайных чисел).
+    - Переменные окружения и аргументы: `environ_sizes_get`, `environ_get`, `args_sizes_get`, `args_get`.
+  - Стандартные сетевые сокеты WASI Preview 1:
+    - Системные вызовы `sock_recv`, `sock_send` и `sock_shutdown` поверх сокетов VFS/lwIP.
+    - Поддержка расширений сокетов в пространстве `wasi_snapshot_preview1`: `sock_open`, `sock_bind`, `sock_listen`, `sock_accept`, `sock_connect`.
+- Расширение подсистемы VFS (`vfs.c` / `vfs.h`):
+  - Таблица дескрипторов `VFS_MAX_HANDLES` увеличена с 8 до 32 дескрипторов.
+  - Добавлены функции ядра: `vfs_stat`, `vfs_fstat`, `vfs_mkdir`, `vfs_unlink`, `vfs_rename`, `vfs_truncate`, `vfs_sync`, `vfs_get_handle_type`.
+  - Реализованы `serial_has_char` и `serial_read_char` в `serial.c` для неблокирующей вычитки `stdin`.
+- Интеграция C SDK и тестовый комплект соответствия:
+  - Экспорт интерфейсов `WASI_API` и структур `wasi_filestat_t`, `wasi_subscription_t`, `wasi_event_t` в `apps/woos.h`.
+  - Приложение валидации стандарта WASI (`apps/wasi_test.c` / `TESTWASI.WAS`):
+    - Автоматическая проверка таймеров (`clock_time_get`), наносекундного сна (`poll_oneoff`), чтения метаданных (`path_filestat_get`), создания каталогов (`path_create_directory`), создания файлов, переименования (`path_rename`) и уступки процессора (`sched_yield`).
+  - Добавление иконки «WASI Test» на рабочий стол композитора (`apps/compositor.wat`) по координатам (450, 50).
+  - Добавление команды `wasitest` в командный процессор терминала (`apps/terminal.wat`).
 - Графический файловый менеджер Windows Explorer (`apps/explorer.c` / `EXPLORER.WAS`):
   - Полнофункциональный оконный интерфейс 640×420 в классическом стиле Windows 98/2000/XP:
     - Верхняя панель инструментов с кнопками перехода [Up] (на уровень вверх), [Refresh] (обновление каталога), [Notepad] и [Terminal].

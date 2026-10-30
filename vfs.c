@@ -4,7 +4,7 @@
 #include "serial.h"
 #include "net_socket.h"
 
-#define VFS_MAX_HANDLES 8u
+#define VFS_MAX_HANDLES 32u
 #define VFS_BOOT_SECTORS 1u
 
 typedef struct vfs_handle {
@@ -303,4 +303,72 @@ void vfs_close(int32_t handle) {
     h->in_use = 0u;
     h->type = VFS_HANDLE_FILE;
     h->socket_id = -1;
+}
+
+int32_t vfs_get_handle_type(int32_t handle) {
+    if (handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES || !g_handles[handle].in_use) return -1;
+    return (int32_t)g_handles[handle].type;
+}
+
+int32_t vfs_fstat(int32_t handle, vfs_dirent_t* out_stat) {
+    if (!g_vfs_ready || !out_stat || handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) return -1;
+    vfs_handle_t* h = &g_handles[handle];
+    if (!h->in_use) return -1;
+    memset(out_stat, 0, sizeof(vfs_dirent_t));
+    if (h->type == VFS_HANDLE_DIR) {
+        out_stat->is_dir = 1;
+        out_stat->size = 0;
+    } else if (h->type == VFS_HANDLE_SOCKET) {
+        out_stat->is_dir = 0;
+        out_stat->size = 0;
+    } else {
+        out_stat->is_dir = 0;
+        out_stat->size = (uint32_t)f_size(&h->fil);
+    }
+    return 0;
+}
+
+int32_t vfs_stat(const char* path, vfs_dirent_t* out_stat) {
+    if (!g_vfs_ready || !path || !out_stat) return -1;
+    FILINFO fno;
+    FRESULT res = f_stat(path, &fno);
+    if (res != FR_OK) return -1;
+    copy_string(out_stat->name, fno.fname, sizeof(out_stat->name));
+    out_stat->is_dir = (fno.fattrib & AM_DIR) ? 1u : 0u;
+    out_stat->size = (uint32_t)fno.fsize;
+    return 0;
+}
+
+int32_t vfs_mkdir(const char* path) {
+    if (!g_vfs_ready || !path) return -1;
+    FRESULT res = f_mkdir(path);
+    return (res == FR_OK) ? 0 : -1;
+}
+
+int32_t vfs_unlink(const char* path) {
+    if (!g_vfs_ready || !path) return -1;
+    FRESULT res = f_unlink(path);
+    return (res == FR_OK) ? 0 : -1;
+}
+
+int32_t vfs_rename(const char* old_path, const char* new_path) {
+    if (!g_vfs_ready || !old_path || !new_path) return -1;
+    FRESULT res = f_rename(old_path, new_path);
+    return (res == FR_OK) ? 0 : -1;
+}
+
+int32_t vfs_truncate(int32_t handle, uint32_t size) {
+    if (!g_vfs_ready || handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) return -1;
+    vfs_handle_t* h = &g_handles[handle];
+    if (!h->in_use || h->type != VFS_HANDLE_FILE) return -1;
+    if (f_lseek(&h->fil, (FSIZE_t)size) != FR_OK) return -1;
+    if (f_truncate(&h->fil) != FR_OK) return -1;
+    return 0;
+}
+
+int32_t vfs_sync(int32_t handle) {
+    if (!g_vfs_ready || handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) return -1;
+    vfs_handle_t* h = &g_handles[handle];
+    if (!h->in_use || h->type != VFS_HANDLE_FILE) return -1;
+    return (f_sync(&h->fil) == FR_OK) ? 0 : -1;
 }

@@ -89,6 +89,9 @@ def main():
     if os.path.exists("apps/explorer.wasm"):
         with open("apps/explorer.wasm", "rb") as f:
             files.append(("EXPLORER.WAS", f.read()))
+    if os.path.exists("apps/wasi_test.wasm"):
+        with open("apps/wasi_test.wasm", "rb") as f:
+            files.append(("TESTWASI.WAS", f.read()))
 
     current_cluster = 2 + ROOT_DIR_CLUSTERS  # Cluster 6+
 

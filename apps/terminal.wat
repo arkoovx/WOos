@@ -59,9 +59,12 @@
   (data (i32.const 1030) "explorer\00")
   (data (i32.const 1040) "/EXPLORER.WAS\00")
   (data (i32.const 1060) "Starting /EXPLORER.WAS...\00")
+  (data (i32.const 1010) "wasitest\00")
+  (data (i32.const 1020) "/TESTWASI.WAS\00")
+  (data (i32.const 1080) "Running /TESTWASI.WAS (WASI Preview 1 Test)...\00")
 
   ;; Files list for ls
-  (data (i32.const 1100) "HELLO.TXT     README.TXT    COMPOSIT.WAS  CALC.WAS      TERM.WAS      NOTEPAD.WAS   EXPLORER.WAS\00")
+  (data (i32.const 1100) "HELLO.TXT     README.TXT    COMPOSIT.WAS  CALC.WAS      TERM.WAS      NOTEPAD.WAS   EXPLORER.WAS  TESTWASI.WAS\00")
 
   ;; Help text lines
   (data (i32.const 1200) "Available commands:\00")
@@ -1138,6 +1141,20 @@
       call $term_puts
       call $term_newline
       i32.const 1040 ;; "/EXPLORER.WAS\00"
+      call $system_spawn
+      drop
+      return
+    end
+
+    ;; Command: wasitest
+    local.get $cmd_ptr
+    i32.const 1010 ;; "wasitest"
+    call $streq
+    if
+      i32.const 1080 ;; "Running /TESTWASI.WAS (WASI Preview 1 Test)..."
+      call $term_puts
+      call $term_newline
+      i32.const 1020 ;; "/TESTWASI.WAS\00"
       call $system_spawn
       drop
       return

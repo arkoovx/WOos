@@ -1,6 +1,6 @@
 # WoOS Development Plan
 
-> Статус на 2026-10-30 (версия 1.45.0): базовый план (A–E), сетевой стек P1 (DNS, сокеты, WoOS Terminal), Single-Instance модель, оконный менеджер, полноэкранный Maximize/Restore, высокопроизводительный драйвер AHCI (SATA) с Bus Master DMA, файловая система FAT32 (64 МБ накопитель), нативный C WebAssembly SDK (`apps/woos.h`), текстовый редактор Notepad (`NOTEPAD.WAS`) и графический файловый менеджер Windows Explorer (`EXPLORER.WAS`) **успешно завершены**.
+> Статус на 2026-10-30 (версия 1.46.0): базовый план (A–E), сетевой стек P1 (DNS, сокеты, WoOS Terminal), Single-Instance модель, оконный менеджер, полноэкранный Maximize/Restore, высокопроизводительный драйвер AHCI (SATA) с Bus Master DMA, файловая система FAT32 (64 МБ накопитель), нативный C WebAssembly SDK (`apps/woos.h`), текстовый редактор Notepad (`NOTEPAD.WAS`), графический файловый менеджер Windows Explorer (`EXPLORER.WAS`) и **100% стандартный мост WASI Snapshot Preview 1 (45/45 вызовов, сокеты, POSIX VFS)** успешно завершены.
 
 ## 1) Пройденный этап (архив ключевых достижений)
 
@@ -14,12 +14,14 @@
 - [x] Интеграция внешней файловой системы FatFs (`external/fatfs`) с поддержкой FAT12/FAT32 и монтированием VFS.
 - [x] Сетевой стек lwIP (`external/lwip`) с драйвером virtio-net, DHCP, UDP/TCP сокетами и WASM HTTP-сервером.
 - [x] Интеграция WebAssembly-рантайма (`external/wasm3`) с мостом системных вызовов WASI (`wasi.c`) и прямой поддержкой VFS (`woos_vfs_*`).
+- [x] **Полная реализация стандарта WASI Snapshot Preview 1 (45/45 вызовов):** файлы, директории (`fd_readdir`, `path_create_directory`), метаданные (`filestat`), сокеты (`sock_recv`/`sock_send`/`sock_open`), таймеры (`poll_oneoff`, `clock_time_get`, `clock_res_get`), `stdin`/`stdout`, уступка CPU (`sched_yield`).
 - [x] Изолированный Ring 3 композитор (`COMPOSIT.WAS`) и оконный менеджер ядра с декорациями в стиле Windows (заголовок, рамка, кнопки закрытия/разворачивания/сворачивания, динамический таскбар, меню Пуск, предотвращение дублирования инстансов, 60+ FPS драг).
 - [x] Нативный C WebAssembly SDK (`apps/woos.h`) для сборки компактных программ на C под WoOS WASM без внешней libc.
 - [x] Первое полноценное прикладное WASM-приложение: калькулятор (`CALC.WAS`).
 - [x] Интерактивный терминал и Linux-совместимый командный процессор (`TERM.WAS`).
 - [x] Полнофункциональный текстовый редактор Notepad (`NOTEPAD.WAS`) на языке C (архитектура Kilo).
 - [x] Графический файловый менеджер Windows Explorer (`EXPLORER.WAS`) с навигацией по каталогам, ассоциациями типов файлов и отображением разделов FAT32.
+- [x] Тестовый комплект соответствия стандарту WASI (`TESTWASI.WAS`).
 
 ---
 
