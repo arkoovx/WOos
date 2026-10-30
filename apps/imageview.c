@@ -2,8 +2,11 @@
 #include "image.h"
 #include "woos_dialog.h"
 
-#define WIN_W 680
-#define WIN_H 460
+#define DEFAULT_WIN_W 680
+#define DEFAULT_WIN_H 460
+#define MAX_WIN_W 1280
+#define MAX_WIN_H 1024
+
 #define TOOLBAR_H 30
 #define STATUSBAR_H 22
 
@@ -17,7 +20,9 @@
 #define COLOR_CHECKER_LIGHT 0xFFFFFF
 #define COLOR_CHECKER_DARK  0xDFE4EA
 
-static uint32_t g_fb[WIN_W * WIN_H];
+static int g_win_w = DEFAULT_WIN_W;
+static int g_win_h = DEFAULT_WIN_H;
+static uint32_t g_fb[MAX_WIN_W * MAX_WIN_H];
 static woos_image_t* g_current_image = 0;
 static char g_image_path[64] = "/WALLPAP.BMP";
 static int g_zoom_pct = 100; // 100 = 100%
@@ -65,68 +70,52 @@ static void load_image(const char* path) {
 }
 
 static void draw_btn(int x, int y, int w, int h, const char* label) {
+    int win_w = g_win_w;
+    int win_h = g_win_h;
     for (int dy = 0; dy < h; dy++) {
-        uint32_t* row = g_fb + (y + dy) * WIN_W;
+        uint32_t* row = g_fb + (y + dy) * win_w;
         for (int dx = 0; dx < w; dx++) {
             row[x + dx] = COLOR_TOOLBAR_BTN;
         }
     }
     // 1px border
     for (int dx = 0; dx < w; dx++) {
-        g_fb[y * WIN_W + x + dx] = COLOR_BTN_BORDER;
-        g_fb[(y + h - 1) * WIN_W + x + dx] = COLOR_BTN_BORDER;
+        g_fb[y * win_w + x + dx] = COLOR_BTN_BORDER;
+        g_fb[(y + h - 1) * win_w + x + dx] = COLOR_BTN_BORDER;
     }
     for (int dy = 0; dy < h; dy++) {
-        g_fb[(y + dy) * WIN_W + x] = COLOR_BTN_BORDER;
-        g_fb[(y + dy) * WIN_W + x + w - 1] = COLOR_BTN_BORDER;
+        g_fb[(y + dy) * win_w + x] = COLOR_BTN_BORDER;
+        g_fb[(y + dy) * win_w + x + w - 1] = COLOR_BTN_BORDER;
     }
 
     int t_len = 0;
     while (label[t_len] != '\0') t_len++;
     int tx = x + (w - t_len * 8) / 2;
     int ty = y + (h - 12) / 2;
-    woos_draw_text(g_fb, WIN_W, WIN_H, tx, ty, label, COLOR_TEXT_WHITE);
+    woos_draw_text(g_fb, win_w, win_h, tx, ty, label, COLOR_TEXT_WHITE);
 }
 
 static void render_screen(void) {
-    // 1. Toolbar background (y = 0..TOOLBAR_H)
-    for (int y = 0; y < TOOLBAR_H; y++) {
-        uint32_t* row = g_fb + y * WIN_W;
-        for (int x = 0; x < WIN_W; x++) {
-            row[x] = COLOR_TOOLBAR_BG;
-        }
-    }
-    // Toolbar bottom divider
-    for (int x = 0; x < WIN_W; x++) {
-        g_fb[(TOOLBAR_H - 1) * WIN_W + x] = 0x1E272E;
-    }
+    int win_w = g_win_w;
+    int win_h = g_win_h;
 
-    // Toolbar buttons
-    draw_btn(8, 4, 60, 22, "Open");
-    draw_btn(72, 4, 72, 22, "Save As");
-    draw_btn(148, 4, 56, 22, "Zoom +");
-    draw_btn(208, 4, 56, 22, "Zoom -");
-    draw_btn(268, 4, 46, 22, "1:1");
-    draw_btn(318, 4, 46, 22, "Fit");
-    draw_btn(368, 4, 64, 22, "Rotate");
-    draw_btn(436, 4, 114, 22, "Set Wallpaper");
-
-    // 2. Viewport Canvas (y = TOOLBAR_H .. WIN_H - STATUSBAR_H)
+    // 1. Viewport Canvas (y = TOOLBAR_H .. win_h - STATUSBAR_H)
     int canvas_y = TOOLBAR_H;
-    int canvas_h = WIN_H - TOOLBAR_H - STATUSBAR_H;
-    int canvas_w = WIN_W;
+    int canvas_h = win_h - TOOLBAR_H - STATUSBAR_H;
+    int canvas_w = win_w;
+    if (canvas_h < 10) canvas_h = 10;
 
     // Checkerboard pattern
     for (int y = 0; y < canvas_h; y++) {
         int py = canvas_y + y;
-        uint32_t* row = g_fb + py * WIN_W;
+        uint32_t* row = g_fb + py * win_w;
         for (int x = 0; x < canvas_w; x++) {
             int check = ((x / 12) ^ (y / 12)) & 1;
             row[x] = check ? COLOR_CHECKER_LIGHT : COLOR_CHECKER_DARK;
         }
     }
 
-    // Draw Image
+    // Draw Image (Strictly clipped to viewport canvas!)
     if (g_current_image && g_current_image->pixels && g_current_image->width > 0 && g_current_image->height > 0) {
         int disp_w = g_current_image->width;
         int disp_h = g_current_image->height;
@@ -151,27 +140,50 @@ static void render_screen(void) {
             image_scale_bilinear(g_current_image->pixels, g_current_image->width, g_current_image->height,
                                  scaled, disp_w, disp_h);
 
-            // Blit scaled image with alpha blending
-            image_blit_alpha(g_fb, WIN_W, WIN_H, img_x, img_y, scaled, disp_w, disp_h, disp_w);
+            // Blit scaled image strictly clipped inside canvas_y .. canvas_y + canvas_h
+            image_blit_alpha_clipped(g_fb, win_w, win_h, img_x, img_y, scaled, disp_w, disp_h, disp_w,
+                                     0, canvas_y, canvas_w, canvas_h);
             woos_free(scaled);
         }
     } else {
         // Placeholder text
-        woos_draw_text(g_fb, WIN_W, WIN_H, canvas_w / 2 - 120, canvas_y + canvas_h / 2 - 8,
+        woos_draw_text(g_fb, win_w, win_h, canvas_w / 2 - 120, canvas_y + canvas_h / 2 - 8,
                        "No image loaded - click [Open]", 0x57606F);
     }
 
-    // 3. Status Bar (y = WIN_H - STATUSBAR_H .. WIN_H)
-    int sb_y = WIN_H - STATUSBAR_H;
-    for (int y = sb_y; y < WIN_H; y++) {
-        uint32_t* row = g_fb + y * WIN_W;
-        for (int x = 0; x < WIN_W; x++) {
+    // 2. Toolbar background (y = 0..TOOLBAR_H) - drawn on top of canvas
+    for (int y = 0; y < TOOLBAR_H; y++) {
+        uint32_t* row = g_fb + y * win_w;
+        for (int x = 0; x < win_w; x++) {
+            row[x] = COLOR_TOOLBAR_BG;
+        }
+    }
+    // Toolbar bottom divider
+    for (int x = 0; x < win_w; x++) {
+        g_fb[(TOOLBAR_H - 1) * win_w + x] = 0x1E272E;
+    }
+
+    // Toolbar buttons
+    draw_btn(8, 4, 60, 22, "Open");
+    draw_btn(72, 4, 72, 22, "Save As");
+    draw_btn(148, 4, 56, 22, "Zoom +");
+    draw_btn(208, 4, 56, 22, "Zoom -");
+    draw_btn(268, 4, 46, 22, "1:1");
+    draw_btn(318, 4, 46, 22, "Fit");
+    draw_btn(368, 4, 64, 22, "Rotate");
+    draw_btn(436, 4, 114, 22, "Set Wallpaper");
+
+    // 3. Status Bar (y = win_h - STATUSBAR_H .. win_h) - drawn on top
+    int sb_y = win_h - STATUSBAR_H;
+    for (int y = sb_y; y < win_h; y++) {
+        uint32_t* row = g_fb + y * win_w;
+        for (int x = 0; x < win_w; x++) {
             row[x] = COLOR_STATUSBAR_BG;
         }
     }
     // Top border
-    for (int x = 0; x < WIN_W; x++) {
-        g_fb[sb_y * WIN_W + x] = 0x2F3542;
+    for (int x = 0; x < win_w; x++) {
+        g_fb[sb_y * win_w + x] = 0x2F3542;
     }
 
     // Status metrics string
@@ -186,7 +198,7 @@ static void render_screen(void) {
 
         size_t p = 0;
         const char* pth = g_image_path;
-        while (pth[p] != '\0' && p < 24) { status_str[p] = pth[p]; p++; }
+        while (pth[p] != '\0' && p < 32) { status_str[p] = pth[p]; p++; }
         status_str[p++] = ' '; status_str[p++] = '|'; status_str[p++] = ' ';
         size_t d = 0; while (w_str[d] != '\0') status_str[p++] = w_str[d++];
         status_str[p++] = 'x';
@@ -205,17 +217,17 @@ static void render_screen(void) {
         while (sm[p] != '\0' && p + 1 < sizeof(status_str)) { status_str[p] = sm[p]; p++; }
         status_str[p] = '\0';
     }
-    woos_draw_text(g_fb, WIN_W, WIN_H, 8, sb_y + 5, status_str, COLOR_TEXT_MUTED);
+    woos_draw_text(g_fb, win_w, win_h, 8, sb_y + 5, status_str, COLOR_TEXT_MUTED);
 
     // 4. Modal Dialog (Open / Save As)
     if (g_dialog.active) {
-        woos_dialog_draw(g_fb, WIN_W, WIN_H, &g_dialog);
+        woos_dialog_draw(g_fb, win_w, win_h, &g_dialog);
     }
 }
 
 __attribute__((export_name("_start")))
 void _start(void) {
-    int win_id = woos_create_window(WIN_W, WIN_H, "Image Viewer", 0);
+    int win_id = woos_create_window(g_win_w, g_win_h, "Image Viewer", 0);
     if (win_id < 0) return;
 
     // Check if launched with an open file
@@ -229,7 +241,7 @@ void _start(void) {
     }
 
     render_screen();
-    woos_blit_window(win_id, g_fb, WIN_W, WIN_H);
+    woos_blit_window(win_id, g_fb, g_win_w, g_win_h);
 
     woos_msg_t msg;
 
@@ -243,6 +255,20 @@ void _start(void) {
                     image_free(g_current_image);
                 }
                 return;
+            }
+
+            if (msg.type == MSG_RESIZE) {
+                int new_w = (int)msg.arg1;
+                int new_h = (int)msg.arg2;
+                if (new_w > 0 && new_h > 0) {
+                    if (new_w > MAX_WIN_W) new_w = MAX_WIN_W;
+                    if (new_h > MAX_WIN_H) new_h = MAX_WIN_H;
+                    g_win_w = new_w;
+                    g_win_h = new_h;
+                    g_pan_x = 0;
+                    g_pan_y = 0;
+                    need_redraw = 1;
+                }
             }
 
             if (msg.type == MSG_OPEN_FILE) {
@@ -259,7 +285,7 @@ void _start(void) {
                 int my = (int)msg.arg2;
 
                 if (g_dialog.active) {
-                    int res = woos_dialog_handle_click(&g_dialog, WIN_W, WIN_H, mx, my);
+                    int res = woos_dialog_handle_click(&g_dialog, g_win_w, g_win_h, mx, my);
                     if (res == WOOS_DIALOG_RES_OK) {
                         if (g_dialog.mode == DIALOG_MODE_OPEN) {
                             load_image(g_dialog.input);
@@ -368,7 +394,7 @@ void _start(void) {
 
         if (need_redraw) {
             render_screen();
-            woos_blit_window(win_id, g_fb, WIN_W, WIN_H);
+            woos_blit_window(win_id, g_fb, g_win_w, g_win_h);
         }
 
         woos_ipc_wait_message();

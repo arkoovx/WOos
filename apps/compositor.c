@@ -49,6 +49,8 @@ static int g_item_count = 0;
 static int g_selected_icon_idx = -1;
 static uint32_t g_last_click_time = 0;
 static int g_last_clicked_icon = -1;
+static uint32_t g_last_titlebar_click_time = 0;
+static int g_last_titlebar_click_win = -1;
 
 // Dragging Desktop Icon
 static int g_is_dragging_icon = 0;
@@ -639,17 +641,19 @@ static void draw_window_decorations(woos_window_info_t* win) {
     }
 
     // [□] Maximize/Restore button
+    int can_max = (strcmp(win->title, "Calculator") != 0);
     bx = win_x + win_w - 48;
     fill_rect(g_screen, SCREEN_W, SCREEN_H, bx, by, 23, 19, title_col);
     draw_rect(g_screen, SCREEN_W, SCREEN_H, bx, by, 23, 19, is_focused ? 0x2A8CE0 : 0x4B535D);
     cx = bx + 11;
     cy = by + 9;
+    uint32_t max_icon_col = can_max ? 0xFFFFFF : 0x7F8C8D;
     if (is_max) {
-        draw_rect(g_screen, SCREEN_W, SCREEN_H, cx - 2, cy - 4, 8, 7, 0xFFFFFF);
-        draw_rect(g_screen, SCREEN_W, SCREEN_H, cx - 4, cy - 2, 8, 7, 0xFFFFFF);
+        draw_rect(g_screen, SCREEN_W, SCREEN_H, cx - 2, cy - 4, 8, 7, max_icon_col);
+        draw_rect(g_screen, SCREEN_W, SCREEN_H, cx - 4, cy - 2, 8, 7, max_icon_col);
     } else {
-        draw_rect(g_screen, SCREEN_W, SCREEN_H, cx - 4, cy - 4, 9, 9, 0xFFFFFF);
-        fill_rect(g_screen, SCREEN_W, SCREEN_H, cx - 4, cy - 4, 9, 2, 0xFFFFFF);
+        draw_rect(g_screen, SCREEN_W, SCREEN_H, cx - 4, cy - 4, 9, 9, max_icon_col);
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, cx - 4, cy - 4, 9, 2, max_icon_col);
     }
 
     // [_] Minimize button
@@ -1302,7 +1306,9 @@ void _start(void) {
                             }
                             // [□] Maximize
                             if (g_cursor_x >= win.x + (int)win.w - 48 && g_cursor_x <= win.x + (int)win.w - 25) {
-                                woos_graphics_toggle_maximize(win.id);
+                                if (strcmp(win.title, "Calculator") != 0) {
+                                    woos_graphics_toggle_maximize(win.id);
+                                }
                                 hit_window = 1;
                                 need_redraw = 1;
                                 break;
@@ -1314,8 +1320,20 @@ void _start(void) {
                                 need_redraw = 1;
                                 break;
                             }
-                            // Titlebar Drag
+                            // Titlebar Drag & Double-Click Maximize
                             if (g_cursor_x >= win.x - 3 && g_cursor_x <= win.x + (int)win.w - 73) {
+                                woos_system_status_t st;
+                                woos_system_get_status(&st);
+                                if (strcmp(win.title, "Calculator") != 0 && g_last_titlebar_click_win == (int)win.id && (st.uptime_ms - g_last_titlebar_click_time) < 450) {
+                                    woos_graphics_toggle_maximize(win.id);
+                                    g_last_titlebar_click_win = -1;
+                                    hit_window = 1;
+                                    need_redraw = 1;
+                                    break;
+                                }
+                                g_last_titlebar_click_win = (int)win.id;
+                                g_last_titlebar_click_time = st.uptime_ms;
+
                                 woos_graphics_bring_to_front(win.id);
                                 if (!(win.flags & 2)) { // not maximized
                                     g_drag_win_id = win.id;

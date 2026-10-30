@@ -73,6 +73,14 @@ static inline void irq_restore(uint64_t rflags) {
 
 video_info_t* get_video_info(void);
 
+// IPC Message types
+#define MSG_CLICK        1
+#define MSG_RIGHT_CLICK  2
+#define MSG_CLOSE        3
+#define MSG_KEY_DOWN     4
+#define MSG_RESIZE       5
+#define MSG_OPEN_FILE    10
+
 #define MAX_WINDOWS 8
 
 // Window Flags

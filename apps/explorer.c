@@ -2,8 +2,13 @@
 #include "icons.h"
 #include "woos_dialog.h"
 
-#define WIN_W 640
-#define WIN_H 420
+#define DEFAULT_WIN_W 640
+#define DEFAULT_WIN_H 420
+#define MAX_WIN_W 1280
+#define MAX_WIN_H 1024
+
+static int g_win_w = DEFAULT_WIN_W;
+static int g_win_h = DEFAULT_WIN_H;
 
 #define COLOR_WINDOW_BG   0xECE9D8
 #define COLOR_SIDEBAR_BG  0xF6F6F6
@@ -32,7 +37,7 @@ typedef struct {
     uint32_t size;
 } file_item_t;
 
-static uint32_t g_fb[WIN_W * WIN_H];
+static uint32_t g_fb[MAX_WIN_W * MAX_WIN_H];
 static file_item_t g_items[MAX_ITEMS];
 static int g_item_count = 0;
 static int g_selected_idx = 0;
@@ -117,42 +122,42 @@ static int is_image_file(const char* fn) {
 }
 
 static void draw_folder_icon(int x, int y) {
-    fill_rect(g_fb, WIN_W, WIN_H, x + 1, y, 6, 3, 0xD4AC0D);
-    fill_rect(g_fb, WIN_W, WIN_H, x, y + 2, 14, 10, 0xF4D03F);
-    fill_rect(g_fb, WIN_W, WIN_H, x, y + 5, 14, 7, 0xF39C12);
-    draw_rect(g_fb, WIN_W, WIN_H, x, y + 2, 14, 10, 0xB7950B);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 1, y, 6, 3, 0xD4AC0D);
+    fill_rect(g_fb, g_win_w, g_win_h, x, y + 2, 14, 10, 0xF4D03F);
+    fill_rect(g_fb, g_win_w, g_win_h, x, y + 5, 14, 7, 0xF39C12);
+    draw_rect(g_fb, g_win_w, g_win_h, x, y + 2, 14, 10, 0xB7950B);
 }
 
 static void draw_recycle_icon(int x, int y) {
-    fill_rect(g_fb, WIN_W, WIN_H, x + 1, y + 1, 12, 3, 0x8FA4BA);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 2, y + 4, 10, 9, 0x4B6584);
-    draw_rect(g_fb, WIN_W, WIN_H, x + 2, y + 4, 10, 9, 0x2C3A47);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 5, y + 7, 4, 3, 0x20BF6B);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 1, y + 1, 12, 3, 0x8FA4BA);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 2, y + 4, 10, 9, 0x4B6584);
+    draw_rect(g_fb, g_win_w, g_win_h, x + 2, y + 4, 10, 9, 0x2C3A47);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 5, y + 7, 4, 3, 0x20BF6B);
 }
 
 static void draw_app_icon(int x, int y) {
-    fill_rect(g_fb, WIN_W, WIN_H, x, y, 13, 13, 0xBDC3C7);
-    draw_rect(g_fb, WIN_W, WIN_H, x, y, 13, 13, 0x2C3E50);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 1, y + 1, 11, 3, 0x2980B9);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 1, y + 4, 11, 8, 0xFFFFFF);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 3, y + 6, 7, 4, 0xE74C3C);
+    fill_rect(g_fb, g_win_w, g_win_h, x, y, 13, 13, 0xBDC3C7);
+    draw_rect(g_fb, g_win_w, g_win_h, x, y, 13, 13, 0x2C3E50);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 1, y + 1, 11, 3, 0x2980B9);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 1, y + 4, 11, 8, 0xFFFFFF);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 3, y + 6, 7, 4, 0xE74C3C);
 }
 
 static void draw_text_icon(int x, int y) {
-    fill_rect(g_fb, WIN_W, WIN_H, x, y, 11, 13, 0xFFFFFF);
-    draw_rect(g_fb, WIN_W, WIN_H, x, y, 11, 13, 0x7F8C8D);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 7, y, 4, 4, 0xBDC3C7);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 2, y + 4, 5, 1, 0x34495E);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 2, y + 6, 7, 1, 0x34495E);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 2, y + 8, 7, 1, 0x34495E);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 2, y + 10, 4, 1, 0x34495E);
+    fill_rect(g_fb, g_win_w, g_win_h, x, y, 11, 13, 0xFFFFFF);
+    draw_rect(g_fb, g_win_w, g_win_h, x, y, 11, 13, 0x7F8C8D);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 7, y, 4, 4, 0xBDC3C7);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 2, y + 4, 5, 1, 0x34495E);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 2, y + 6, 7, 1, 0x34495E);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 2, y + 8, 7, 1, 0x34495E);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 2, y + 10, 4, 1, 0x34495E);
 }
 
 static void draw_drive_icon(int x, int y) {
-    fill_rect(g_fb, WIN_W, WIN_H, x, y + 1, 14, 9, 0xBDC3C7);
-    draw_rect(g_fb, WIN_W, WIN_H, x, y + 1, 14, 9, 0x7F8C8D);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 2, y + 7, 8, 2, 0x34495E);
-    fill_rect(g_fb, WIN_W, WIN_H, x + 11, y + 7, 2, 2, 0x2ECC71); // Green LED
+    fill_rect(g_fb, g_win_w, g_win_h, x, y + 1, 14, 9, 0xBDC3C7);
+    draw_rect(g_fb, g_win_w, g_win_h, x, y + 1, 14, 9, 0x7F8C8D);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 2, y + 7, 8, 2, 0x34495E);
+    fill_rect(g_fb, g_win_w, g_win_h, x + 11, y + 7, 2, 2, 0x2ECC71); // Green LED
 }
 
 static void load_directory(const char* path) {
@@ -448,29 +453,29 @@ static void paste_to_current(void) {
 
 static void draw_explorer(void) {
     // 1. Toolbar background
-    fill_rect(g_fb, WIN_W, WIN_H, 0, 0, WIN_W, TOOLBAR_H, COLOR_WINDOW_BG);
+    fill_rect(g_fb, g_win_w, g_win_h, 0, 0, g_win_w, TOOLBAR_H, COLOR_WINDOW_BG);
 
     // Toolbar buttons: [Up], [Refresh], [Notepad], [Terminal]
-    draw_3d_rect(g_fb, WIN_W, WIN_H, 6, 4, 52, 22, 0);
-    fill_rect(g_fb, WIN_W, WIN_H, 7, 5, 50, 20, 0xE0DFD8);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 18, 9, "Up", COLOR_TEXT);
+    draw_3d_rect(g_fb, g_win_w, g_win_h, 6, 4, 52, 22, 0);
+    fill_rect(g_fb, g_win_w, g_win_h, 7, 5, 50, 20, 0xE0DFD8);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 18, 9, "Up", COLOR_TEXT);
 
-    draw_3d_rect(g_fb, WIN_W, WIN_H, 64, 4, 68, 22, 0);
-    fill_rect(g_fb, WIN_W, WIN_H, 65, 5, 66, 20, 0xE0DFD8);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 72, 9, "Refresh", COLOR_TEXT);
+    draw_3d_rect(g_fb, g_win_w, g_win_h, 64, 4, 68, 22, 0);
+    fill_rect(g_fb, g_win_w, g_win_h, 65, 5, 66, 20, 0xE0DFD8);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 72, 9, "Refresh", COLOR_TEXT);
 
-    draw_3d_rect(g_fb, WIN_W, WIN_H, 138, 4, 68, 22, 0);
-    fill_rect(g_fb, WIN_W, WIN_H, 139, 5, 66, 20, 0xE0DFD8);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 146, 9, "Notepad", COLOR_TEXT);
+    draw_3d_rect(g_fb, g_win_w, g_win_h, 138, 4, 68, 22, 0);
+    fill_rect(g_fb, g_win_w, g_win_h, 139, 5, 66, 20, 0xE0DFD8);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 146, 9, "Notepad", COLOR_TEXT);
 
-    draw_3d_rect(g_fb, WIN_W, WIN_H, 212, 4, 72, 22, 0);
-    fill_rect(g_fb, WIN_W, WIN_H, 213, 5, 70, 20, 0xE0DFD8);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 220, 9, "Terminal", COLOR_TEXT);
+    draw_3d_rect(g_fb, g_win_w, g_win_h, 212, 4, 72, 22, 0);
+    fill_rect(g_fb, g_win_w, g_win_h, 213, 5, 70, 20, 0xE0DFD8);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 220, 9, "Terminal", COLOR_TEXT);
 
     // Address Bar row (y=28..48)
-    woos_draw_text(g_fb, WIN_W, WIN_H, 8, 33, "Address", COLOR_TEXT);
-    draw_3d_rect(g_fb, WIN_W, WIN_H, 64, 28, WIN_W - 70, 20, 1);
-    fill_rect(g_fb, WIN_W, WIN_H, 65, 29, WIN_W - 72, 18, 0xFFFFFF);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 8, 33, "Address", COLOR_TEXT);
+    draw_3d_rect(g_fb, g_win_w, g_win_h, 64, 28, g_win_w - 70, 20, 1);
+    fill_rect(g_fb, g_win_w, g_win_h, 65, 29, g_win_w - 72, 18, 0xFFFFFF);
 
     draw_drive_icon(70, 32);
     char addr_str[80];
@@ -482,67 +487,67 @@ static void draw_explorer(void) {
         }
         addr_str[p] = '\0';
     }
-    woos_draw_text(g_fb, WIN_W, WIN_H, 90, 33, addr_str, COLOR_TEXT);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 90, 33, addr_str, COLOR_TEXT);
 
-    fill_rect(g_fb, WIN_W, WIN_H, 0, TOOLBAR_H - 1, WIN_W, 1, 0xACA899);
+    fill_rect(g_fb, g_win_w, g_win_h, 0, TOOLBAR_H - 1, g_win_w, 1, 0xACA899);
 
     // 2. Left Sidebar (Navigation pane)
-    int content_h = WIN_H - TOOLBAR_H - STATUSBAR_H;
-    fill_rect(g_fb, WIN_W, WIN_H, 0, TOOLBAR_H, SIDEBAR_W, content_h, COLOR_SIDEBAR_BG);
-    fill_rect(g_fb, WIN_W, WIN_H, SIDEBAR_W - 1, TOOLBAR_H, 1, content_h, 0xACA899);
+    int content_h = g_win_h - TOOLBAR_H - STATUSBAR_H;
+    fill_rect(g_fb, g_win_w, g_win_h, 0, TOOLBAR_H, SIDEBAR_W, content_h, COLOR_SIDEBAR_BG);
+    fill_rect(g_fb, g_win_w, g_win_h, SIDEBAR_W - 1, TOOLBAR_H, 1, content_h, 0xACA899);
 
-    fill_rect(g_fb, WIN_W, WIN_H, 0, TOOLBAR_H, SIDEBAR_W - 1, 20, 0x2A62C9);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 8, TOOLBAR_H + 4, "Places", 0xFFFFFF);
+    fill_rect(g_fb, g_win_w, g_win_h, 0, TOOLBAR_H, SIDEBAR_W - 1, 20, 0x2A62C9);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 8, TOOLBAR_H + 4, "Places", 0xFFFFFF);
 
     // Sidebar: Desktop
     int sb_y = TOOLBAR_H + 26;
     draw_app_icon(8, sb_y);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 26, sb_y, "Desktop", (strcmp(g_current_path, "/DESKTOP") == 0) ? 0x003399 : 0x222222);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 26, sb_y, "Desktop", (strcmp(g_current_path, "/DESKTOP") == 0) ? 0x003399 : 0x222222);
 
     // Sidebar: Recycle Bin
     sb_y += 24;
     draw_recycle_icon(8, sb_y);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 26, sb_y, "Recycle Bin", is_in_recycle() ? 0x003399 : 0x222222);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 26, sb_y, "Recycle Bin", is_in_recycle() ? 0x003399 : 0x222222);
 
     // Sidebar: System Drive (C:)
     sb_y += 24;
     draw_drive_icon(8, sb_y);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 26, sb_y, "Drive (C:)", (strcmp(g_current_path, "/") == 0) ? 0x003399 : 0x222222);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 26, sb_y, "Drive (C:)", (strcmp(g_current_path, "/") == 0) ? 0x003399 : 0x222222);
 
     sb_y += 32;
-    fill_rect(g_fb, WIN_W, WIN_H, 6, sb_y, SIDEBAR_W - 14, 1, 0xCCCCCC);
+    fill_rect(g_fb, g_win_w, g_win_h, 6, sb_y, SIDEBAR_W - 14, 1, 0xCCCCCC);
     sb_y += 8;
-    woos_draw_text(g_fb, WIN_W, WIN_H, 8, sb_y, "Disk Info:", 0x003366);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 8, sb_y, "Disk Info:", 0x003366);
     sb_y += 18;
-    woos_draw_text(g_fb, WIN_W, WIN_H, 8, sb_y, "FS: FAT32", 0x444444);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 8, sb_y, "FS: FAT32", 0x444444);
     sb_y += 16;
-    woos_draw_text(g_fb, WIN_W, WIN_H, 8, sb_y, "Size: 64 MB", 0x444444);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 8, sb_y, "Size: 64 MB", 0x444444);
     sb_y += 16;
-    woos_draw_text(g_fb, WIN_W, WIN_H, 8, sb_y, "Free: ~62 MB", 0x27AE60);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 8, sb_y, "Free: ~62 MB", 0x27AE60);
 
     // 3. Right Pane: Header Bar
     int list_x = SIDEBAR_W;
-    int list_w = WIN_W - SIDEBAR_W;
+    int list_w = g_win_w - SIDEBAR_W;
     int list_y = TOOLBAR_H;
 
     // Header buttons (Name, Size, Type)
-    draw_3d_rect(g_fb, WIN_W, WIN_H, list_x, list_y, 220, HEADER_H, 0);
-    fill_rect(g_fb, WIN_W, WIN_H, list_x + 1, list_y + 1, 218, HEADER_H - 2, COLOR_HEADER_BG);
-    woos_draw_text(g_fb, WIN_W, WIN_H, list_x + 6, list_y + 4, "Name", COLOR_TEXT);
+    draw_3d_rect(g_fb, g_win_w, g_win_h, list_x, list_y, 220, HEADER_H, 0);
+    fill_rect(g_fb, g_win_w, g_win_h, list_x + 1, list_y + 1, 218, HEADER_H - 2, COLOR_HEADER_BG);
+    woos_draw_text(g_fb, g_win_w, g_win_h, list_x + 6, list_y + 4, "Name", COLOR_TEXT);
 
-    draw_3d_rect(g_fb, WIN_W, WIN_H, list_x + 220, list_y, 110, HEADER_H, 0);
-    fill_rect(g_fb, WIN_W, WIN_H, list_x + 221, list_y + 1, 108, HEADER_H - 2, COLOR_HEADER_BG);
-    woos_draw_text(g_fb, WIN_W, WIN_H, list_x + 226, list_y + 4, "Size", COLOR_TEXT);
+    draw_3d_rect(g_fb, g_win_w, g_win_h, list_x + 220, list_y, 110, HEADER_H, 0);
+    fill_rect(g_fb, g_win_w, g_win_h, list_x + 221, list_y + 1, 108, HEADER_H - 2, COLOR_HEADER_BG);
+    woos_draw_text(g_fb, g_win_w, g_win_h, list_x + 226, list_y + 4, "Size", COLOR_TEXT);
 
     int type_w = list_w - 330;
-    draw_3d_rect(g_fb, WIN_W, WIN_H, list_x + 330, list_y, type_w, HEADER_H, 0);
-    fill_rect(g_fb, WIN_W, WIN_H, list_x + 331, list_y + 1, type_w - 2, HEADER_H - 2, COLOR_HEADER_BG);
-    woos_draw_text(g_fb, WIN_W, WIN_H, list_x + 336, list_y + 4, "Type", COLOR_TEXT);
+    draw_3d_rect(g_fb, g_win_w, g_win_h, list_x + 330, list_y, type_w, HEADER_H, 0);
+    fill_rect(g_fb, g_win_w, g_win_h, list_x + 331, list_y + 1, type_w - 2, HEADER_H - 2, COLOR_HEADER_BG);
+    woos_draw_text(g_fb, g_win_w, g_win_h, list_x + 336, list_y + 4, "Type", COLOR_TEXT);
 
     // 4. File List Body
     int file_list_y = list_y + HEADER_H;
     int file_list_h = content_h - HEADER_H;
-    fill_rect(g_fb, WIN_W, WIN_H, list_x, file_list_y, list_w, file_list_h, COLOR_LIST_BG);
+    fill_rect(g_fb, g_win_w, g_win_h, list_x, file_list_y, list_w, file_list_h, COLOR_LIST_BG);
 
     int visible_rows = file_list_h / ROW_H;
     for (int r = 0; r < visible_rows; r++) {
@@ -553,7 +558,7 @@ static void draw_explorer(void) {
         int is_sel = (idx == g_selected_idx);
 
         if (is_sel) {
-            fill_rect(g_fb, WIN_W, WIN_H, list_x, row_y, list_w, ROW_H, COLOR_SELECT_BG);
+            fill_rect(g_fb, g_win_w, g_win_h, list_x, row_y, list_w, ROW_H, COLOR_SELECT_BG);
         }
 
         uint32_t text_color = is_sel ? COLOR_SELECT_TEXT : COLOR_TEXT;
@@ -564,30 +569,30 @@ static void draw_explorer(void) {
         if (g_items[idx].is_dir) {
             draw_folder_icon(icon_x, icon_y);
         } else {
-            draw_icon_by_target(g_fb, WIN_W, WIN_H, icon_x, icon_y - 1, 16, g_items[idx].name);
+            draw_icon_by_target(g_fb, g_win_w, g_win_h, icon_x, icon_y - 1, 16, g_items[idx].name);
         }
 
         // Name
-        woos_draw_text(g_fb, WIN_W, WIN_H, list_x + 26, row_y + 4, g_items[idx].name, text_color);
+        woos_draw_text(g_fb, g_win_w, g_win_h, list_x + 26, row_y + 4, g_items[idx].name, text_color);
 
         // Size
         if (!g_items[idx].is_dir) {
             char size_buf[16];
             format_size(g_items[idx].size, size_buf);
-            woos_draw_text(g_fb, WIN_W, WIN_H, list_x + 226, row_y + 4, size_buf, text_color);
+            woos_draw_text(g_fb, g_win_w, g_win_h, list_x + 226, row_y + 4, size_buf, text_color);
         }
 
         // Type
         const char* type_str = get_file_type(g_items[idx].name, g_items[idx].is_dir);
-        woos_draw_text(g_fb, WIN_W, WIN_H, list_x + 336, row_y + 4, type_str, text_color);
+        woos_draw_text(g_fb, g_win_w, g_win_h, list_x + 336, row_y + 4, type_str, text_color);
     }
 
     // 5. Status Bar
-    int status_y = WIN_H - STATUSBAR_H;
-    fill_rect(g_fb, WIN_W, WIN_H, 0, status_y, WIN_W, STATUSBAR_H, COLOR_WINDOW_BG);
-    fill_rect(g_fb, WIN_W, WIN_H, 0, status_y, WIN_W, 1, 0xACA899);
+    int status_y = g_win_h - STATUSBAR_H;
+    fill_rect(g_fb, g_win_w, g_win_h, 0, status_y, g_win_w, STATUSBAR_H, COLOR_WINDOW_BG);
+    fill_rect(g_fb, g_win_w, g_win_h, 0, status_y, g_win_w, 1, 0xACA899);
 
-    draw_3d_rect(g_fb, WIN_W, WIN_H, 2, status_y + 2, 240, 18, 1);
+    draw_3d_rect(g_fb, g_win_w, g_win_h, 2, status_y + 2, 240, 18, 1);
     char status_buf[64];
     char count_str[16];
     int_to_str(g_item_count, count_str);
@@ -600,15 +605,15 @@ static void draw_explorer(void) {
         for (int i = 0; sel_word[i]; i++) status_buf[sp++] = sel_word[i];
     }
     status_buf[sp] = '\0';
-    woos_draw_text(g_fb, WIN_W, WIN_H, 8, status_y + 5, status_buf, 0x222222);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 8, status_y + 5, status_buf, 0x222222);
 
-    draw_3d_rect(g_fb, WIN_W, WIN_H, 246, status_y + 2, WIN_W - 250, 18, 1);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 252, status_y + 5, "My Computer | Free: 62.0 MB (FAT32)", 0x222222);
+    draw_3d_rect(g_fb, g_win_w, g_win_h, 246, status_y + 2, g_win_w - 250, 18, 1);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 252, status_y + 5, "My Computer | Free: 62.0 MB (FAT32)", 0x222222);
 
     // 6. Context Menu Popup Overlay
     if (g_ctx_open) {
-        draw_3d_rect(g_fb, WIN_W, WIN_H, g_ctx_x, g_ctx_y, g_ctx_w, g_ctx_h, 0);
-        fill_rect(g_fb, WIN_W, WIN_H, g_ctx_x + 1, g_ctx_y + 1, g_ctx_w - 2, g_ctx_h - 2, COLOR_MENU_BG);
+        draw_3d_rect(g_fb, g_win_w, g_win_h, g_ctx_x, g_ctx_y, g_ctx_w, g_ctx_h, 0);
+        fill_rect(g_fb, g_win_w, g_win_h, g_ctx_x + 1, g_ctx_y + 1, g_ctx_w - 2, g_ctx_h - 2, COLOR_MENU_BG);
 
         if (g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) {
             int is_sys = is_system_item(g_items[g_ctx_target_idx].name);
@@ -619,9 +624,9 @@ static void draw_explorer(void) {
                     int iy = g_ctx_y + 4 + i * 22;
                     int disabled = (i == 1 && is_sys);
                     int is_h = (i == g_ctx_hover && !disabled);
-                    if (is_h) fill_rect(g_fb, WIN_W, WIN_H, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
+                    if (is_h) fill_rect(g_fb, g_win_w, g_win_h, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
                     uint32_t col = disabled ? COLOR_TEXT_MUTED : (is_h ? 0xFFFFFF : 0x000000);
-                    woos_draw_text(g_fb, WIN_W, WIN_H, g_ctx_x + 10, iy + 3, items[i], col);
+                    woos_draw_text(g_fb, g_win_w, g_win_h, g_ctx_x + 10, iy + 3, items[i], col);
                 }
             } else {
                 // Standard Item Menu
@@ -639,23 +644,23 @@ static void draw_explorer(void) {
                     int disabled = is_sys && (i == 2 || i == 4 || i == 5);
                     int is_sub_active = (i == 1 && g_ctx_submenu == 1);
                     int is_h = ((i == g_ctx_hover) || is_sub_active) && !disabled;
-                    if (is_h) fill_rect(g_fb, WIN_W, WIN_H, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
+                    if (is_h) fill_rect(g_fb, g_win_w, g_win_h, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
                     uint32_t col = disabled ? COLOR_TEXT_MUTED : (is_h ? 0xFFFFFF : 0x000000);
-                    woos_draw_text(g_fb, WIN_W, WIN_H, g_ctx_x + 10, iy + 3, items[i], col);
+                    woos_draw_text(g_fb, g_win_w, g_win_h, g_ctx_x + 10, iy + 3, items[i], col);
                 }
                 // Submenu: Open with...
                 if (g_ctx_submenu == 1) {
                     int sw = 135;
                     int sh = 5 * 22 + 8;
-                    int sx = (g_ctx_x + g_ctx_w - 4 + sw > WIN_W) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
+                    int sx = (g_ctx_x + g_ctx_w - 4 + sw > g_win_w) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
                     int sy = g_ctx_y + 4 + 1 * 22;
-                    if (sy + sh > WIN_H - STATUSBAR_H) sy = WIN_H - STATUSBAR_H - sh - 2;
-                    draw_3d_rect(g_fb, WIN_W, WIN_H, sx, sy, sw, sh, 0);
-                    fill_rect(g_fb, WIN_W, WIN_H, sx + 1, sy + 1, sw - 2, sh - 2, COLOR_MENU_BG);
+                    if (sy + sh > g_win_h - STATUSBAR_H) sy = g_win_h - STATUSBAR_H - sh - 2;
+                    draw_3d_rect(g_fb, g_win_w, g_win_h, sx, sy, sw, sh, 0);
+                    fill_rect(g_fb, g_win_w, g_win_h, sx + 1, sy + 1, sw - 2, sh - 2, COLOR_MENU_BG);
                     const char* sitems[] = { "Notepad", "Image Viewer", "File Explorer", "Terminal", "Calculator" };
                     for (int s = 0; s < 5; s++) {
                         int ssy = sy + 4 + s * 22;
-                        woos_draw_text(g_fb, WIN_W, WIN_H, sx + 10, ssy + 3, sitems[s], 0x000000);
+                        woos_draw_text(g_fb, g_win_w, g_win_h, sx + 10, ssy + 3, sitems[s], 0x000000);
                     }
                 }
             }
@@ -666,8 +671,8 @@ static void draw_explorer(void) {
                 for (int i = 0; i < 3; i++) {
                     int iy = g_ctx_y + 4 + i * 22;
                     int is_h = (i == g_ctx_hover);
-                    if (is_h) fill_rect(g_fb, WIN_W, WIN_H, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
-                    woos_draw_text(g_fb, WIN_W, WIN_H, g_ctx_x + 10, iy + 3, items[i], is_h ? 0xFFFFFF : 0x000000);
+                    if (is_h) fill_rect(g_fb, g_win_w, g_win_h, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
+                    woos_draw_text(g_fb, g_win_w, g_win_h, g_ctx_x + 10, iy + 3, items[i], is_h ? 0xFFFFFF : 0x000000);
                 }
             } else {
                 const char* items[] = { "New... >", "Paste", "Refresh", "Properties" };
@@ -675,24 +680,24 @@ static void draw_explorer(void) {
                     int iy = g_ctx_y + 4 + i * 22;
                     int is_sub_active = (i == 0 && g_ctx_submenu == 2);
                     int is_h = (i == g_ctx_hover) || is_sub_active;
-                    if (is_h) fill_rect(g_fb, WIN_W, WIN_H, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
+                    if (is_h) fill_rect(g_fb, g_win_w, g_win_h, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
                     uint32_t col = is_h ? 0xFFFFFF : 0x000000;
                     if (i == 1 && !g_clipboard_path[0]) col = COLOR_TEXT_MUTED;
-                    woos_draw_text(g_fb, WIN_W, WIN_H, g_ctx_x + 10, iy + 3, items[i], col);
+                    woos_draw_text(g_fb, g_win_w, g_win_h, g_ctx_x + 10, iy + 3, items[i], col);
                 }
                 // Submenu: New...
                 if (g_ctx_submenu == 2) {
                     int sw = 135;
                     int sh = 3 * 22 + 8;
-                    int sx = (g_ctx_x + g_ctx_w - 4 + sw > WIN_W) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
+                    int sx = (g_ctx_x + g_ctx_w - 4 + sw > g_win_w) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
                     int sy = g_ctx_y + 4;
-                    if (sy + sh > WIN_H - STATUSBAR_H) sy = WIN_H - STATUSBAR_H - sh - 2;
-                    draw_3d_rect(g_fb, WIN_W, WIN_H, sx, sy, sw, sh, 0);
-                    fill_rect(g_fb, WIN_W, WIN_H, sx + 1, sy + 1, sw - 2, sh - 2, COLOR_MENU_BG);
+                    if (sy + sh > g_win_h - STATUSBAR_H) sy = g_win_h - STATUSBAR_H - sh - 2;
+                    draw_3d_rect(g_fb, g_win_w, g_win_h, sx, sy, sw, sh, 0);
+                    fill_rect(g_fb, g_win_w, g_win_h, sx + 1, sy + 1, sw - 2, sh - 2, COLOR_MENU_BG);
                     const char* sitems[] = { "Text Document", "New File", "New Folder" };
                     for (int s = 0; s < 3; s++) {
                         int ssy = sy + 4 + s * 22;
-                        woos_draw_text(g_fb, WIN_W, WIN_H, sx + 10, ssy + 3, sitems[s], 0x000000);
+                        woos_draw_text(g_fb, g_win_w, g_win_h, sx + 10, ssy + 3, sitems[s], 0x000000);
                     }
                 }
             }
@@ -701,46 +706,46 @@ static void draw_explorer(void) {
 
     // 7. Dialog Popups (Properties / Rename / New)
     if (g_file_dialog.active) {
-        woos_dialog_draw(g_fb, WIN_W, WIN_H, &g_file_dialog);
+        woos_dialog_draw(g_fb, g_win_w, g_win_h, &g_file_dialog);
     } else if (g_dialog_mode == 1) {
         int dw = 280;
         int dh = 200;
-        int dx = (WIN_W - dw) / 2;
-        int dy = (WIN_H - dh) / 2;
+        int dx = (g_win_w - dw) / 2;
+        int dy = (g_win_h - dh) / 2;
 
-        draw_3d_rect(g_fb, WIN_W, WIN_H, dx, dy, dw, dh, 0);
-        fill_rect(g_fb, WIN_W, WIN_H, dx + 1, dy + 1, dw - 2, dh - 2, COLOR_WINDOW_BG);
+        draw_3d_rect(g_fb, g_win_w, g_win_h, dx, dy, dw, dh, 0);
+        fill_rect(g_fb, g_win_w, g_win_h, dx + 1, dy + 1, dw - 2, dh - 2, COLOR_WINDOW_BG);
 
         // Header
-        fill_rect(g_fb, WIN_W, WIN_H, dx + 2, dy + 2, dw - 4, 20, 0x2A62C9);
-        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 6, dy + 4, "Properties", 0xFFFFFF);
+        fill_rect(g_fb, g_win_w, g_win_h, dx + 2, dy + 2, dw - 4, 20, 0x2A62C9);
+        woos_draw_text(g_fb, g_win_w, g_win_h, dx + 6, dy + 4, "Properties", 0xFFFFFF);
 
         if (g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) {
             file_item_t* it = &g_items[g_ctx_target_idx];
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 32, it->name, 0x000000);
-            fill_rect(g_fb, WIN_W, WIN_H, dx + 16, dy + 52, dw - 32, 1, 0xCCCCCC);
+            woos_draw_text(g_fb, g_win_w, g_win_h, dx + 16, dy + 32, it->name, 0x000000);
+            fill_rect(g_fb, g_win_w, g_win_h, dx + 16, dy + 52, dw - 32, 1, 0xCCCCCC);
 
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 62, get_file_type(it->name, it->is_dir), 0x333333);
+            woos_draw_text(g_fb, g_win_w, g_win_h, dx + 16, dy + 62, get_file_type(it->name, it->is_dir), 0x333333);
             char pbuf[64] = "In: ";
             strcat(pbuf, g_current_path);
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 84, pbuf, 0x333333);
+            woos_draw_text(g_fb, g_win_w, g_win_h, dx + 16, dy + 84, pbuf, 0x333333);
 
             char sbuf[32] = "Size: ";
             char nbuf[16];
             int_to_str((int)it->size, nbuf);
             strcat(sbuf, nbuf);
             strcat(sbuf, " Bytes");
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 106, sbuf, 0x333333);
+            woos_draw_text(g_fb, g_win_w, g_win_h, dx + 16, dy + 106, sbuf, 0x333333);
         } else {
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 36, "Folder Properties", 0x000000);
+            woos_draw_text(g_fb, g_win_w, g_win_h, dx + 16, dy + 36, "Folder Properties", 0x000000);
             char pbuf[64] = "Path: ";
             strcat(pbuf, g_current_path);
-            woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 64, pbuf, 0x333333);
+            woos_draw_text(g_fb, g_win_w, g_win_h, dx + 16, dy + 64, pbuf, 0x333333);
         }
 
-        draw_3d_rect(g_fb, WIN_W, WIN_H, dx + dw / 2 - 30, dy + dh - 30, 60, 20, 0);
-        fill_rect(g_fb, WIN_W, WIN_H, dx + dw / 2 - 29, dy + dh - 29, 58, 18, 0xE4E2D5);
-        woos_draw_text(g_fb, WIN_W, WIN_H, dx + dw / 2 - 8, dy + dh - 26, "OK", 0x000000);
+        draw_3d_rect(g_fb, g_win_w, g_win_h, dx + dw / 2 - 30, dy + dh - 30, 60, 20, 0);
+        fill_rect(g_fb, g_win_w, g_win_h, dx + dw / 2 - 29, dy + dh - 29, 58, 18, 0xE4E2D5);
+        woos_draw_text(g_fb, g_win_w, g_win_h, dx + dw / 2 - 8, dy + dh - 26, "OK", 0x000000);
     }
 }
 
@@ -776,7 +781,7 @@ static void apply_explorer_dialog(void) {
 static void handle_click(int x, int y) {
     // Handle Dialog
     if (g_file_dialog.active) {
-        int res = woos_dialog_handle_click(&g_file_dialog, WIN_W, WIN_H, x, y);
+        int res = woos_dialog_handle_click(&g_file_dialog, g_win_w, g_win_h, x, y);
         if (res == WOOS_DIALOG_RES_OK) {
             apply_explorer_dialog();
         }
@@ -785,8 +790,8 @@ static void handle_click(int x, int y) {
     if (g_dialog_mode == 1) {
         int dw = 280;
         int dh = 200;
-        int dx = (WIN_W - dw) / 2;
-        int dy = (WIN_H - dh) / 2;
+        int dx = (g_win_w - dw) / 2;
+        int dy = (g_win_h - dh) / 2;
         if (x >= dx + dw / 2 - 30 && x <= dx + dw / 2 + 30 && y >= dy + dh - 30 && y <= dy + dh - 10) {
             g_dialog_mode = 0;
         }
@@ -800,9 +805,9 @@ static void handle_click(int x, int y) {
         if (g_ctx_submenu == 1) { // Submenu: Open with...
             int sw = 135;
             int sh = 5 * 22 + 8;
-            int sx = (g_ctx_x + g_ctx_w - 4 + sw > WIN_W) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
+            int sx = (g_ctx_x + g_ctx_w - 4 + sw > g_win_w) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
             int sy = g_ctx_y + 4 + 1 * 22;
-            if (sy + sh > WIN_H - STATUSBAR_H) sy = WIN_H - STATUSBAR_H - sh - 2;
+            if (sy + sh > g_win_h - STATUSBAR_H) sy = g_win_h - STATUSBAR_H - sh - 2;
 
             if (x >= sx && x < sx + sw && y >= sy && y < sy + sh) {
                 int sidx = (y - (sy + 4)) / 22;
@@ -833,9 +838,9 @@ static void handle_click(int x, int y) {
         } else if (g_ctx_submenu == 2) { // Submenu: New...
             int sw = 135;
             int sh = 3 * 22 + 8;
-            int sx = (g_ctx_x + g_ctx_w - 4 + sw > WIN_W) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
+            int sx = (g_ctx_x + g_ctx_w - 4 + sw > g_win_w) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
             int sy = g_ctx_y + 4;
-            if (sy + sh > WIN_H - STATUSBAR_H) sy = WIN_H - STATUSBAR_H - sh - 2;
+            if (sy + sh > g_win_h - STATUSBAR_H) sy = g_win_h - STATUSBAR_H - sh - 2;
 
             if (x >= sx && x < sx + sw && y >= sy && y < sy + sh) {
                 int sidx = (y - (sy + 4)) / 22;
@@ -973,7 +978,7 @@ static void handle_click(int x, int y) {
 
     // Check File List items
     int file_list_y = TOOLBAR_H + HEADER_H;
-    int file_list_h = WIN_H - TOOLBAR_H - STATUSBAR_H - HEADER_H;
+    int file_list_h = g_win_h - TOOLBAR_H - STATUSBAR_H - HEADER_H;
     if (x >= SIDEBAR_W && y >= file_list_y && y < file_list_y + file_list_h) {
         int clicked_row = (y - file_list_y) / ROW_H;
         int idx = g_scroll_offset + clicked_row;
@@ -992,7 +997,7 @@ static void handle_right_click(int x, int y) {
 
     // Check if right clicked on file item
     int file_list_y = TOOLBAR_H + HEADER_H;
-    int file_list_h = WIN_H - TOOLBAR_H - STATUSBAR_H - HEADER_H;
+    int file_list_h = g_win_h - TOOLBAR_H - STATUSBAR_H - HEADER_H;
     int clicked_item = -1;
 
     if (x >= SIDEBAR_W && y >= file_list_y && y < file_list_y + file_list_h) {
@@ -1014,8 +1019,8 @@ static void handle_right_click(int x, int y) {
         g_ctx_h = is_in_recycle() ? (3 * 22 + 8) : (4 * 22 + 8);
     }
 
-    if (g_ctx_x + g_ctx_w > WIN_W) g_ctx_x = WIN_W - g_ctx_w - 4;
-    if (g_ctx_y + g_ctx_h > WIN_H - STATUSBAR_H) g_ctx_y = WIN_H - STATUSBAR_H - g_ctx_h - 2;
+    if (g_ctx_x + g_ctx_w > g_win_w) g_ctx_x = g_win_w - g_ctx_w - 4;
+    if (g_ctx_y + g_ctx_h > g_win_h - STATUSBAR_H) g_ctx_y = g_win_h - STATUSBAR_H - g_ctx_h - 2;
 
     g_ctx_open = 1;
     g_ctx_hover = -1;
@@ -1088,7 +1093,7 @@ static void handle_key(int ascii, int scancode) {
     if (scancode == 0x50) {
         if (g_selected_idx < g_item_count - 1) {
             g_selected_idx++;
-            int visible_rows = (WIN_H - TOOLBAR_H - STATUSBAR_H - HEADER_H) / ROW_H;
+            int visible_rows = (g_win_h - TOOLBAR_H - STATUSBAR_H - HEADER_H) / ROW_H;
             if (g_selected_idx >= g_scroll_offset + visible_rows) {
                 g_scroll_offset = g_selected_idx - visible_rows + 1;
             }
@@ -1099,12 +1104,12 @@ static void handle_key(int ascii, int scancode) {
 
 __attribute__((export_name("_start")))
 void _start(void) {
-    int win_id = woos_create_window(WIN_W, WIN_H, "File Explorer", 0);
+    int win_id = woos_create_window(g_win_w, g_win_h, "File Explorer", 0);
     if (win_id < 0) return;
 
     load_directory("/");
     draw_explorer();
-    woos_blit_window(win_id, g_fb, WIN_W, WIN_H);
+    woos_blit_window(win_id, g_fb, g_win_w, g_win_h);
 
     woos_msg_t msg;
 
@@ -1115,6 +1120,16 @@ void _start(void) {
             if (msg.type == MSG_CLOSE) {
                 woos_destroy_window(win_id);
                 return;
+            } else if (msg.type == MSG_RESIZE) {
+                int new_w = (int)msg.arg1;
+                int new_h = (int)msg.arg2;
+                if (new_w > 0 && new_h > 0) {
+                    if (new_w > MAX_WIN_W) new_w = MAX_WIN_W;
+                    if (new_h > MAX_WIN_H) new_h = MAX_WIN_H;
+                    g_win_w = new_w;
+                    g_win_h = new_h;
+                    needs_redraw = 1;
+                }
             } else if (msg.type == MSG_CLICK || msg.type == MSG_RIGHT_CLICK) {
                 int is_right = (msg.type == MSG_RIGHT_CLICK) || ((msg.arg3 & 2) != 0);
                 if (is_right) {
@@ -1131,7 +1146,7 @@ void _start(void) {
 
         if (needs_redraw) {
             draw_explorer();
-            woos_blit_window(win_id, g_fb, WIN_W, WIN_H);
+            woos_blit_window(win_id, g_fb, g_win_w, g_win_h);
         }
 
         woos_ipc_wait_message();

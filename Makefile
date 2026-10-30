@@ -110,10 +110,10 @@ apps/terminal.wasm: apps/terminal.wat
 	$(WAT2WASM) apps/terminal.wat -o apps/terminal.wasm
 
 apps/notepad.wasm: apps/notepad.c apps/woos.h apps/woos_dialog.h
-	clang --target=wasm32 -nostdlib -O2 -fno-builtin -Wl,--no-entry apps/notepad.c -o apps/notepad.wasm
+	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iapps -Wl,--no-entry -Wl,--initial-memory=10485760 -Wl,--export-memory -Wl,--export=_start apps/notepad.c -o apps/notepad.wasm
 
 apps/explorer.wasm: apps/explorer.c apps/woos.h apps/icons.h apps/woos_dialog.h
-	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iapps -Wl,--no-entry apps/explorer.c -o apps/explorer.wasm
+	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iapps -Wl,--no-entry -Wl,--initial-memory=10485760 -Wl,--export-memory -Wl,--export=_start apps/explorer.c -o apps/explorer.wasm
 
 apps/wasi_test.wasm: apps/wasi_test.c apps/woos.h
 	clang --target=wasm32 -nostdlib -O2 -fno-builtin -Wl,--no-entry apps/wasi_test.c -o apps/wasi_test.wasm
@@ -122,7 +122,7 @@ apps/fetch.wasm: apps/fetch.c apps/woos.h
 	clang --target=wasm32 -nostdlib -O2 -fno-builtin -Wl,--no-entry apps/fetch.c -o apps/fetch.wasm
 
 apps/imageview.wasm: apps/imageview.c apps/image.h apps/woos_mem.h apps/woos.h apps/woos_dialog.h
-	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iexternal/stb/include -Wl,--no-entry -Wl,--initial-memory=10485760 -Wl,--export-memory -Wl,--export=_start apps/imageview.c -o apps/imageview.wasm
+	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iexternal/stb/include -Wl,--no-entry -Wl,--initial-memory=16777216 -Wl,--export-memory -Wl,--export=_start apps/imageview.c -o apps/imageview.wasm
 
 woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm apps/terminal.wasm apps/notepad.wasm apps/explorer.wasm apps/wasi_test.wasm apps/fetch.wasm apps/imageview.wasm
 	python3 tools/build_fat.py

@@ -1,8 +1,13 @@
 #include "woos.h"
 #include "woos_dialog.h"
 
-#define WIN_W 580
-#define WIN_H 380
+#define DEFAULT_WIN_W 580
+#define DEFAULT_WIN_H 380
+#define MAX_WIN_W 1280
+#define MAX_WIN_H 1024
+
+static int g_win_w = DEFAULT_WIN_W;
+static int g_win_h = DEFAULT_WIN_H;
 
 #define TOOLBAR_H 24
 #define STATUSBAR_H 20
@@ -25,7 +30,7 @@
 #define MAX_ROWS 1000
 #define MAX_COLS 256
 
-static uint32_t g_fb[WIN_W * WIN_H];
+static uint32_t g_fb[MAX_WIN_W * MAX_WIN_H];
 static char g_rows[MAX_ROWS][MAX_COLS];
 static int g_row_len[MAX_ROWS];
 static int g_num_rows = 0;
@@ -44,11 +49,11 @@ static int g_cursor_blink = 1;
 static woos_file_dialog_t g_dialog;
 
 static int visible_rows(void) {
-    return (WIN_H - TOOLBAR_H - STATUSBAR_H) / LINE_H;
+    return (g_win_h - TOOLBAR_H - STATUSBAR_H) / LINE_H;
 }
 
 static int visible_cols(void) {
-    return (WIN_W - MARGIN_LEFT - 4) / CHAR_W;
+    return (g_win_w - MARGIN_LEFT - 4) / CHAR_W;
 }
 
 static void set_status(const char* msg) {
@@ -246,31 +251,31 @@ static void draw_editor(void) {
 
     int v_rows = visible_rows();
     int v_cols = visible_cols();
-    int text_h = WIN_H - TOOLBAR_H - STATUSBAR_H;
+    int text_h = g_win_h - TOOLBAR_H - STATUSBAR_H;
 
     // 1. Toolbar background and border
-    fill_rect(g_fb, WIN_W, WIN_H, 0, 0, WIN_W, TOOLBAR_H, COLOR_TOOLBAR);
-    fill_rect(g_fb, WIN_W, WIN_H, 0, TOOLBAR_H - 1, WIN_W, 1, COLOR_BORDER);
+    fill_rect(g_fb, g_win_w, g_win_h, 0, 0, g_win_w, TOOLBAR_H, COLOR_TOOLBAR);
+    fill_rect(g_fb, g_win_w, g_win_h, 0, TOOLBAR_H - 1, g_win_w, 1, COLOR_BORDER);
 
     // Button [Save] (6..52)
-    fill_rect(g_fb, WIN_W, WIN_H, 6, 3, 46, 18, COLOR_BTN_BG);
-    draw_rect(g_fb, WIN_W, WIN_H, 6, 3, 46, 18, COLOR_BTN_BORDER);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 14, 8, "Save", COLOR_BTN_TEXT);
+    fill_rect(g_fb, g_win_w, g_win_h, 6, 3, 46, 18, COLOR_BTN_BG);
+    draw_rect(g_fb, g_win_w, g_win_h, 6, 3, 46, 18, COLOR_BTN_BORDER);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 14, 8, "Save", COLOR_BTN_TEXT);
 
     // Button [Save As] (56..122)
-    fill_rect(g_fb, WIN_W, WIN_H, 56, 3, 66, 18, COLOR_BTN_BG);
-    draw_rect(g_fb, WIN_W, WIN_H, 56, 3, 66, 18, COLOR_BTN_BORDER);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 62, 8, "Save As", COLOR_BTN_TEXT);
+    fill_rect(g_fb, g_win_w, g_win_h, 56, 3, 66, 18, COLOR_BTN_BG);
+    draw_rect(g_fb, g_win_w, g_win_h, 56, 3, 66, 18, COLOR_BTN_BORDER);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 62, 8, "Save As", COLOR_BTN_TEXT);
 
     // Button [Open] (126..172)
-    fill_rect(g_fb, WIN_W, WIN_H, 126, 3, 46, 18, COLOR_BTN_BG);
-    draw_rect(g_fb, WIN_W, WIN_H, 126, 3, 46, 18, COLOR_BTN_BORDER);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 134, 8, "Open", COLOR_BTN_TEXT);
+    fill_rect(g_fb, g_win_w, g_win_h, 126, 3, 46, 18, COLOR_BTN_BG);
+    draw_rect(g_fb, g_win_w, g_win_h, 126, 3, 46, 18, COLOR_BTN_BORDER);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 134, 8, "Open", COLOR_BTN_TEXT);
 
     // Button [Reload] (176..232)
-    fill_rect(g_fb, WIN_W, WIN_H, 176, 3, 56, 18, COLOR_BTN_BG);
-    draw_rect(g_fb, WIN_W, WIN_H, 176, 3, 56, 18, COLOR_BTN_BORDER);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 182, 8, "Reload", COLOR_BTN_TEXT);
+    fill_rect(g_fb, g_win_w, g_win_h, 176, 3, 56, 18, COLOR_BTN_BG);
+    draw_rect(g_fb, g_win_w, g_win_h, 176, 3, 56, 18, COLOR_BTN_BORDER);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 182, 8, "Reload", COLOR_BTN_TEXT);
 
     // Filename in toolbar
     char title_buf[80];
@@ -282,14 +287,14 @@ static void draw_editor(void) {
         title_buf[pos++] = '*';
     }
     title_buf[pos] = '\0';
-    woos_draw_text(g_fb, WIN_W, WIN_H, 238, 8, title_buf, 0x003366);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 238, 8, title_buf, 0x003366);
 
     // 2. Line numbers margin
-    fill_rect(g_fb, WIN_W, WIN_H, 0, TOOLBAR_H, MARGIN_LEFT, text_h, COLOR_LINE_NUM_BG);
-    fill_rect(g_fb, WIN_W, WIN_H, MARGIN_LEFT - 1, TOOLBAR_H, 1, text_h, COLOR_BORDER);
+    fill_rect(g_fb, g_win_w, g_win_h, 0, TOOLBAR_H, MARGIN_LEFT, text_h, COLOR_LINE_NUM_BG);
+    fill_rect(g_fb, g_win_w, g_win_h, MARGIN_LEFT - 1, TOOLBAR_H, 1, text_h, COLOR_BORDER);
 
     // 3. Text area background
-    fill_rect(g_fb, WIN_W, WIN_H, MARGIN_LEFT, TOOLBAR_H, WIN_W - MARGIN_LEFT, text_h, COLOR_BG);
+    fill_rect(g_fb, g_win_w, g_win_h, MARGIN_LEFT, TOOLBAR_H, g_win_w - MARGIN_LEFT, text_h, COLOR_BG);
 
     // 4. Text rows
     for (int y = 0; y < v_rows; y++) {
@@ -303,7 +308,7 @@ static void draw_editor(void) {
             int num_len = (int)strlen(num_str);
             int num_x = MARGIN_LEFT - 8 - num_len * CHAR_W;
             if (num_x < 4) num_x = 4;
-            woos_draw_text(g_fb, WIN_W, WIN_H, num_x, screen_y, num_str, COLOR_LINE_NUM);
+            woos_draw_text(g_fb, g_win_w, g_win_h, num_x, screen_y, num_str, COLOR_LINE_NUM);
 
             // Draw line text
             int len = g_row_len[file_row];
@@ -314,7 +319,7 @@ static void draw_editor(void) {
                 char visible_text[MAX_COLS];
                 memcpy(visible_text, &g_rows[file_row][g_col_off], draw_len);
                 visible_text[draw_len] = '\0';
-                woos_draw_text(g_fb, WIN_W, WIN_H, MARGIN_LEFT + 4, screen_y, visible_text, COLOR_TEXT);
+                woos_draw_text(g_fb, g_win_w, g_win_h, MARGIN_LEFT + 4, screen_y, visible_text, COLOR_TEXT);
             }
         }
     }
@@ -324,16 +329,16 @@ static void draw_editor(void) {
         if (g_cx >= g_col_off && g_cx <= g_col_off + v_cols) {
             int cursor_screen_x = MARGIN_LEFT + 4 + (g_cx - g_col_off) * CHAR_W;
             int cursor_screen_y = TOOLBAR_H + (g_cy - g_row_off) * LINE_H + 1;
-            fill_rect(g_fb, WIN_W, WIN_H, cursor_screen_x, cursor_screen_y, 2, LINE_H - 1, COLOR_CURSOR);
+            fill_rect(g_fb, g_win_w, g_win_h, cursor_screen_x, cursor_screen_y, 2, LINE_H - 1, COLOR_CURSOR);
         }
     }
 
     // 6. Status bar
-    int status_y = WIN_H - STATUSBAR_H;
-    fill_rect(g_fb, WIN_W, WIN_H, 0, status_y, WIN_W, STATUSBAR_H, COLOR_STATUSBAR);
-    fill_rect(g_fb, WIN_W, WIN_H, 0, status_y, WIN_W, 1, COLOR_BORDER);
+    int status_y = g_win_h - STATUSBAR_H;
+    fill_rect(g_fb, g_win_w, g_win_h, 0, status_y, g_win_w, STATUSBAR_H, COLOR_STATUSBAR);
+    fill_rect(g_fb, g_win_w, g_win_h, 0, status_y, g_win_w, 1, COLOR_BORDER);
 
-    woos_draw_text(g_fb, WIN_W, WIN_H, 8, status_y + 6, g_status_msg, 0x333333);
+    woos_draw_text(g_fb, g_win_w, g_win_h, 8, status_y + 6, g_status_msg, 0x333333);
 
     // Line / Column on right
     char pos_buf[32];
@@ -347,12 +352,12 @@ static void draw_editor(void) {
     for (int i = 0; c_str[i]; i++) pos_buf[p++] = c_str[i];
     pos_buf[p] = '\0';
 
-    int pos_x = WIN_W - (int)strlen(pos_buf) * CHAR_W - 12;
-    woos_draw_text(g_fb, WIN_W, WIN_H, pos_x, status_y + 6, pos_buf, 0x222222);
+    int pos_x = g_win_w - (int)strlen(pos_buf) * CHAR_W - 12;
+    woos_draw_text(g_fb, g_win_w, g_win_h, pos_x, status_y + 6, pos_buf, 0x222222);
 
     // 7. Modal Dialog (Save As / Open)
     if (g_dialog.active) {
-        woos_dialog_draw(g_fb, WIN_W, WIN_H, &g_dialog);
+        woos_dialog_draw(g_fb, g_win_w, g_win_h, &g_dialog);
     }
 }
 
@@ -384,7 +389,7 @@ static void apply_dialog_result(void) {
 
 static void handle_click(int x, int y) {
     if (g_dialog.active) {
-        int res = woos_dialog_handle_click(&g_dialog, WIN_W, WIN_H, x, y);
+        int res = woos_dialog_handle_click(&g_dialog, g_win_w, g_win_h, x, y);
         if (res == WOOS_DIALOG_RES_OK) {
             apply_dialog_result();
         }
@@ -415,7 +420,7 @@ static void handle_click(int x, int y) {
         return;
     }
 
-    if (y >= TOOLBAR_H && y < WIN_H - STATUSBAR_H) {
+    if (y >= TOOLBAR_H && y < g_win_h - STATUSBAR_H) {
         if (g_num_rows <= 0) {
             g_cy = 0;
             g_cx = 0;
@@ -578,7 +583,7 @@ static void handle_key(int ascii, int scancode) {
 
 __attribute__((export_name("_start")))
 void _start(void) {
-    int win_id = woos_create_window(WIN_W, WIN_H, "Notepad", 0);
+    int win_id = woos_create_window(g_win_w, g_win_h, "Notepad", 0);
     if (win_id < 0) return;
 
     char open_buf[64] = "";
@@ -590,7 +595,7 @@ void _start(void) {
     }
 
     draw_editor();
-    woos_blit_window(win_id, g_fb, WIN_W, WIN_H);
+    woos_blit_window(win_id, g_fb, g_win_w, g_win_h);
 
     woos_msg_t msg;
 
@@ -601,6 +606,16 @@ void _start(void) {
             if (msg.type == MSG_CLOSE) {
                 woos_destroy_window(win_id);
                 return;
+            } else if (msg.type == MSG_RESIZE) {
+                int new_w = (int)msg.arg1;
+                int new_h = (int)msg.arg2;
+                if (new_w > 0 && new_h > 0) {
+                    if (new_w > MAX_WIN_W) new_w = MAX_WIN_W;
+                    if (new_h > MAX_WIN_H) new_h = MAX_WIN_H;
+                    g_win_w = new_w;
+                    g_win_h = new_h;
+                    needs_redraw = 1;
+                }
             } else if (msg.type == MSG_OPEN_FILE) {
                 char req_buf[64] = "";
                 if (woos_system_get_open_file(req_buf, sizeof(req_buf)) > 0 && req_buf[0] != '\0') {
@@ -619,7 +634,7 @@ void _start(void) {
 
         if (needs_redraw) {
             draw_editor();
-            woos_blit_window(win_id, g_fb, WIN_W, WIN_H);
+            woos_blit_window(win_id, g_fb, g_win_w, g_win_h);
         }
 
         woos_ipc_wait_message();

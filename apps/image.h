@@ -173,6 +173,56 @@ static inline void image_blit_alpha(uint32_t* dst, int dst_w, int dst_h, int dx,
     }
 }
 
+static inline void image_blit_alpha_clipped(uint32_t* dst, int dst_w, int dst_h, int dx, int dy,
+                                           const uint32_t* src, int sw, int sh, int src_pitch,
+                                           int clip_x, int clip_y, int clip_w, int clip_h) {
+    if (!dst || !src) return;
+
+    int min_y = clip_y > 0 ? clip_y : 0;
+    int max_y = (clip_y + clip_h < dst_h) ? (clip_y + clip_h) : dst_h;
+    int min_x = clip_x > 0 ? clip_x : 0;
+    int max_x = (clip_x + clip_w < dst_w) ? (clip_x + clip_w) : dst_w;
+
+    int start_y = (dy < min_y) ? (min_y - dy) : 0;
+    int end_y   = (dy + sh > max_y) ? (max_y - dy) : sh;
+
+    for (int y = start_y; y < end_y; y++) {
+        int target_y = dy + y;
+        const uint32_t* s_line = src + y * src_pitch;
+        uint32_t* d_line = dst + target_y * dst_w;
+
+        int start_x = (dx < min_x) ? (min_x - dx) : 0;
+        int end_x   = (dx + sw > max_x) ? (max_x - dx) : sw;
+
+        for (int x = start_x; x < end_x; x++) {
+            int target_x = dx + x;
+
+            uint32_t sp = s_line[x];
+            uint32_t sa = (sp >> 24) & 0xFF;
+            if (sa == 0) continue;
+            if (sa == 255) {
+                d_line[target_x] = sp;
+                continue;
+            }
+
+            uint32_t dp = d_line[target_x];
+            uint32_t sr = (sp >> 16) & 0xFF;
+            uint32_t sg = (sp >> 8) & 0xFF;
+            uint32_t sb = sp & 0xFF;
+
+            uint32_t dr = (dp >> 16) & 0xFF;
+            uint32_t dg = (dp >> 8) & 0xFF;
+            uint32_t db = dp & 0xFF;
+
+            uint32_t r = (sr * sa + dr * (255 - sa)) / 255;
+            uint32_t g = (sg * sa + dg * (255 - sa)) / 255;
+            uint32_t b = (sb * sa + db * (255 - sa)) / 255;
+
+            d_line[target_x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
 // Rotate 90 degrees clockwise
 static inline uint32_t* image_rotate_90_cw(const uint32_t* src, int w, int h) {
     if (!src || w <= 0 || h <= 0) return 0;

@@ -2,6 +2,7 @@
 #include "drivers/virtio_gpu_renderer/virtio_gpu_renderer.h"
 #include "serial.h"
 #include "input.h"
+#include "sched.h"
 
 #define FONT_W 8
 #define FONT_H 8
@@ -666,6 +667,7 @@ static uint32_t g_next_window_id = 1;
 extern uint32_t sched_current_thread_id(void);
 extern void* memset(void* s, int c, size_t n);
 extern void* memcpy(void* dest, const void* src, size_t n);
+extern int strcmp(const char* s1, const char* s2);
 
 int32_t woos_graphics_create_window_ex(uint32_t w, uint32_t h, const char* title, uint32_t flags) {
     uint32_t* buf = (uint32_t*)kheap_alloc(w * h * 4);
@@ -899,28 +901,67 @@ int32_t woos_graphics_toggle_maximize(uint32_t window_id) {
     uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
+            if (strcmp(g_windows[i].title, "Calculator") == 0) {
+                irq_restore(flags);
+                return 0;
+            }
+            uint32_t old_w = g_windows[i].w;
+            uint32_t old_h = g_windows[i].h;
+            uint32_t target_w = 0;
+            uint32_t target_h = 0;
+            int is_max = 0;
             if (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) {
                 g_windows[i].x = g_windows[i].saved_x;
                 g_windows[i].y = g_windows[i].saved_y;
                 g_windows[i].w = g_windows[i].saved_w;
                 g_windows[i].h = g_windows[i].saved_h;
                 g_windows[i].flags &= ~WOOS_WIN_FLAG_MAXIMIZED;
+                target_w = g_windows[i].saved_w;
+                target_h = g_windows[i].saved_h;
+                is_max = 0;
             } else {
                 g_windows[i].saved_x = g_windows[i].x;
                 g_windows[i].saved_y = g_windows[i].y;
                 g_windows[i].saved_w = g_windows[i].w;
                 g_windows[i].saved_h = g_windows[i].h;
                 video_info_t* info = get_video_info();
-                g_windows[i].x = 3;
-                g_windows[i].y = 25;
-                if (info && info->width > 6 && info->height > 64) {
-                    g_windows[i].w = info->width - 6;
-                    g_windows[i].h = info->height - 64;
+                g_windows[i].x = 0;
+                g_windows[i].y = 22;
+                if (info && info->width > 0 && info->height > 58) {
+                    g_windows[i].w = info->width;
+                    g_windows[i].h = info->height - 58;
                 }
                 g_windows[i].flags |= WOOS_WIN_FLAG_MAXIMIZED;
+                target_w = g_windows[i].w;
+                target_h = g_windows[i].h;
+                is_max = 1;
             }
+
+            if (target_w > 0 && target_h > 0) {
+                uint32_t old_size = old_w * old_h * 4;
+                uint32_t new_size = target_w * target_h * 4;
+                uint32_t* new_buf = (uint32_t*)kheap_realloc(g_windows[i].buffer, (uint64_t)new_size);
+                if (new_buf) {
+                    if (new_size > old_size) {
+                        memset((uint8_t*)new_buf + old_size, 0, new_size - old_size);
+                    }
+                    g_windows[i].buffer = new_buf;
+                }
+            }
+
+            uint32_t tid = g_windows[i].thread_id;
             irq_restore(flags);
             woos_graphics_bring_to_front(window_id);
+
+            if (tid > 0) {
+                woos_ipc_send(tid, MSG_RESIZE, target_w, target_h, (uint32_t)is_max, 0, 0);
+            }
+
+            input_event_t ev = { .type = INPUT_EVENT_WINDOW_CHANGE, .x = 0, .y = 0, .buttons = 0 };
+            input_push(&ev);
+            extern void sched_unblock_all(void);
+            sched_unblock_all();
+
             return 0;
         }
     }
@@ -1037,8 +1078,18 @@ int32_t woos_graphics_blit_window_internal(uint32_t window_id, const uint32_t* w
     uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
-            uint32_t buf_w = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_w : g_windows[i].w;
-            uint32_t buf_h = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_h : g_windows[i].h;
+            // Reallocate buffer if application is blitting at a different size
+            if (w != g_windows[i].w || h != g_windows[i].h) {
+                uint32_t* new_buf = (uint32_t*)kheap_realloc(g_windows[i].buffer, (uint64_t)w * h * 4);
+                if (new_buf) {
+                    g_windows[i].buffer = new_buf;
+                    g_windows[i].w = w;
+                    g_windows[i].h = h;
+                }
+            }
+
+            uint32_t buf_w = g_windows[i].w;
+            uint32_t buf_h = g_windows[i].h;
 
             uint32_t copy_w = (w < buf_w) ? w : buf_w;
             uint32_t copy_h = (h < buf_h) ? h : buf_h;
@@ -1127,29 +1178,10 @@ int32_t woos_graphics_draw_window_to_screen_internal(uint32_t window_id) {
             uint32_t win_w = g_windows[i].w;
             uint32_t win_h = g_windows[i].h;
             
-            // If maximized, fill client background on screen backbuffer
-            if (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) {
-                uint32_t bg_col = g_windows[i].buffer ? g_windows[i].buffer[0] : 0x1E1E1E;
-                int32_t my_start_y = (win_y < 0) ? -win_y : 0;
-                int32_t my_end_y = (win_y + (int32_t)win_h > (int32_t)info->height) ? (int32_t)info->height - win_y : (int32_t)win_h;
-                int32_t my_start_x = (win_x < 0) ? -win_x : 0;
-                int32_t my_end_x = (win_x + (int32_t)win_w > (int32_t)info->width) ? (int32_t)info->width - win_x : (int32_t)win_w;
-                for (int32_t cy = my_start_y; cy < my_end_y; cy++) {
-                    uint8_t* dst_row = g_backbuffer + (uint64_t)(win_y + cy) * info->pitch + (uint64_t)(win_x + my_start_x) * 4;
-                    uint32_t* dst = (uint32_t*)dst_row;
-                    for (int32_t cx = 0; cx < (my_end_x - my_start_x); cx++) {
-                        dst[cx] = bg_col;
-                    }
-                }
-            }
-
-            uint32_t buf_w = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_w : g_windows[i].w;
-            uint32_t buf_h = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_h : g_windows[i].h;
-
             int32_t start_y = (win_y < 0) ? -win_y : 0;
-            int32_t end_y = (win_y + (int32_t)buf_h > (int32_t)info->height) ? (int32_t)info->height - win_y : (int32_t)buf_h;
+            int32_t end_y = (win_y + (int32_t)win_h > (int32_t)info->height) ? (int32_t)info->height - win_y : (int32_t)win_h;
             int32_t start_x = (win_x < 0) ? -win_x : 0;
-            int32_t end_x = (win_x + (int32_t)buf_w > (int32_t)info->width) ? (int32_t)info->width - win_x : (int32_t)buf_w;
+            int32_t end_x = (win_x + (int32_t)win_w > (int32_t)info->width) ? (int32_t)info->width - win_x : (int32_t)win_w;
             
             if (start_x >= end_x || start_y >= end_y || !g_windows[i].buffer) {
                 irq_restore(flags);
@@ -1162,7 +1194,7 @@ int32_t woos_graphics_draw_window_to_screen_internal(uint32_t window_id) {
             uint8_t screen_bpp = bytes_per_pixel(info);
             
             for (int32_t cy = start_y; cy < end_y; cy++) {
-                uint32_t* src_row = g_windows[i].buffer + cy * buf_w + start_x;
+                uint32_t* src_row = g_windows[i].buffer + cy * win_w + start_x;
                 uint8_t* dst_row = screen_base + (uint64_t)(win_y + cy) * screen_pitch + (uint64_t)(win_x + start_x) * screen_bpp;
                 
                 if (screen_bpp == 4) {
@@ -1233,33 +1265,15 @@ int32_t woos_graphics_draw_window_to_buffer(uint32_t window_id, uint32_t* dst_bu
             uint32_t win_w = g_windows[i].w;
             uint32_t win_h = g_windows[i].h;
             
-            // If maximized, fill background in compositor backbuffer
-            if (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) {
-                uint32_t bg_col = g_windows[i].buffer ? g_windows[i].buffer[0] : 0x1E1E1E;
-                int32_t my_start_y = (win_y < 0) ? -win_y : 0;
-                int32_t my_end_y = (win_y + (int32_t)win_h > (int32_t)dst_h) ? (int32_t)dst_h - win_y : (int32_t)win_h;
-                int32_t my_start_x = (win_x < 0) ? -win_x : 0;
-                int32_t my_end_x = (win_x + (int32_t)win_w > (int32_t)dst_w) ? (int32_t)dst_w - win_x : (int32_t)win_w;
-                for (int32_t cy = my_start_y; cy < my_end_y; cy++) {
-                    uint32_t* dst_row = dst_buf + (win_y + cy) * dst_w + (win_x + my_start_x);
-                    for (int32_t cx = 0; cx < (my_end_x - my_start_x); cx++) {
-                        dst_row[cx] = bg_col;
-                    }
-                }
-            }
-
-            uint32_t buf_w = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_w : g_windows[i].w;
-            uint32_t buf_h = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_h : g_windows[i].h;
-
             int32_t start_y = (win_y < 0) ? -win_y : 0;
-            int32_t end_y = (win_y + (int32_t)buf_h > (int32_t)dst_h) ? (int32_t)dst_h - win_y : (int32_t)buf_h;
+            int32_t end_y = (win_y + (int32_t)win_h > (int32_t)dst_h) ? (int32_t)dst_h - win_y : (int32_t)win_h;
             int32_t start_x = (win_x < 0) ? -win_x : 0;
-            int32_t end_x = (win_x + (int32_t)buf_w > (int32_t)dst_w) ? (int32_t)dst_w - win_x : (int32_t)buf_w;
+            int32_t end_x = (win_x + (int32_t)win_w > (int32_t)dst_w) ? (int32_t)dst_w - win_x : (int32_t)win_w;
             
             if (start_x < end_x && start_y < end_y && g_windows[i].buffer) {
                 uint32_t copy_width = (uint32_t)(end_x - start_x);
                 for (int32_t cy = start_y; cy < end_y; cy++) {
-                    uint32_t* src_row = g_windows[i].buffer + cy * buf_w + start_x;
+                    uint32_t* src_row = g_windows[i].buffer + cy * win_w + start_x;
                     uint32_t* dst_row = dst_buf + (win_y + cy) * dst_w + (win_x + start_x);
                     memcpy(dst_row, src_row, copy_width * 4);
                 }

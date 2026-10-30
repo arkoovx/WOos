@@ -35,6 +35,7 @@ static inline void int_to_str(int val, char* dst) {
 #define MSG_RIGHT_CLICK  2
 #define MSG_CLOSE        3
 #define MSG_KEY_DOWN     4
+#define MSG_RESIZE       5
 #define MSG_OPEN_FILE    10
 
 // VFS Modes
