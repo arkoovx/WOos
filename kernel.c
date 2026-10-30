@@ -42,7 +42,7 @@ void calibrate_tsc(void) {
     uint64_t end_tsc = rdtsc();
     // 5 тиков при частоте PIT 20 Гц — это 250 мс
     g_tsc_per_ms = (end_tsc - start_tsc) / 250;
-    if (g_tsc_per_ms == 0) {
+    if (g_tsc_per_ms < 100000ULL) {
         g_tsc_per_ms = 2000000ULL;
     }
     serial_printf("[WoOS Kernel] TSC calibrated: %u ticks/ms\n", (uint32_t)g_tsc_per_ms);
@@ -229,23 +229,8 @@ void kmain(video_info_t* video) {
     calibrate_tsc();
 
     while (1) {
-        uint64_t start, end;
-
-        start = rdtsc();
         net_poll();
-        end = rdtsc();
-        uint64_t net_time = (end - start) / g_tsc_per_ms;
-        if (net_time >= 2) {
-            serial_printf("[Perf Warning] net_poll took %u ms\n", (uint32_t)net_time);
-        }
-
-        start = rdtsc();
         run_deferred_vfs_probe();
-        end = rdtsc();
-        uint64_t vfs_time = (end - start) / g_tsc_per_ms;
-        if (vfs_time >= 2) {
-            serial_printf("[Perf Warning] vfs_probe took %u ms\n", (uint32_t)vfs_time);
-        }
 
 #if !WOOS_ENABLE_HW_INTERRUPTS
         mouse_poll();

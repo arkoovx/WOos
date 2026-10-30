@@ -54,8 +54,18 @@ static uint8_t page_is_reserved(uint64_t page_addr) {
         return 1u;
     }
 
-    // Резервируем 5 МБ для backbuffer (0x01000000 - 0x01500000)
-    if (range_overlaps(page_addr, page_end, 0x01000000ull, 0x01500000ull)) {
+    // Резервируем 8 МБ для backbuffer (0x01000000 - 0x01800000)
+    if (range_overlaps(page_addr, page_end, 0x01000000ull, 0x01800000ull)) {
+        return 1u;
+    }
+
+    // Резервируем 8 МБ для VirtIO-GPU draw surface (0x01800000 - 0x02000000)
+    if (range_overlaps(page_addr, page_end, 0x01800000ull, 0x02000000ull)) {
+        return 1u;
+    }
+
+    // Резервируем 48 МБ для кучи ядра kheap (0x02000000 - 0x05000000)
+    if (range_overlaps(page_addr, page_end, 0x02000000ull, 0x05000000ull)) {
         return 1u;
     }
 

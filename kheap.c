@@ -1,5 +1,6 @@
 #include "kheap.h"
 
+#define KHEAP_BASE       0x02000000ull
 #define KHEAP_ARENA_SIZE (48u * 1024u * 1024u)
 #define KHEAP_ALIGN      16u
 
@@ -12,7 +13,7 @@ typedef struct kheap_block {
     uint8_t _pad[15];
 } kheap_block_t;
 
-static uint8_t g_kheap_arena[KHEAP_ARENA_SIZE] __attribute__((aligned(KHEAP_ALIGN)));
+static uint8_t* const g_kheap_arena = (uint8_t*)(uint64_t)KHEAP_BASE;
 static kheap_block_t* g_kheap_head = 0;
 static uint64_t g_kheap_used = 0;
 
