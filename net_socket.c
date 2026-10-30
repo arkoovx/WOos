@@ -393,3 +393,129 @@ static void tcp_err_callback(void* arg, err_t err) {
         g_sockets[sock].tcp = NULL; // Освобожден lwIP
     }
 }
+
+static void sock_str_cat(char* dst, const char* src, uint32_t max_len) {
+    uint32_t d_len = 0;
+    while (dst[d_len] != '\0' && d_len < max_len) d_len++;
+    while (*src != '\0' && d_len + 1 < max_len) {
+        dst[d_len++] = *src++;
+    }
+    dst[d_len] = '\0';
+}
+
+static void sock_uint_cat(char* dst, uint32_t val, uint32_t max_len) {
+    char buf[16];
+    int idx = 0;
+    if (val == 0) {
+        buf[idx++] = '0';
+    } else {
+        char temp[16];
+        int t_idx = 0;
+        while (val > 0) {
+            temp[t_idx++] = '0' + (val % 10);
+            val /= 10;
+        }
+        while (t_idx > 0) {
+            buf[idx++] = temp[--t_idx];
+        }
+    }
+    buf[idx] = '\0';
+    sock_str_cat(dst, buf, max_len);
+}
+
+static void sock_pad_spaces(char* dst, uint32_t target_len, uint32_t max_len) {
+    uint32_t len = 0;
+    while (dst[len] != '\0' && len < max_len) len++;
+    while (len < target_len && len + 1 < max_len) {
+        dst[len++] = ' ';
+    }
+    dst[len] = '\0';
+}
+
+int32_t net_socket_get_state(int32_t sock) {
+    if (sock < 0 || sock >= NET_MAX_SOCKETS || !g_sockets[sock].in_use) {
+        return -1;
+    }
+    return (int32_t)g_sockets[sock].state;
+}
+
+void net_socket_get_stat(char* out_buf, uint32_t max_len) {
+    if (!out_buf || max_len == 0) return;
+    out_buf[0] = '\0';
+
+    sock_str_cat(out_buf, "Active Internet connections (servers and established)\n", max_len);
+    sock_str_cat(out_buf, "Proto Recv-Q Send-Q Local Address           Foreign Address         State\n", max_len);
+
+    for (int32_t i = 0; i < NET_MAX_SOCKETS; i++) {
+        if (!g_sockets[i].in_use) continue;
+        net_socket_t* s = &g_sockets[i];
+
+        const char* proto = (s->type == SOCKET_TYPE_TCP) ? "tcp" : "udp";
+        uint32_t recv_q = s->rx_count;
+        uint32_t send_q = 0;
+
+        char loc_ip[20] = "0.0.0.0";
+        uint16_t loc_port = 0;
+        char rem_ip[20] = "0.0.0.0";
+        uint16_t rem_port = 0;
+
+        if (s->type == SOCKET_TYPE_TCP && s->tcp) {
+            ip4addr_ntoa_r(&s->tcp->local_ip, loc_ip, sizeof(loc_ip));
+            loc_port = s->tcp->local_port;
+            ip4addr_ntoa_r(&s->tcp->remote_ip, rem_ip, sizeof(rem_ip));
+            rem_port = s->tcp->remote_port;
+            if (s->tcp->snd_buf < TCP_SND_BUF) {
+                send_q = (uint32_t)(TCP_SND_BUF - s->tcp->snd_buf);
+            }
+        } else if (s->type == SOCKET_TYPE_UDP && s->udp) {
+            ip4addr_ntoa_r(&s->udp->local_ip, loc_ip, sizeof(loc_ip));
+            loc_port = s->udp->local_port;
+            ip4addr_ntoa_r(&s->udp->remote_ip, rem_ip, sizeof(rem_ip));
+            rem_port = s->udp->remote_port;
+        }
+
+        const char* st_str = "UNKNOWN";
+        if (s->type == SOCKET_TYPE_TCP) {
+            switch (s->state) {
+                case 0: st_str = "CLOSED"; break;
+                case 1: st_str = "BOUND"; break;
+                case 2: st_str = "LISTEN"; break;
+                case 3: st_str = "ESTABLISHED"; break;
+                case 4: st_str = "CLOSE_WAIT"; break;
+                case 5: st_str = "SYN_SENT"; break;
+                default: st_str = "UNKNOWN"; break;
+            }
+        } else {
+            st_str = (s->state == 1) ? "BOUND" : "UNCONN";
+        }
+
+        uint32_t line_start = 0;
+        while (out_buf[line_start] != '\0') line_start++;
+
+        sock_str_cat(out_buf, proto, max_len);
+        sock_pad_spaces(out_buf, line_start + 6, max_len);
+
+        sock_uint_cat(out_buf, recv_q, max_len);
+        sock_pad_spaces(out_buf, line_start + 13, max_len);
+
+        sock_uint_cat(out_buf, send_q, max_len);
+        sock_pad_spaces(out_buf, line_start + 20, max_len);
+
+        sock_str_cat(out_buf, loc_ip, max_len);
+        sock_str_cat(out_buf, ":", max_len);
+        sock_uint_cat(out_buf, loc_port, max_len);
+        sock_pad_spaces(out_buf, line_start + 44, max_len);
+
+        if (rem_port == 0) {
+            sock_str_cat(out_buf, "0.0.0.0:*", max_len);
+        } else {
+            sock_str_cat(out_buf, rem_ip, max_len);
+            sock_str_cat(out_buf, ":", max_len);
+            sock_uint_cat(out_buf, rem_port, max_len);
+        }
+        sock_pad_spaces(out_buf, line_start + 68, max_len);
+
+        sock_str_cat(out_buf, st_str, max_len);
+        sock_str_cat(out_buf, "\n", max_len);
+    }
+}

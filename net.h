@@ -18,5 +18,9 @@ void net_poll(void);
 const net_status_t* net_get_status(void);
 int32_t net_resolve_host(const char* hostname, char* out_ip, uint32_t max_len);
 void net_get_config(char* out_buf, uint32_t max_len);
+void net_get_arp(char* out_buf, uint32_t max_len);
+int32_t net_nslookup(const char* host, char* out_buf, uint32_t max_len);
+int32_t net_ping(const char* host, uint32_t count, char* out_buf, uint32_t max_len);
+int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len);
 
 #endif

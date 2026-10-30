@@ -9,6 +9,11 @@
   (import "env" "woos_system_get_status" (func $get_status (param i32) (result i32)))
   (import "env" "woos_net_resolve" (func $net_resolve (param i32 i32 i32) (result i32)))
   (import "env" "woos_net_get_config" (func $net_get_config (param i32 i32) (result i32)))
+  (import "env" "woos_net_ping" (func $net_ping (param i32 i32 i32 i32) (result i32)))
+  (import "env" "woos_net_stat" (func $net_stat (param i32 i32) (result i32)))
+  (import "env" "woos_net_arp" (func $net_arp (param i32 i32) (result i32)))
+  (import "env" "woos_net_nslookup" (func $net_nslookup (param i32 i32 i32) (result i32)))
+  (import "env" "woos_net_fetch" (func $net_fetch (param i32 i32 i32) (result i32)))
 
   ;; Socket Imports
   (import "env" "woos_socket_create" (func $sock_create (param i32) (result i32)))
@@ -29,9 +34,9 @@
   ;; Constants and String Data (Top-Level)
   (data (i32.const 500) "Terminal\00")
   (data (i32.const 520) "woos# \00")
-  (data (i32.const 540) "WoOS Terminal (v1.44.0)\00")
+  (data (i32.const 540) "WoOS Terminal (v1.49.0)\00")
   (data (i32.const 590) "Type 'help' for available commands.\00")
-  (data (i32.const 640) "WoOS 1.44.0 #1 SMP PREEMPT x86_64 WoOS Microkernel\00")
+  (data (i32.const 640) "WoOS 1.49.0 #1 SMP PREEMPT x86_64 WoOS Microkernel\00")
   (data (i32.const 710) "Starting /CALC.WAS...\00")
   (data (i32.const 740) "woos: command not found: \00")
   (data (i32.const 780) "/CALC.WAS\00")
@@ -64,7 +69,7 @@
   (data (i32.const 1080) "Running /TESTWASI.WAS (WASI Preview 1 Test)...\00")
 
   ;; Files list for ls
-  (data (i32.const 1100) "HELLO.TXT     README.TXT    COMPOSIT.WAS  CALC.WAS      TERM.WAS      NOTEPAD.WAS   EXPLORER.WAS  TESTWASI.WAS\00")
+  (data (i32.const 1100) "HELLO.TXT     README.TXT    COMPOSIT.WAS  CALC.WAS      TERM.WAS      NOTEPAD.WAS   EXPLORER.WAS  FETCH.WAS     TESTWASI.WAS\00")
 
   ;; Help text lines
   (data (i32.const 1200) "Available commands:\00")
@@ -115,6 +120,19 @@
   (data (i32.const 3370) "fetch: connected, no data returned\00")
   (data (i32.const 3420) "Usage: cat <filename>\00")
   (data (i32.const 3450) "cat: cannot open file: \00")
+
+  (data (i32.const 3500) "netstat\00")
+  (data (i32.const 3515) "arp\00")
+  (data (i32.const 3525) "nslookup\00")
+  (data (i32.const 3540) "host\00")
+  (data (i32.const 3550) "fetchapp\00")
+  (data (i32.const 3565) "/FETCH.WAS\00")
+  (data (i32.const 3580) "Starting /FETCH.WAS...\00")
+  (data (i32.const 3610) "Usage: nslookup <host|ip>\00")
+  (data (i32.const 3640) "Usage: fetch <host|url>\00")
+  (data (i32.const 3670) "  netstat     - Report active network connections\00")
+  (data (i32.const 3730) "  arp         - Display ARP address cache\00")
+  (data (i32.const 3780) "  nslookup    - Query domain name servers\00")
 
   ;; Globals
   (global $g_win_id (mut i32) (i32.const 0))
@@ -677,6 +695,15 @@
       i32.const 1780
       call $term_puts
       call $term_newline
+      i32.const 3670
+      call $term_puts
+      call $term_newline
+      i32.const 3730
+      call $term_puts
+      call $term_newline
+      i32.const 3780
+      call $term_puts
+      call $term_newline
       i32.const 1830
       call $term_puts
       call $term_newline
@@ -844,64 +871,19 @@
         return
       end
 
-      ;; Resolve host
       local.get $arg_ptr
-      i32.const 16000 ;; out_ip
-      i32.const 64
-      call $net_resolve
-      local.set $fd
+      i32.const 4
+      i32.const 16000
+      i32.const 8000
+      call $net_ping
+      drop
 
-      local.get $fd
-      i32.const 0
-      i32.ne
-      if
-        i32.const 3030
-        call $term_puts
-        local.get $arg_ptr
-        call $term_puts
-        call $term_newline
-        return
-      end
-
-      ;; Print ping stats
-      i32.const 3060
-      call $term_puts
-      local.get $arg_ptr
-      call $term_puts
-      i32.const 3070
-      call $term_puts
       i32.const 16000
       call $term_puts
-      i32.const 3080
-      call $term_puts
-      call $term_newline
-
-      i32.const 3110
-      call $term_puts
-      i32.const 16000
-      call $term_puts
-      i32.const 3130
-      call $term_puts
-      call $term_newline
-
-      i32.const 3110
-      call $term_puts
-      i32.const 16000
-      call $term_puts
-      i32.const 3170
-      call $term_puts
-      call $term_newline
-
-      i32.const 3210
-      call $term_puts
-      call $term_newline
-      i32.const 3240
-      call $term_puts
-      call $term_newline
       return
     end
 
-    ;; Command: fetch <ip>
+    ;; Command: fetch <url>
     local.get $cmd_ptr
     i32.const 930 ;; "fetch"
     call $startswith
@@ -928,69 +910,123 @@
       i32.load8_u
       i32.eqz
       if
-        i32.const 3300
+        i32.const 3640
         call $term_puts
         call $term_newline
         return
       end
 
-      ;; Create TCP socket (type 1)
-      i32.const 1
-      call $sock_create
-      local.set $sock
-
-      local.get $sock
-      i32.const 0
-      i32.lt_s
-      if
-        i32.const 3330
-        call $term_puts
-        call $term_newline
-        return
-      end
-
-      ;; Connect to port 80
-      local.get $sock
       local.get $arg_ptr
-      i32.const 80
-      call $sock_connect
+      i32.const 16000
+      i32.const 16000
+      call $net_fetch
       drop
 
-      ;; Send HTTP GET
-      local.get $sock
-      i32.const 2250 ;; GET / HTTP/1.0
-      i32.const 39
-      call $sock_send
+      i32.const 16000
+      call $term_puts
+      call $term_newline
+      return
+    end
+
+    ;; Command: netstat
+    local.get $cmd_ptr
+    i32.const 3500 ;; "netstat"
+    call $streq
+    if
+      i32.const 16000
+      i32.const 8000
+      call $net_stat
       drop
 
-      ;; Receive response
-      local.get $sock
-      i32.const 13000
-      i32.const 500
-      call $sock_recv
-      local.set $read_bytes
+      i32.const 16000
+      call $term_puts
+      return
+    end
 
-      local.get $read_bytes
-      i32.const 0
-      i32.gt_s
+    ;; Command: arp
+    local.get $cmd_ptr
+    i32.const 3515 ;; "arp"
+    call $streq
+    if
+      i32.const 16000
+      i32.const 8000
+      call $net_arp
+      drop
+
+      i32.const 16000
+      call $term_puts
+      return
+    end
+
+    ;; Command: nslookup or host
+    local.get $cmd_ptr
+    i32.const 3525 ;; "nslookup"
+    call $startswith
+    local.get $cmd_ptr
+    i32.const 3540 ;; "host"
+    call $startswith
+    i32.or
+    if
+      local.get $cmd_ptr
+      i32.const 3525
+      call $startswith
       if
-        i32.const 13000
-        local.get $read_bytes
+        local.get $cmd_ptr
+        i32.const 8
         i32.add
-        i32.const 0
-        i32.store8
-
-        i32.const 13000
-        call $term_puts
-        call $term_newline
+        local.set $arg_ptr
       else
-        i32.const 3370
-        call $term_puts
-        call $term_newline
+        local.get $cmd_ptr
+        i32.const 4
+        i32.add
+        local.set $arg_ptr
       end
 
-      local.get $sock
-      call $sock_close
+      (loop $loop_sn
+        local.get $arg_ptr
+        i32.load8_u
+        i32.const 32
+        i32.eq
+        if
+          local.get $arg_ptr
+          i32.const 1
+          i32.add
+          local.set $arg_ptr
+          br $loop_sn
+        end
+      )
+
+      local.get $arg_ptr
+      i32.load8_u
+      i32.eqz
+      if
+        i32.const 3610
+        call $term_puts
+        call $term_newline
+        return
+      end
+
+      local.get $arg_ptr
+      i32.const 16000
+      i32.const 8000
+      call $net_nslookup
+      drop
+
+      i32.const 16000
+      call $term_puts
+      return
+    end
+
+    ;; Command: fetchapp
+    local.get $cmd_ptr
+    i32.const 3550 ;; "fetchapp"
+    call $streq
+    if
+      i32.const 3580 ;; "Starting /FETCH.WAS..."
+      call $term_puts
+      call $term_newline
+      i32.const 3565 ;; "/FETCH.WAS"
+      call $system_spawn
       drop
       return
     end

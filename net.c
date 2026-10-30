@@ -7,6 +7,11 @@
 #include "lwip/dhcp.h"
 #include "lwip/dns.h"
 #include "lwip/ip_addr.h"
+#include "lwip/raw.h"
+#include "lwip/prot/ip.h"
+#include "lwip/prot/icmp.h"
+#include "lwip/inet_chksum.h"
+#include "net_socket.h"
 #include "timer.h"
 #include "kernel.h"
 
@@ -183,6 +188,403 @@ void net_get_config(char* out_buf, uint32_t max_len) {
     str_cat(out_buf, "  TX packets ", max_len);
     uint_cat(out_buf, st->tx_packets, max_len);
     str_cat(out_buf, "\n", max_len);
+}
+
+static void pad_spaces(char* dst, uint32_t target_len, uint32_t max_len) {
+    uint32_t len = 0;
+    while (dst[len] != '\0' && len < max_len) len++;
+    while (len < target_len && len + 1 < max_len) {
+        dst[len++] = ' ';
+    }
+    dst[len] = '\0';
+}
+
+static void hex_cat(char* dst, uint8_t byte, uint32_t max_len) {
+    const char hex_chars[] = "0123456789abcdef";
+    char buf[3];
+    buf[0] = hex_chars[(byte >> 4) & 0x0F];
+    buf[1] = hex_chars[byte & 0x0F];
+    buf[2] = '\0';
+    str_cat(dst, buf, max_len);
+}
+
+void net_get_arp(char* out_buf, uint32_t max_len) {
+    if (!out_buf || max_len < 64) return;
+    out_buf[0] = '\0';
+
+    str_cat(out_buf, "Address                  HWtype  HWaddress           Flags Mask            Iface\n", max_len);
+
+    int count = 0;
+    for (size_t i = 0; i < 16; i++) {
+        ip4_addr_t *ip = NULL;
+        struct netif *nif = NULL;
+        struct eth_addr *eth = NULL;
+        if (etharp_get_entry(i, &ip, &nif, &eth)) {
+            char ip_str[24];
+            ip4addr_ntoa_r(ip, ip_str, sizeof(ip_str));
+
+            uint32_t before = 0;
+            while (out_buf[before] != '\0') before++;
+            str_cat(out_buf, ip_str, max_len);
+            pad_spaces(out_buf, before + 25, max_len);
+
+            str_cat(out_buf, "ether   ", max_len);
+
+            before = 0;
+            while (out_buf[before] != '\0') before++;
+            for (int b = 0; b < 6; b++) {
+                if (b > 0) str_cat(out_buf, ":", max_len);
+                hex_cat(out_buf, eth->addr[b], max_len);
+            }
+            pad_spaces(out_buf, before + 20, max_len);
+
+            str_cat(out_buf, "C                     eth0\n", max_len);
+            count++;
+        }
+    }
+    if (count == 0) {
+        str_cat(out_buf, "(ARP cache is empty - run 'ping 10.0.2.2' to populate)\n", max_len);
+    }
+}
+
+int32_t net_nslookup(const char* host, char* out_buf, uint32_t max_len) {
+    if (!host || !out_buf || max_len < 64) return -1;
+    out_buf[0] = '\0';
+
+    char dns_str[32] = "10.0.2.3";
+    const ip_addr_t* dns = dns_getserver(0);
+    if (dns) {
+        ip4addr_ntoa_r(dns, dns_str, sizeof(dns_str));
+    }
+
+    str_cat(out_buf, "Server:    ", max_len);
+    str_cat(out_buf, dns_str, max_len);
+    str_cat(out_buf, "\nAddress:   ", max_len);
+    str_cat(out_buf, dns_str, max_len);
+    str_cat(out_buf, "#53\n\n", max_len);
+
+    char ip_str[32];
+    uint64_t t_start = rdtsc();
+    int32_t res = net_resolve_host(host, ip_str, sizeof(ip_str));
+    uint64_t t_diff = rdtsc() - t_start;
+    uint32_t query_ms = (uint32_t)(t_diff / g_tsc_per_ms);
+    if (query_ms == 0) query_ms = 1;
+
+    if (res == 0) {
+        str_cat(out_buf, "Non-authoritative answer:\n", max_len);
+        str_cat(out_buf, "Name:      ", max_len);
+        str_cat(out_buf, host, max_len);
+        str_cat(out_buf, "\nAddress:   ", max_len);
+        str_cat(out_buf, ip_str, max_len);
+        str_cat(out_buf, "\nQuery time: ", max_len);
+        uint_cat(out_buf, query_ms, max_len);
+        str_cat(out_buf, " ms\n", max_len);
+        return 0;
+    } else {
+        str_cat(out_buf, "** server can't find ", max_len);
+        str_cat(out_buf, host, max_len);
+        str_cat(out_buf, ": NXDOMAIN\n", max_len);
+        return -1;
+    }
+}
+
+typedef struct {
+    uint16_t id;
+    uint16_t seq;
+    uint8_t received;
+    uint8_t ttl;
+} ping_state_t;
+
+static volatile ping_state_t g_ping_state;
+
+static u8_t ping_raw_recv(void* arg, struct raw_pcb* pcb, struct pbuf* p, const ip_addr_t* addr) {
+    (void)arg; (void)pcb; (void)addr;
+    if (!p) return 0;
+
+    if (p->tot_len >= (IP_HLEN + sizeof(struct icmp_echo_hdr))) {
+        struct ip_hdr* iphdr = (struct ip_hdr*)p->payload;
+        u8_t ip_hl = (u8_t)(IPH_HL(iphdr) * 4);
+        if (p->tot_len >= (ip_hl + sizeof(struct icmp_echo_hdr))) {
+            struct icmp_echo_hdr* iecho = (struct icmp_echo_hdr*)((u8_t*)p->payload + ip_hl);
+            if (ICMPH_TYPE(iecho) == ICMP_ER &&
+                iecho->id == g_ping_state.id &&
+                iecho->seqno == lwip_htons(g_ping_state.seq)) {
+                g_ping_state.ttl = IPH_TTL(iphdr);
+                g_ping_state.received = 1;
+                pbuf_free(p);
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+int32_t net_ping(const char* host, uint32_t count, char* out_buf, uint32_t max_len) {
+    if (!host || !out_buf || max_len < 128) return -1;
+    out_buf[0] = '\0';
+    if (count == 0) count = 4;
+    if (count > 10) count = 10;
+
+    ip_addr_t target_ip;
+    char ip_str[32];
+    if (ip4addr_aton(host, &target_ip)) {
+        ip4addr_ntoa_r(&target_ip, ip_str, sizeof(ip_str));
+    } else {
+        if (net_resolve_host(host, ip_str, sizeof(ip_str)) != 0) {
+            str_cat(out_buf, "ping: unknown host ", max_len);
+            str_cat(out_buf, host, max_len);
+            str_cat(out_buf, "\n", max_len);
+            return -1;
+        }
+        ip4addr_aton(ip_str, &target_ip);
+    }
+
+    str_cat(out_buf, "PING ", max_len);
+    str_cat(out_buf, host, max_len);
+    str_cat(out_buf, " (", max_len);
+    str_cat(out_buf, ip_str, max_len);
+    str_cat(out_buf, "): 56 data bytes\n", max_len);
+
+    struct raw_pcb* pcb = raw_new(IP_PROTO_ICMP);
+    if (!pcb) {
+        str_cat(out_buf, "ping: raw socket error\n", max_len);
+        return -1;
+    }
+
+    g_ping_state.id = 0xAFAF;
+    raw_recv(pcb, ping_raw_recv, NULL);
+
+    uint32_t pkts_tx = 0;
+    uint32_t pkts_rx = 0;
+    uint32_t min_rtt = 0xFFFFFFFF;
+    uint32_t max_rtt = 0;
+    uint32_t sum_rtt = 0;
+
+    extern void thread_yield(void);
+
+    for (uint32_t seq = 1; seq <= count; seq++) {
+        g_ping_state.seq = (uint16_t)seq;
+        g_ping_state.received = 0;
+
+        u16_t ping_size = (u16_t)(sizeof(struct icmp_echo_hdr) + 32);
+        struct pbuf* p = pbuf_alloc(PBUF_IP, ping_size, PBUF_RAM);
+        if (!p) break;
+
+        struct icmp_echo_hdr* iecho = (struct icmp_echo_hdr*)p->payload;
+        ICMPH_TYPE_SET(iecho, ICMP_ECHO);
+        ICMPH_CODE_SET(iecho, 0);
+        iecho->chksum = 0;
+        iecho->id = g_ping_state.id;
+        iecho->seqno = lwip_htons(g_ping_state.seq);
+        for (int i = 0; i < 32; i++) {
+            ((char*)iecho)[sizeof(struct icmp_echo_hdr) + i] = (char)('a' + (i % 26));
+        }
+        iecho->chksum = inet_chksum(iecho, ping_size);
+
+        uint64_t t_send = rdtsc();
+        pkts_tx++;
+        raw_sendto(pcb, p, &target_ip);
+        pbuf_free(p);
+
+        uint64_t timeout_tsc = 1000ULL * g_tsc_per_ms;
+        while (!g_ping_state.received) {
+            net_poll();
+            if ((rdtsc() - t_send) > timeout_tsc) {
+                break;
+            }
+            thread_yield();
+        }
+
+        if (g_ping_state.received) {
+            uint64_t t_diff = rdtsc() - t_send;
+            uint32_t rtt = (uint32_t)(t_diff / g_tsc_per_ms);
+            if (rtt == 0) rtt = 1;
+            pkts_rx++;
+            if (rtt < min_rtt) min_rtt = rtt;
+            if (rtt > max_rtt) max_rtt = rtt;
+            sum_rtt += rtt;
+
+            str_cat(out_buf, "64 bytes from ", max_len);
+            str_cat(out_buf, ip_str, max_len);
+            str_cat(out_buf, ": icmp_seq=", max_len);
+            uint_cat(out_buf, seq, max_len);
+            str_cat(out_buf, " ttl=", max_len);
+            uint_cat(out_buf, g_ping_state.ttl, max_len);
+            str_cat(out_buf, " time=", max_len);
+            uint_cat(out_buf, rtt, max_len);
+            str_cat(out_buf, " ms\n", max_len);
+        } else {
+            str_cat(out_buf, "Request timeout for icmp_seq ", max_len);
+            uint_cat(out_buf, seq, max_len);
+            str_cat(out_buf, "\n", max_len);
+        }
+
+        if (seq < count) {
+            uint64_t pause_start = rdtsc();
+            while ((rdtsc() - pause_start) < (250ULL * g_tsc_per_ms)) {
+                net_poll();
+                thread_yield();
+            }
+        }
+    }
+
+    raw_remove(pcb);
+
+    str_cat(out_buf, "--- ", max_len);
+    str_cat(out_buf, host, max_len);
+    str_cat(out_buf, " ping statistics ---\n", max_len);
+    uint_cat(out_buf, pkts_tx, max_len);
+    str_cat(out_buf, " packets transmitted, ", max_len);
+    uint_cat(out_buf, pkts_rx, max_len);
+    str_cat(out_buf, " received, ", max_len);
+    uint32_t loss = pkts_tx > 0 ? ((pkts_tx - pkts_rx) * 100 / pkts_tx) : 0;
+    uint_cat(out_buf, loss, max_len);
+    str_cat(out_buf, "% packet loss\n", max_len);
+
+    if (pkts_rx > 0) {
+        uint32_t avg_rtt = sum_rtt / pkts_rx;
+        str_cat(out_buf, "round-trip min/avg/max = ", max_len);
+        uint_cat(out_buf, min_rtt, max_len);
+        str_cat(out_buf, "/", max_len);
+        uint_cat(out_buf, avg_rtt, max_len);
+        str_cat(out_buf, "/", max_len);
+        uint_cat(out_buf, max_rtt, max_len);
+        str_cat(out_buf, " ms\n", max_len);
+    }
+
+    return (pkts_rx > 0) ? 0 : -1;
+}
+
+int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
+    if (!url || !out_buf || max_len < 64) return -1;
+    out_buf[0] = '\0';
+
+    const char* p = url;
+    if (p[0] == 'h' && p[1] == 't' && p[2] == 't' && p[3] == 'p' && p[4] == ':' && p[5] == '/' && p[6] == '/') {
+        p += 7;
+    }
+
+    char host_buf[64];
+    uint32_t h_idx = 0;
+    while (*p != '\0' && *p != ':' && *p != '/' && h_idx + 1 < sizeof(host_buf)) {
+        host_buf[h_idx++] = *p++;
+    }
+    host_buf[h_idx] = '\0';
+
+    if (host_buf[0] == '\0') {
+        str_cat(out_buf, "fetch: invalid URL or host\n", max_len);
+        return -1;
+    }
+
+    uint16_t port = 80;
+    if (*p == ':') {
+        p++;
+        uint32_t p_val = 0;
+        while (*p >= '0' && *p <= '9') {
+            p_val = p_val * 10 + (*p - '0');
+            p++;
+        }
+        if (p_val > 0 && p_val <= 65535) {
+            port = (uint16_t)p_val;
+        }
+    }
+
+    const char* path = "/";
+    if (*p == '/') {
+        path = p;
+    }
+
+    char ip_str[32];
+    if (net_resolve_host(host_buf, ip_str, sizeof(ip_str)) != 0) {
+        str_cat(out_buf, "fetch: cannot resolve host '", max_len);
+        str_cat(out_buf, host_buf, max_len);
+        str_cat(out_buf, "'\n", max_len);
+        return -1;
+    }
+
+    int32_t sock = net_socket_create(SOCKET_TYPE_TCP);
+    if (sock < 0) {
+        str_cat(out_buf, "fetch: socket allocation failed\n", max_len);
+        return -1;
+    }
+
+    if (net_socket_connect(sock, ip_str, port) != 0) {
+        net_socket_close(sock);
+        str_cat(out_buf, "fetch: connect call failed\n", max_len);
+        return -1;
+    }
+
+    extern void thread_yield(void);
+
+    uint64_t t_conn = rdtsc();
+    while (net_socket_get_state(sock) == 5 /* CONNECTING */) {
+        net_poll();
+        if ((rdtsc() - t_conn) > (5000ULL * g_tsc_per_ms)) {
+            break;
+        }
+        thread_yield();
+    }
+
+    if (net_socket_get_state(sock) != 3 /* CONNECTED */) {
+        net_socket_close(sock);
+        str_cat(out_buf, "fetch: connection failed to ", max_len);
+        str_cat(out_buf, host_buf, max_len);
+        str_cat(out_buf, "\n", max_len);
+        return -1;
+    }
+
+    char req[256];
+    req[0] = '\0';
+    str_cat(req, "GET ", sizeof(req));
+    str_cat(req, path, sizeof(req));
+    str_cat(req, " HTTP/1.0\r\nHost: ", sizeof(req));
+    str_cat(req, host_buf, sizeof(req));
+    str_cat(req, "\r\nUser-Agent: WoOS-Fetch/1.49\r\nConnection: close\r\n\r\n", sizeof(req));
+
+    uint32_t req_len = 0;
+    while (req[req_len] != '\0') req_len++;
+
+    uint32_t sent = 0;
+    uint64_t t_send = rdtsc();
+    while (sent < req_len) {
+        int32_t s = net_socket_send(sock, req + sent, req_len - sent);
+        if (s > 0) {
+            sent += (uint32_t)s;
+            t_send = rdtsc();
+        } else {
+            net_poll();
+            if ((rdtsc() - t_send) > (3000ULL * g_tsc_per_ms)) {
+                break;
+            }
+            thread_yield();
+        }
+    }
+
+    uint32_t total_rx = 0;
+    uint64_t t_last_rx = rdtsc();
+    while (total_rx + 1 < max_len) {
+        int32_t r = net_socket_recv(sock, out_buf + total_rx, max_len - 1 - total_rx);
+        if (r > 0) {
+            total_rx += (uint32_t)r;
+            t_last_rx = rdtsc();
+        } else if (r == 0) {
+            break;
+        } else {
+            net_poll();
+            if ((rdtsc() - t_last_rx) > (4000ULL * g_tsc_per_ms)) {
+                break;
+            }
+            thread_yield();
+        }
+    }
+    out_buf[total_rx] = '\0';
+    net_socket_close(sock);
+
+    if (total_rx == 0) {
+        str_cat(out_buf, "fetch: connected, no data returned\n", max_len);
+        return 0;
+    }
+    return (int32_t)total_rx;
 }
 
 // Заглушки для ACD (Address Conflict Detection), если lwip их требует

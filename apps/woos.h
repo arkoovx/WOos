@@ -125,6 +125,28 @@ int woos_vfs_unlink(const char* path);
 WOOS_API("woos_vfs_rename")
 int woos_vfs_rename(const char* old_path, const char* new_path);
 
+// Network APIs
+WOOS_API("woos_net_resolve")
+int woos_net_resolve(const char* hostname, char* out_ip, uint32_t max_len);
+
+WOOS_API("woos_net_get_config")
+int woos_net_get_config(char* out_buf, uint32_t max_len);
+
+WOOS_API("woos_net_ping")
+int woos_net_ping(const char* host, uint32_t count, char* out_buf, uint32_t max_len);
+
+WOOS_API("woos_net_stat")
+int woos_net_stat(char* out_buf, uint32_t max_len);
+
+WOOS_API("woos_net_arp")
+int woos_net_arp(char* out_buf, uint32_t max_len);
+
+WOOS_API("woos_net_nslookup")
+int woos_net_nslookup(const char* host, char* out_buf, uint32_t max_len);
+
+WOOS_API("woos_net_fetch")
+int woos_net_fetch(const char* url, char* out_buf, uint32_t max_len);
+
 // Compositor & Window Manager APIs
 typedef struct {
     uint32_t width;
@@ -396,6 +418,7 @@ static inline int is_system_item(const char* name) {
     if (strcasecmp_custom(base, "CALC.WAS") == 0) return 1;
     if (strcasecmp_custom(base, "NOTEPAD.WAS") == 0) return 1;
     if (strcasecmp_custom(base, "TERM.WAS") == 0) return 1;
+    if (strcasecmp_custom(base, "FETCH.WAS") == 0) return 1;
     if (strcasecmp_custom(base, "TESTWASI.WAS") == 0) return 1;
     return 0;
 }

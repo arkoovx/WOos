@@ -449,6 +449,7 @@ static void launch_item(int idx) {
         else if (strcmp(it->name, "NOTEPAD.WAS") == 0) launch_or_focus(it->full_path, "Notepad");
         else if (strcmp(it->name, "CALC.WAS") == 0) launch_or_focus(it->full_path, "Calculator");
         else if (strcmp(it->name, "TERM.WAS") == 0) launch_or_focus(it->full_path, "Terminal");
+        else if (strcmp(it->name, "FETCH.WAS") == 0) launch_or_focus(it->full_path, "HTTP Fetch");
         else woos_system_spawn(it->full_path);
     } else {
         // Document: open with Notepad!
@@ -764,7 +765,7 @@ static void render_screen(void) {
     // 6. Start Menu Popup
     if (g_start_menu_open) {
         int sm_w = 200;
-        int sm_h = 220;
+        int sm_h = 240;
         int sm_x = 4;
         int sm_y = SCREEN_H - TASKBAR_H - sm_h - 2;
 
@@ -781,11 +782,12 @@ static void render_screen(void) {
             "Notepad",
             "Terminal",
             "Calculator",
+            "HTTP Fetch",
             "WASI Test"
         };
 
-        for (int i = 0; i < 5; i++) {
-            int iy = sm_y + 12 + i * 36;
+        for (int i = 0; i < 6; i++) {
+            int iy = sm_y + 10 + i * 36;
             fill_rect(g_screen, SCREEN_W, SCREEN_H, sm_x + 34, iy - 2, sm_w - 38, 30, 0xE4E2D5);
             draw_app_icon(sm_x + 38, iy + 4);
             woos_draw_text(g_screen, SCREEN_W, SCREEN_H, sm_x + 72, iy + 8, sm_items[i], COLOR_TEXT_BLACK);
@@ -1160,17 +1162,18 @@ void _start(void) {
                 // Handle Start Menu click
                 if (g_start_menu_open) {
                     int sm_w = 200;
-                    int sm_h = 220;
+                    int sm_h = 240;
                     int sm_x = 4;
                     int sm_y = SCREEN_H - TASKBAR_H - sm_h - 2;
 
                     if (g_cursor_x >= sm_x && g_cursor_x < sm_x + sm_w && g_cursor_y >= sm_y && g_cursor_y < sm_y + sm_h) {
-                        int it_idx = (g_cursor_y - (sm_y + 12)) / 36;
+                        int it_idx = (g_cursor_y - (sm_y + 10)) / 36;
                         if (it_idx == 0) launch_or_focus("/EXPLORER.WAS", "File Explorer");
                         else if (it_idx == 1) launch_or_focus("/NOTEPAD.WAS", "Notepad");
                         else if (it_idx == 2) launch_or_focus("/TERM.WAS", "Terminal");
                         else if (it_idx == 3) launch_or_focus("/CALC.WAS", "Calculator");
-                        else if (it_idx == 4) launch_or_focus("/TESTWASI.WAS", "WASI Test");
+                        else if (it_idx == 4) launch_or_focus("/FETCH.WAS", "HTTP Fetch");
+                        else if (it_idx == 5) launch_or_focus("/TESTWASI.WAS", "WASI Test");
                     }
                     g_start_menu_open = 0;
                     need_redraw = 1;

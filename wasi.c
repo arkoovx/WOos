@@ -577,6 +577,70 @@ m3ApiRawFunction(wasi_net_get_config) {
     m3ApiReturn(0);
 }
 
+m3ApiRawFunction(wasi_net_ping) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, host)
+    m3ApiGetArg(uint32_t, count)
+    m3ApiGetArgMem(char*, out_buf)
+    m3ApiGetArg(uint32_t, max_len)
+
+    m3ApiCheckMem(host, 1);
+    m3ApiCheckMem(out_buf, max_len);
+
+    extern int32_t net_ping(const char* host, uint32_t count, char* out_buf, uint32_t max_len);
+    m3ApiReturn(net_ping(host, count, out_buf, max_len));
+}
+
+m3ApiRawFunction(wasi_net_stat) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(char*, out_buf)
+    m3ApiGetArg(uint32_t, max_len)
+
+    m3ApiCheckMem(out_buf, max_len);
+
+    extern void net_socket_get_stat(char* out_buf, uint32_t max_len);
+    net_socket_get_stat(out_buf, max_len);
+    m3ApiReturn(0);
+}
+
+m3ApiRawFunction(wasi_net_arp) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(char*, out_buf)
+    m3ApiGetArg(uint32_t, max_len)
+
+    m3ApiCheckMem(out_buf, max_len);
+
+    extern void net_get_arp(char* out_buf, uint32_t max_len);
+    net_get_arp(out_buf, max_len);
+    m3ApiReturn(0);
+}
+
+m3ApiRawFunction(wasi_net_nslookup) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, host)
+    m3ApiGetArgMem(char*, out_buf)
+    m3ApiGetArg(uint32_t, max_len)
+
+    m3ApiCheckMem(host, 1);
+    m3ApiCheckMem(out_buf, max_len);
+
+    extern int32_t net_nslookup(const char* host, char* out_buf, uint32_t max_len);
+    m3ApiReturn(net_nslookup(host, out_buf, max_len));
+}
+
+m3ApiRawFunction(wasi_net_fetch) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, url)
+    m3ApiGetArgMem(char*, out_buf)
+    m3ApiGetArg(uint32_t, max_len)
+
+    m3ApiCheckMem(url, 1);
+    m3ApiCheckMem(out_buf, max_len);
+
+    extern int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len);
+    m3ApiReturn(net_http_fetch(url, out_buf, max_len));
+}
+
 m3ApiRawFunction(wasi_vfs_open) {
     m3ApiReturnType(int32_t)
     m3ApiGetArgMem(const char*, path)
@@ -2045,6 +2109,16 @@ M3Result link_wasi(IM3Module module) {
     res = link_raw_func(module, "env", "woos_net_resolve", "i(**i)", &wasi_net_resolve);
     if (res) return res;
     res = link_raw_func(module, "env", "woos_net_get_config", "i(*i)", &wasi_net_get_config);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_net_ping", "i(*i*i)", &wasi_net_ping);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_net_stat", "i(*i)", &wasi_net_stat);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_net_arp", "i(*i)", &wasi_net_arp);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_net_nslookup", "i(**i)", &wasi_net_nslookup);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_net_fetch", "i(**i)", &wasi_net_fetch);
     if (res) return res;
 
     // VFS direct in "env"

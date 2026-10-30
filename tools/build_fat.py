@@ -122,6 +122,7 @@ def main():
     notepad_wasm = read_opt("apps/notepad.wasm")
     explorer_wasm = read_opt("apps/explorer.wasm")
     wasi_test_wasm = read_opt("apps/wasi_test.wasm")
+    fetch_wasm = read_opt("apps/fetch.wasm")
 
     root_files = [
         ("HELLO.TXT", b"Hello from WoOS VFS (FAT32)!\n"),
@@ -133,6 +134,7 @@ def main():
     if notepad_wasm: root_files.append(("NOTEPAD.WAS", notepad_wasm))
     if explorer_wasm: root_files.append(("EXPLORER.WAS", explorer_wasm))
     if wasi_test_wasm: root_files.append(("TESTWASI.WAS", wasi_test_wasm))
+    if fetch_wasm: root_files.append(("FETCH.WAS", fetch_wasm))
 
     # Write root files
     for name, content in root_files:
@@ -167,6 +169,7 @@ def main():
         ("NOTEPAD.WAS", notepad_wasm),
         ("TERM.WAS", term_wasm),
         ("CALC.WAS", calc_wasm),
+        ("FETCH.WAS", fetch_wasm),
         ("README.TXT", b"Welcome to WoOS Desktop!\nFiles placed in /DESKTOP appear directly on your desktop screen.\n"),
         ("TESTWASI.WAS", wasi_test_wasm)
     ]
