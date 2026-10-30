@@ -700,6 +700,48 @@ m3ApiRawFunction(wasi_thread_get_id) {
     m3ApiReturn(res);
 }
 
+static char g_open_file_target[128] = "";
+
+m3ApiRawFunction(wasi_system_set_open_file) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, path)
+    m3ApiCheckMem(path, 1);
+    
+    uint32_t i = 0;
+    while (i < sizeof(g_open_file_target) - 1 && path[i] != '\0') {
+        g_open_file_target[i] = path[i];
+        i++;
+    }
+    g_open_file_target[i] = '\0';
+    m3ApiReturn(0);
+}
+
+m3ApiRawFunction(wasi_system_get_open_file) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(char*, buf)
+    m3ApiGetArg(uint32_t, max_len)
+    m3ApiCheckMem(buf, max_len);
+    
+    if (g_open_file_target[0] != '\0') {
+        uint32_t i = 0;
+        while (i < max_len - 1 && g_open_file_target[i] != '\0') {
+            buf[i] = g_open_file_target[i];
+            i++;
+        }
+        buf[i] = '\0';
+        m3ApiReturn(1);
+    } else {
+        if (max_len > 0) buf[0] = '\0';
+        m3ApiReturn(0);
+    }
+}
+
+m3ApiRawFunction(wasi_system_clear_open_file) {
+    m3ApiReturnType(int32_t)
+    g_open_file_target[0] = '\0';
+    m3ApiReturn(0);
+}
+
 m3ApiRawFunction(wasi_system_spawn) {
     m3ApiReturnType(int32_t)
     m3ApiGetArgMem(const char*, path)
@@ -2037,6 +2079,12 @@ M3Result link_wasi(IM3Module module) {
     res = link_raw_func(module, "env", "woos_thread_get_id", "i()", &wasi_thread_get_id);
     if (res) return res;
     res = link_raw_func(module, "env", "woos_system_spawn", "i(*)", &wasi_system_spawn);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_system_set_open_file", "i(*)", &wasi_system_set_open_file);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_system_get_open_file", "i(*i)", &wasi_system_get_open_file);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_system_clear_open_file", "i()", &wasi_system_clear_open_file);
     if (res) return res;
 
     return m3Err_none;

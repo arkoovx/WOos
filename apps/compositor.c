@@ -108,6 +108,30 @@ static void launch_or_focus(const char* path, const char* title) {
     woos_system_spawn(path);
 }
 
+static void open_file_in_notepad(const char* filepath) {
+    woos_system_set_open_file(filepath);
+    int win_count = woos_graphics_get_window_count();
+    woos_window_info_t win;
+    int found_tid = -1;
+    int found_id = -1;
+    for (int i = 0; i < win_count; i++) {
+        if (woos_graphics_get_window_info(i, &win) == 0) {
+            if (strcmp(win.title, "Notepad") == 0 || strncmp(win.title, "Notepad", 7) == 0) {
+                found_id = win.id;
+                found_tid = win.thread_id;
+                break;
+            }
+        }
+    }
+
+    if (found_id >= 0 && found_tid >= 0) {
+        woos_graphics_bring_to_front(found_id);
+        woos_ipc_send(found_tid, MSG_OPEN_FILE, 0, 0, 0, 0, 0);
+    } else {
+        woos_system_spawn("/NOTEPAD.WAS");
+    }
+}
+
 // Icon Drawing Helpers
 static void draw_recycle_bin_icon(int x, int y) {
     // Wastebasket rim
@@ -270,7 +294,7 @@ static void launch_item(int idx) {
         else woos_system_spawn(it->full_path);
     } else {
         // Document: open with Notepad!
-        launch_or_focus("/NOTEPAD.WAS", "Notepad");
+        open_file_in_notepad(it->full_path);
     }
 }
 
@@ -355,6 +379,76 @@ static void paste_clipboard(void) {
     load_desktop_items();
 }
 
+static void draw_window_decorations(woos_window_info_t* win) {
+    int win_x = win->x;
+    int win_y = win->y;
+    int win_w = (int)win->w;
+    int win_h = (int)win->h;
+    int is_focused = (win->flags & 8) != 0;
+    int is_max = (win->flags & 2) != 0;
+
+    uint32_t frame_col = is_focused ? 0x0078D7 : 0x4B535D;
+    uint32_t title_col = is_focused ? 0x0078D7 : 0x333A42;
+    uint32_t text_col  = is_focused ? 0xFFFFFF : 0xBDC3C7;
+
+    // 3px outer border (if not maximized)
+    if (!is_max) {
+        // Top border above titlebar
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, win_x - 3, win_y - 25, win_w + 6, 3, frame_col);
+        // Left border
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, win_x - 3, win_y - 22, 3, win_h + 25, frame_col);
+        // Right border
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, win_x + win_w, win_y - 22, 3, win_h + 25, frame_col);
+        // Bottom border
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, win_x - 3, win_y + win_h, win_w + 6, 3, frame_col);
+    }
+
+    // Titlebar rectangle (22px high)
+    fill_rect(g_screen, SCREEN_W, SCREEN_H, win_x, win_y - 22, win_w, 22, title_col);
+
+    // Mini Window Icon (at win_x + 5, win_y - 17)
+    fill_rect(g_screen, SCREEN_W, SCREEN_H, win_x + 5, win_y - 17, 10, 10, 0x3498DB);
+    fill_rect(g_screen, SCREEN_W, SCREEN_H, win_x + 7, win_y - 15, 6, 6, 0xFFFFFF);
+
+    // Window Title String
+    woos_draw_text(g_screen, SCREEN_W, SCREEN_H, win_x + 19, win_y - 15, win->title, text_col);
+
+    // [X] Close button
+    int bx = win_x + win_w - 24;
+    int by = win_y - 21;
+    fill_rect(g_screen, SCREEN_W, SCREEN_H, bx, by, 23, 19, 0xC0392B);
+    int cx = bx + 11;
+    int cy = by + 9;
+    for (int d = -4; d <= 4; d++) {
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, cx + d, cy + d, 1, 1, 0xFFFFFF);
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, cx + d, cy - d, 1, 1, 0xFFFFFF);
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, cx + d + 1, cy + d, 1, 1, 0xFFFFFF);
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, cx + d + 1, cy - d, 1, 1, 0xFFFFFF);
+    }
+
+    // [□] Maximize/Restore button
+    bx = win_x + win_w - 48;
+    fill_rect(g_screen, SCREEN_W, SCREEN_H, bx, by, 23, 19, title_col);
+    draw_rect(g_screen, SCREEN_W, SCREEN_H, bx, by, 23, 19, is_focused ? 0x2A8CE0 : 0x4B535D);
+    cx = bx + 11;
+    cy = by + 9;
+    if (is_max) {
+        draw_rect(g_screen, SCREEN_W, SCREEN_H, cx - 2, cy - 4, 8, 7, 0xFFFFFF);
+        draw_rect(g_screen, SCREEN_W, SCREEN_H, cx - 4, cy - 2, 8, 7, 0xFFFFFF);
+    } else {
+        draw_rect(g_screen, SCREEN_W, SCREEN_H, cx - 4, cy - 4, 9, 9, 0xFFFFFF);
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, cx - 4, cy - 4, 9, 2, 0xFFFFFF);
+    }
+
+    // [_] Minimize button
+    bx = win_x + win_w - 72;
+    fill_rect(g_screen, SCREEN_W, SCREEN_H, bx, by, 23, 19, title_col);
+    draw_rect(g_screen, SCREEN_W, SCREEN_H, bx, by, 23, 19, is_focused ? 0x2A8CE0 : 0x4B535D);
+    cx = bx + 11;
+    cy = by + 9;
+    fill_rect(g_screen, SCREEN_W, SCREEN_H, cx - 4, cy + 3, 9, 2, 0xFFFFFF);
+}
+
 // Rendering Main Function
 static void render_screen(void) {
     // 1. Wallpaper background
@@ -424,6 +518,9 @@ static void render_screen(void) {
     for (int i = 0; i < win_count; i++) {
         if (woos_graphics_get_window_info(i, &win) == 0) {
             if (!(win.flags & 1)) { // not minimized
+                if (!(win.flags & 4)) { // not custom decor
+                    draw_window_decorations(&win);
+                }
                 woos_graphics_draw_window_to_buffer(win.id, g_screen, SCREEN_W, SCREEN_H);
             }
         }
@@ -852,7 +949,13 @@ void _start(void) {
                         int sub_y = g_ctx_y + 4 + 1 * 22;
                         if (g_cursor_x >= sub_x && g_cursor_x < sub_x + 140 && g_cursor_y >= sub_y && g_cursor_y < sub_y + 4 * 22) {
                             int s_idx = (g_cursor_y - (sub_y + 4)) / 22;
-                            if (s_idx == 0) launch_or_focus("/NOTEPAD.WAS", "Notepad");
+                            if (s_idx == 0) {
+                                if (g_ctx_target_item >= 0) {
+                                    open_file_in_notepad(g_items[g_ctx_target_item].full_path);
+                                } else {
+                                    launch_or_focus("/NOTEPAD.WAS", "Notepad");
+                                }
+                            }
                             else if (s_idx == 1) launch_or_focus("/EXPLORER.WAS", "File Explorer");
                             else if (s_idx == 2) launch_or_focus("/TERM.WAS", "Terminal");
                             else if (s_idx == 3) launch_or_focus("/CALC.WAS", "Calculator");

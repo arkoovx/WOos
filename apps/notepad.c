@@ -39,6 +39,10 @@ static char g_filename[64] = "/README.TXT";
 static char g_status_msg[128] = "Press Ctrl+S or click [Save] to save file";
 static int g_cursor_blink = 1;
 
+static int g_dialog_mode = 0; // 0 = none, 1 = Save As, 2 = Open File
+static char g_dialog_input[64] = "";
+static int g_dialog_input_len = 0;
+
 static int visible_rows(void) {
     return (WIN_H - TOOLBAR_H - STATUSBAR_H) / LINE_H;
 }
@@ -116,6 +120,7 @@ static void delete_row(int at_row) {
 static void load_file(const char* path) {
     g_num_rows = 0;
     strncpy(g_filename, path, sizeof(g_filename) - 1);
+    g_filename[sizeof(g_filename) - 1] = '\0';
 
     int handle = woos_vfs_open(path, VFS_MODE_READ);
     if (handle < 0) {
@@ -143,13 +148,30 @@ static void load_file(const char* path) {
             if (c == '\n') {
                 insert_row(g_num_rows, line_buf, line_len);
                 line_len = 0;
+                if (g_num_rows >= MAX_ROWS - 1) break;
             } else {
-                if (line_len < MAX_COLS - 1) {
+                // Binary and control characters handling
+                if (c == '\0') {
+                    c = '.';
+                } else if ((unsigned char)c < 32 && c != '\t') {
+                    c = '.';
+                } else if ((unsigned char)c > 126) {
+                    c = '?';
+                }
+
+                if (line_len < MAX_COLS - 2) {
                     line_buf[line_len++] = c;
+                }
+                // Automatically wrap lines at 72 chars for binary streams without newlines
+                if (line_len >= 72) {
+                    insert_row(g_num_rows, line_buf, line_len);
+                    line_len = 0;
+                    if (g_num_rows >= MAX_ROWS - 1) break;
                 }
             }
         }
         remaining -= bytes_read;
+        if (g_num_rows >= MAX_ROWS - 1) break;
     }
 
     if (line_len > 0 || g_num_rows == 0) {
@@ -215,38 +237,37 @@ static void draw_editor(void) {
     fill_rect(g_fb, WIN_W, WIN_H, 0, 0, WIN_W, TOOLBAR_H, COLOR_TOOLBAR);
     fill_rect(g_fb, WIN_W, WIN_H, 0, TOOLBAR_H - 1, WIN_W, 1, COLOR_BORDER);
 
-    // Button [Save]
-    fill_rect(g_fb, WIN_W, WIN_H, 6, 3, 50, 18, COLOR_BTN_BG);
-    draw_rect(g_fb, WIN_W, WIN_H, 6, 3, 50, 18, COLOR_BTN_BORDER);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 16, 8, "Save", COLOR_BTN_TEXT);
+    // Button [Save] (6..52)
+    fill_rect(g_fb, WIN_W, WIN_H, 6, 3, 46, 18, COLOR_BTN_BG);
+    draw_rect(g_fb, WIN_W, WIN_H, 6, 3, 46, 18, COLOR_BTN_BORDER);
+    woos_draw_text(g_fb, WIN_W, WIN_H, 14, 8, "Save", COLOR_BTN_TEXT);
 
-    // Button [Reload]
-    fill_rect(g_fb, WIN_W, WIN_H, 62, 3, 56, 18, COLOR_BTN_BG);
-    draw_rect(g_fb, WIN_W, WIN_H, 62, 3, 56, 18, COLOR_BTN_BORDER);
-    woos_draw_text(g_fb, WIN_W, WIN_H, 68, 8, "Reload", COLOR_BTN_TEXT);
+    // Button [Save As] (56..122)
+    fill_rect(g_fb, WIN_W, WIN_H, 56, 3, 66, 18, COLOR_BTN_BG);
+    draw_rect(g_fb, WIN_W, WIN_H, 56, 3, 66, 18, COLOR_BTN_BORDER);
+    woos_draw_text(g_fb, WIN_W, WIN_H, 62, 8, "Save As", COLOR_BTN_TEXT);
+
+    // Button [Open] (126..172)
+    fill_rect(g_fb, WIN_W, WIN_H, 126, 3, 46, 18, COLOR_BTN_BG);
+    draw_rect(g_fb, WIN_W, WIN_H, 126, 3, 46, 18, COLOR_BTN_BORDER);
+    woos_draw_text(g_fb, WIN_W, WIN_H, 134, 8, "Open", COLOR_BTN_TEXT);
+
+    // Button [Reload] (176..232)
+    fill_rect(g_fb, WIN_W, WIN_H, 176, 3, 56, 18, COLOR_BTN_BG);
+    draw_rect(g_fb, WIN_W, WIN_H, 176, 3, 56, 18, COLOR_BTN_BORDER);
+    woos_draw_text(g_fb, WIN_W, WIN_H, 182, 8, "Reload", COLOR_BTN_TEXT);
 
     // Filename in toolbar
     char title_buf[80];
     int pos = 0;
     const char* fn = g_filename;
-    while (*fn && pos < 50) title_buf[pos++] = *fn++;
+    while (*fn && pos < 40) title_buf[pos++] = *fn++;
     if (g_dirty) {
         title_buf[pos++] = ' ';
         title_buf[pos++] = '*';
-        title_buf[pos++] = ' ';
-        title_buf[pos++] = '(';
-        title_buf[pos++] = 'm';
-        title_buf[pos++] = 'o';
-        title_buf[pos++] = 'd';
-        title_buf[pos++] = 'i';
-        title_buf[pos++] = 'f';
-        title_buf[pos++] = 'i';
-        title_buf[pos++] = 'e';
-        title_buf[pos++] = 'd';
-        title_buf[pos++] = ')';
     }
     title_buf[pos] = '\0';
-    woos_draw_text(g_fb, WIN_W, WIN_H, 130, 8, title_buf, 0x003366);
+    woos_draw_text(g_fb, WIN_W, WIN_H, 238, 8, title_buf, 0x003366);
 
     // 2. Line numbers margin
     fill_rect(g_fb, WIN_W, WIN_H, 0, TOOLBAR_H, MARGIN_LEFT, text_h, COLOR_LINE_NUM_BG);
@@ -313,35 +334,170 @@ static void draw_editor(void) {
 
     int pos_x = WIN_W - (int)strlen(pos_buf) * CHAR_W - 12;
     woos_draw_text(g_fb, WIN_W, WIN_H, pos_x, status_y + 6, pos_buf, 0x222222);
+
+    // 7. Modal Dialog (Save As / Open)
+    if (g_dialog_mode != 0) {
+        int dw = 380;
+        int dh = 110;
+        int dx = (WIN_W - dw) / 2;
+        int dy = (WIN_H - dh) / 2;
+
+        // Shadow & Background
+        fill_rect(g_fb, WIN_W, WIN_H, dx - 2, dy - 2, dw + 4, dh + 4, 0x222222);
+        fill_rect(g_fb, WIN_W, WIN_H, dx, dy, dw, dh, 0xF2F2F2);
+        draw_rect(g_fb, WIN_W, WIN_H, dx, dy, dw, dh, 0x0078D7);
+
+        // Header
+        fill_rect(g_fb, WIN_W, WIN_H, dx, dy, dw, 22, 0x0078D7);
+        const char* dtitle = (g_dialog_mode == 1) ? "Save File As..." : "Open File...";
+        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 8, dy + 6, dtitle, 0xFFFFFF);
+
+        // Prompt
+        const char* prompt = (g_dialog_mode == 1) ? "Enter destination path on disk:" : "Enter file path to open:";
+        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 12, dy + 30, prompt, 0x222222);
+
+        // Text input field
+        fill_rect(g_fb, WIN_W, WIN_H, dx + 12, dy + 46, dw - 24, 22, 0xFFFFFF);
+        draw_rect(g_fb, WIN_W, WIN_H, dx + 12, dy + 46, dw - 24, 22, 0x7A7A7A);
+
+        char disp_input[70];
+        strncpy(disp_input, g_dialog_input, 60);
+        disp_input[60] = '\0';
+        int dlen = (int)strlen(disp_input);
+        disp_input[dlen] = '_';
+        disp_input[dlen + 1] = '\0';
+        woos_draw_text(g_fb, WIN_W, WIN_H, dx + 16, dy + 52, disp_input, 0x000000);
+
+        // [OK] button
+        fill_rect(g_fb, WIN_W, WIN_H, dx + dw - 150, dy + dh - 32, 60, 22, 0x0078D7);
+        woos_draw_text(g_fb, WIN_W, WIN_H, dx + dw - 132, dy + dh - 26, "OK", 0xFFFFFF);
+
+        // [Cancel] button
+        fill_rect(g_fb, WIN_W, WIN_H, dx + dw - 80, dy + dh - 32, 60, 22, 0xE0E0E0);
+        draw_rect(g_fb, WIN_W, WIN_H, dx + dw - 80, dy + dh - 32, 60, 22, 0x999999);
+        woos_draw_text(g_fb, WIN_W, WIN_H, dx + dw - 68, dy + dh - 26, "Cancel", 0x333333);
+    }
 }
 
 static void handle_click(int x, int y) {
+    if (g_dialog_mode != 0) {
+        int dw = 380;
+        int dh = 110;
+        int dx = (WIN_W - dw) / 2;
+        int dy = (WIN_H - dh) / 2;
+
+        // OK button: dx + dw - 150 to dx + dw - 90, dy + dh - 32 to dy + dh - 10
+        if (x >= dx + dw - 150 && x <= dx + dw - 90 && y >= dy + dh - 32 && y <= dy + dh - 10) {
+            if (g_dialog_input[0]) {
+                if (g_dialog_mode == 1) { // Save As
+                    strncpy(g_filename, g_dialog_input, sizeof(g_filename) - 1);
+                    save_file();
+                } else if (g_dialog_mode == 2) { // Open File
+                    load_file(g_dialog_input);
+                }
+            }
+            g_dialog_mode = 0;
+            return;
+        }
+
+        // Cancel button: dx + dw - 80 to dx + dw - 20, dy + dh - 32 to dy + dh - 10
+        if (x >= dx + dw - 80 && x <= dx + dw - 20 && y >= dy + dh - 32 && y <= dy + dh - 10) {
+            g_dialog_mode = 0;
+            return;
+        }
+
+        return;
+    }
+
     if (y < TOOLBAR_H) {
         // [Save]
-        if (x >= 6 && x <= 56) {
+        if (x >= 6 && x <= 52) {
             save_file();
         }
+        // [Save As]
+        else if (x >= 56 && x <= 122) {
+            g_dialog_mode = 1;
+            strncpy(g_dialog_input, g_filename, sizeof(g_dialog_input) - 1);
+            g_dialog_input_len = (int)strlen(g_dialog_input);
+        }
+        // [Open]
+        else if (x >= 126 && x <= 172) {
+            g_dialog_mode = 2;
+            g_dialog_input[0] = '/';
+            g_dialog_input[1] = '\0';
+            g_dialog_input_len = 1;
+        }
         // [Reload]
-        else if (x >= 62 && x <= 118) {
+        else if (x >= 176 && x <= 232) {
             load_file(g_filename);
         }
         return;
     }
 
     if (y >= TOOLBAR_H && y < WIN_H - STATUSBAR_H) {
-        int clicked_row = g_row_off + (y - TOOLBAR_H) / LINE_H;
-        if (clicked_row < 0) clicked_row = 0;
-        if (clicked_row >= g_num_rows) clicked_row = g_num_rows - 1;
-        g_cy = clicked_row;
+        if (g_num_rows <= 0) {
+            g_cy = 0;
+            g_cx = 0;
+        } else {
+            int clicked_row = g_row_off + (y - TOOLBAR_H) / LINE_H;
+            if (clicked_row < 0) clicked_row = 0;
+            if (clicked_row >= g_num_rows) clicked_row = g_num_rows - 1;
+            g_cy = clicked_row;
 
-        int clicked_col = g_col_off + (x - MARGIN_LEFT - 4 + CHAR_W / 2) / CHAR_W;
-        if (clicked_col < 0) clicked_col = 0;
-        if (clicked_col > g_row_len[g_cy]) clicked_col = g_row_len[g_cy];
-        g_cx = clicked_col;
+            int text_x = x - (MARGIN_LEFT + 4);
+            int clicked_col = 0;
+            if (text_x > 0) {
+                clicked_col = g_col_off + (text_x + CHAR_W / 2) / CHAR_W;
+            }
+            if (clicked_col < 0) clicked_col = 0;
+            if (clicked_col > g_row_len[g_cy]) clicked_col = g_row_len[g_cy];
+            g_cx = clicked_col;
+        }
+        g_cursor_blink = 1;
+        set_status("Cursor moved");
     }
 }
 
 static void handle_key(int ascii, int scancode) {
+    if (g_dialog_mode != 0) {
+        // Enter: Commit dialog
+        if (ascii == '\n' || ascii == '\r' || scancode == 0x1C) {
+            if (g_dialog_input[0]) {
+                if (g_dialog_mode == 1) { // Save As
+                    strncpy(g_filename, g_dialog_input, sizeof(g_filename) - 1);
+                    save_file();
+                } else if (g_dialog_mode == 2) { // Open
+                    load_file(g_dialog_input);
+                }
+            }
+            g_dialog_mode = 0;
+            return;
+        }
+
+        // Esc: Cancel dialog
+        if (ascii == 27 || scancode == 0x01) {
+            g_dialog_mode = 0;
+            return;
+        }
+
+        // Backspace
+        if (ascii == '\b' || scancode == 0x0E) {
+            if (g_dialog_input_len > 0) {
+                g_dialog_input[--g_dialog_input_len] = '\0';
+            }
+            return;
+        }
+
+        // Printable input
+        if (ascii >= 32 && ascii <= 126 && g_dialog_input_len < 60) {
+            g_dialog_input[g_dialog_input_len++] = (char)ascii;
+            g_dialog_input[g_dialog_input_len] = '\0';
+            return;
+        }
+
+        return;
+    }
+
     // Ctrl+S: Save
     if (ascii == 19 || (ascii == 's' && (scancode == 0x1F))) {
         save_file();
@@ -471,7 +627,14 @@ void _start(void) {
     int win_id = woos_create_window(WIN_W, WIN_H, "Notepad", 0);
     if (win_id < 0) return;
 
-    load_file("/README.TXT");
+    char open_buf[64] = "";
+    if (woos_system_get_open_file(open_buf, sizeof(open_buf)) > 0 && open_buf[0] != '\0') {
+        load_file(open_buf);
+        woos_system_clear_open_file();
+    } else {
+        load_file("/README.TXT");
+    }
+
     draw_editor();
     woos_blit_window(win_id, g_fb, WIN_W, WIN_H);
 
@@ -484,6 +647,13 @@ void _start(void) {
             if (msg.type == MSG_CLOSE) {
                 woos_destroy_window(win_id);
                 return;
+            } else if (msg.type == MSG_OPEN_FILE) {
+                char req_buf[64] = "";
+                if (woos_system_get_open_file(req_buf, sizeof(req_buf)) > 0 && req_buf[0] != '\0') {
+                    load_file(req_buf);
+                    woos_system_clear_open_file();
+                    needs_redraw = 1;
+                }
             } else if (msg.type == MSG_CLICK) {
                 handle_click((int)msg.arg1, (int)msg.arg2);
                 needs_redraw = 1;

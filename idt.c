@@ -363,6 +363,7 @@ static const char kbd_us_upper[128] = {
 
 static uint8_t g_kbd_shift = 0;
 static uint8_t g_kbd_ctrl = 0;
+static uint8_t g_kbd_caps_lock = 0;
 static uint8_t g_kbd_extended = 0;
 
 void idt_handle_irq(uint32_t vector) {
@@ -385,12 +386,21 @@ void idt_handle_irq(uint32_t vector) {
             } else if (sc == 0x9D) {
                 g_kbd_ctrl = 0;
                 g_kbd_extended = 0;
+            } else if (sc == 0x3A) {
+                // Caps Lock toggle
+                g_kbd_caps_lock ^= 1;
+                g_kbd_extended = 0;
             } else if (!(sc & 0x80)) {
                 char ascii = 0;
                 if (!g_kbd_extended && sc < 128) {
-                    ascii = g_kbd_shift ? kbd_us_upper[sc] : kbd_us_lower[sc];
+                    char lower = kbd_us_lower[sc];
+                    int is_letter = (lower >= 'a' && lower <= 'z');
+                    int use_upper = is_letter ? (g_kbd_shift ^ g_kbd_caps_lock) : g_kbd_shift;
+                    ascii = use_upper ? kbd_us_upper[sc] : lower;
                     if (g_kbd_ctrl && ascii >= 'a' && ascii <= 'z') {
                         ascii = (char)(ascii - 'a' + 1);
+                    } else if (g_kbd_ctrl && ascii >= 'A' && ascii <= 'Z') {
+                        ascii = (char)(ascii - 'A' + 1);
                     }
                 }
                 if (ascii != 0 || sc == 0x48 || sc == 0x50 || sc == 0x4B || sc == 0x4D ||
@@ -399,7 +409,7 @@ void idt_handle_irq(uint32_t vector) {
                     ev.type = INPUT_EVENT_KEY_DOWN;
                     ev.x = (uint16_t)(uint8_t)ascii;
                     ev.y = (uint16_t)sc;
-                    ev.buttons = (uint16_t)(g_kbd_shift | (g_kbd_ctrl << 1));
+                    ev.buttons = (uint16_t)(g_kbd_shift | (g_kbd_ctrl << 1) | (g_kbd_caps_lock << 2));
                     input_push(&ev);
                 }
                 g_kbd_extended = 0;

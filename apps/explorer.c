@@ -181,6 +181,30 @@ static void load_directory(const char* path) {
     }
 }
 
+static void open_file_in_notepad(const char* filepath) {
+    woos_system_set_open_file(filepath);
+    int win_count = woos_graphics_get_window_count();
+    woos_window_info_t win;
+    int found_tid = -1;
+    int found_id = -1;
+    for (int i = 0; i < win_count; i++) {
+        if (woos_graphics_get_window_info(i, &win) == 0) {
+            if (strcmp(win.title, "Notepad") == 0 || strncmp(win.title, "Notepad", 7) == 0) {
+                found_id = win.id;
+                found_tid = win.thread_id;
+                break;
+            }
+        }
+    }
+
+    if (found_id >= 0 && found_tid >= 0) {
+        woos_graphics_bring_to_front(found_id);
+        woos_ipc_send(found_tid, MSG_OPEN_FILE, 0, 0, 0, 0, 0);
+    } else {
+        woos_system_spawn("/NOTEPAD.WAS");
+    }
+}
+
 static void open_item(int idx) {
     if (idx < 0 || idx >= g_item_count) return;
 
@@ -213,7 +237,7 @@ static void open_item(int idx) {
         if (len >= 4 && (strcmp(&fn[len - 4], ".WAS") == 0 || strcmp(&fn[len - 4], ".was") == 0)) {
             woos_system_spawn(full_path);
         } else {
-            woos_system_spawn("/NOTEPAD.WAS");
+            open_file_in_notepad(full_path);
         }
     }
 }
@@ -741,7 +765,24 @@ static void handle_click(int x, int y) {
             int sy = g_ctx_y + 4 + 1 * 22;
             if (x >= sx && x < sx + 135 && y >= sy && y < sy + 4 * 22) {
                 int sidx = (y - (sy + 4)) / 22;
-                if (sidx == 0) woos_system_spawn("/NOTEPAD.WAS");
+                char target_p[64];
+                if (g_ctx_target_idx >= 0) {
+                    if (strcmp(g_current_path, "/") == 0) {
+                        strcpy(target_p, "/");
+                        strcat(target_p, g_items[g_ctx_target_idx].name);
+                    } else {
+                        strcpy(target_p, g_current_path);
+                        strcat(target_p, "/");
+                        strcat(target_p, g_items[g_ctx_target_idx].name);
+                    }
+                } else {
+                    target_p[0] = '\0';
+                }
+
+                if (sidx == 0) {
+                    if (target_p[0]) open_file_in_notepad(target_p);
+                    else woos_system_spawn("/NOTEPAD.WAS");
+                }
                 else if (sidx == 1) woos_system_spawn("/EXPLORER.WAS");
                 else if (sidx == 2) woos_system_spawn("/TERM.WAS");
                 else if (sidx == 3) woos_system_spawn("/CALC.WAS");
