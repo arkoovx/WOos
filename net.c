@@ -12,6 +12,7 @@
 #include "lwip/prot/icmp.h"
 #include "lwip/inet_chksum.h"
 #include "net_socket.h"
+#include "serial.h"
 #include "timer.h"
 #include "kernel.h"
 
@@ -89,15 +90,15 @@ int32_t net_resolve_host(const char* hostname, char* out_ip, uint32_t max_len) {
     if (!hostname || !out_ip || max_len < 16) return -1;
 
     ip_addr_t addr;
-    if (ip4addr_aton(hostname, &addr)) {
-        ip4addr_ntoa_r(&addr, out_ip, (int)max_len);
+    if (ipaddr_aton(hostname, &addr)) {
+        ipaddr_ntoa_r(&addr, out_ip, (int)max_len);
         return 0;
     }
 
     dns_query_ctx_t ctx = {0, 0, {0}};
     err_t err = dns_gethostbyname(hostname, &addr, dns_callback, &ctx);
     if (err == ERR_OK) {
-        ip4addr_ntoa_r(&addr, out_ip, (int)max_len);
+        ipaddr_ntoa_r(&addr, out_ip, (int)max_len);
         return 0;
     }
     if (err != ERR_INPROGRESS) {
@@ -117,7 +118,7 @@ int32_t net_resolve_host(const char* hostname, char* out_ip, uint32_t max_len) {
     }
 
     if (ctx.resolved) {
-        ip4addr_ntoa_r(&ctx.addr, out_ip, (int)max_len);
+        ipaddr_ntoa_r(&ctx.addr, out_ip, (int)max_len);
         return 0;
     }
     return -1;
@@ -327,8 +328,8 @@ int32_t net_ping(const char* host, uint32_t count, char* out_buf, uint32_t max_l
 
     ip_addr_t target_ip;
     char ip_str[32];
-    if (ip4addr_aton(host, &target_ip)) {
-        ip4addr_ntoa_r(&target_ip, ip_str, sizeof(ip_str));
+    if (ipaddr_aton(host, &target_ip)) {
+        ipaddr_ntoa_r(&target_ip, ip_str, sizeof(ip_str));
     } else {
         if (net_resolve_host(host, ip_str, sizeof(ip_str)) != 0) {
             str_cat(out_buf, "ping: unknown host ", max_len);
@@ -336,7 +337,7 @@ int32_t net_ping(const char* host, uint32_t count, char* out_buf, uint32_t max_l
             str_cat(out_buf, "\n", max_len);
             return -1;
         }
-        ip4addr_aton(ip_str, &target_ip);
+        ipaddr_aton(ip_str, &target_ip);
     }
 
     str_cat(out_buf, "PING ", max_len);
@@ -353,6 +354,7 @@ int32_t net_ping(const char* host, uint32_t count, char* out_buf, uint32_t max_l
 
     g_ping_state.id = 0xAFAF;
     raw_recv(pcb, ping_raw_recv, NULL);
+    raw_bind(pcb, IP_ADDR_ANY);
 
     uint32_t pkts_tx = 0;
     uint32_t pkts_rx = 0;
@@ -383,7 +385,7 @@ int32_t net_ping(const char* host, uint32_t count, char* out_buf, uint32_t max_l
 
         uint64_t t_send = rdtsc();
         pkts_tx++;
-        raw_sendto(pcb, p, &target_ip);
+        (void)raw_sendto(pcb, p, &target_ip);
         pbuf_free(p);
 
         uint64_t timeout_tsc = 1000ULL * g_tsc_per_ms;
