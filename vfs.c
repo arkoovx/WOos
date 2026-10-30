@@ -107,17 +107,28 @@ static int32_t allocate_handle(void) {
 }
 
 int32_t vfs_create_socket_handle(int32_t socket_id) {
+    uint64_t flags = irq_save();
     int32_t h = allocate_handle();
-    if (h < 0) return -1;
+    if (h < 0) {
+        irq_restore(flags);
+        return -1;
+    }
     g_handles[h].type = VFS_HANDLE_SOCKET;
     g_handles[h].socket_id = socket_id;
+    irq_restore(flags);
     return h;
 }
 
 int32_t vfs_get_socket_id(int32_t handle) {
     if (handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) return -1;
-    if (!g_handles[handle].in_use || g_handles[handle].type != VFS_HANDLE_SOCKET) return -1;
-    return g_handles[handle].socket_id;
+    uint64_t flags = irq_save();
+    if (!g_handles[handle].in_use || g_handles[handle].type != VFS_HANDLE_SOCKET) {
+        irq_restore(flags);
+        return -1;
+    }
+    int32_t sock = g_handles[handle].socket_id;
+    irq_restore(flags);
+    return sock;
 }
 
 int32_t vfs_open(const char* path, uint8_t mode) {
@@ -125,8 +136,13 @@ int32_t vfs_open(const char* path, uint8_t mode) {
         return -1;
     }
 
+    uint64_t flags = irq_save();
+
     int32_t h = allocate_handle();
-    if (h < 0) return -1;
+    if (h < 0) {
+        irq_restore(flags);
+        return -1;
+    }
 
     // 1. Проверяем, не открываем ли мы корневой каталог "/" или любую папку
     // Для простоты, если путь оканчивается на "/" или является "/" — открываем как каталог.
@@ -137,9 +153,11 @@ int32_t vfs_open(const char* path, uint8_t mode) {
         FRESULT res = f_opendir(&g_handles[h].dir, path);
         if (res == FR_OK) {
             g_handles[h].type = VFS_HANDLE_DIR;
+            irq_restore(flags);
             return h;
         }
         g_handles[h].in_use = 0u;
+        irq_restore(flags);
         return -1;
     }
 
@@ -165,6 +183,7 @@ int32_t vfs_open(const char* path, uint8_t mode) {
     FRESULT res = f_open(&g_handles[h].fil, path, fat_mode);
     if (res == FR_OK) {
         g_handles[h].type = VFS_HANDLE_FILE;
+        irq_restore(flags);
         return h;
     }
 
@@ -173,10 +192,12 @@ int32_t vfs_open(const char* path, uint8_t mode) {
     res = f_opendir(&g_handles[h].dir, path);
     if (res == FR_OK) {
         g_handles[h].type = VFS_HANDLE_DIR;
+        irq_restore(flags);
         return h;
     }
 
     g_handles[h].in_use = 0u;
+    irq_restore(flags);
     return -1;
 }
 
@@ -185,24 +206,35 @@ uint32_t vfs_read(int32_t handle, void* buffer, uint32_t bytes) {
         return 0u;
     }
 
+    uint64_t flags = irq_save();
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use) return 0u;
+    if (!h->in_use) {
+        irq_restore(flags);
+        return 0u;
+    }
 
     if (h->type == VFS_HANDLE_SOCKET) {
-        int32_t res = net_socket_recv(h->socket_id, buffer, bytes);
+        int32_t sock = h->socket_id;
+        irq_restore(flags);
+        int32_t res = net_socket_recv(sock, buffer, bytes);
         return (res < 0) ? 0u : (uint32_t)res;
     }
 
-    if (h->type != VFS_HANDLE_FILE) return 0u;
+    if (h->type != VFS_HANDLE_FILE) {
+        irq_restore(flags);
+        return 0u;
+    }
 
     UINT br = 0;
     serial_printf("[VFS] reading from handle %d: type=%d, in_use=%d, fptr=%u, size=%u\n", 
                   handle, (int)h->type, (int)h->in_use, (uint32_t)h->fil.fptr, (uint32_t)f_size(&h->fil));
     FRESULT res = f_read(&h->fil, buffer, (UINT)bytes, &br);
     if (res == FR_OK) {
+        irq_restore(flags);
         return (uint32_t)br;
     }
     serial_printf("[VFS] f_read error: %d (handle=%d, bytes=%u)\n", (int)res, handle, bytes);
+    irq_restore(flags);
     return 0u;
 }
 
@@ -211,21 +243,32 @@ uint32_t vfs_write(int32_t handle, const void* buffer, uint32_t bytes) {
         return 0u;
     }
 
+    uint64_t flags = irq_save();
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use) return 0u;
+    if (!h->in_use) {
+        irq_restore(flags);
+        return 0u;
+    }
 
     if (h->type == VFS_HANDLE_SOCKET) {
-        int32_t res = net_socket_send(h->socket_id, buffer, bytes);
+        int32_t sock = h->socket_id;
+        irq_restore(flags);
+        int32_t res = net_socket_send(sock, buffer, bytes);
         return (res < 0) ? 0u : (uint32_t)res;
     }
 
-    if (h->type != VFS_HANDLE_FILE) return 0u;
+    if (h->type != VFS_HANDLE_FILE) {
+        irq_restore(flags);
+        return 0u;
+    }
 
     UINT bw = 0;
     FRESULT res = f_write(&h->fil, buffer, (UINT)bytes, &bw);
     if (res == FR_OK) {
+        irq_restore(flags);
         return (uint32_t)bw;
     }
+    irq_restore(flags);
     return 0u;
 }
 
@@ -234,10 +277,15 @@ int32_t vfs_seek(int32_t handle, uint32_t offset) {
         return -1;
     }
 
+    uint64_t flags = irq_save();
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->type != VFS_HANDLE_FILE) return -1;
+    if (!h->in_use || h->type != VFS_HANDLE_FILE) {
+        irq_restore(flags);
+        return -1;
+    }
 
     FRESULT res = f_lseek(&h->fil, (FSIZE_t)offset);
+    irq_restore(flags);
     if (res == FR_OK) {
         return 0;
     }
@@ -249,10 +297,16 @@ uint32_t vfs_tell(int32_t handle) {
         return 0;
     }
 
+    uint64_t flags = irq_save();
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->type != VFS_HANDLE_FILE) return 0;
+    if (!h->in_use || h->type != VFS_HANDLE_FILE) {
+        irq_restore(flags);
+        return 0;
+    }
 
-    return (uint32_t)f_tell(&h->fil);
+    uint32_t pos = (uint32_t)f_tell(&h->fil);
+    irq_restore(flags);
+    return pos;
 }
 
 uint32_t vfs_size(int32_t handle) {
@@ -260,10 +314,16 @@ uint32_t vfs_size(int32_t handle) {
         return 0;
     }
 
+    uint64_t flags = irq_save();
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->type != VFS_HANDLE_FILE) return 0;
+    if (!h->in_use || h->type != VFS_HANDLE_FILE) {
+        irq_restore(flags);
+        return 0;
+    }
 
-    return (uint32_t)f_size(&h->fil);
+    uint32_t sz = (uint32_t)f_size(&h->fil);
+    irq_restore(flags);
+    return sz;
 }
 
 int32_t vfs_readdir(int32_t handle, vfs_dirent_t* out_entry) {
@@ -271,18 +331,24 @@ int32_t vfs_readdir(int32_t handle, vfs_dirent_t* out_entry) {
         return -1;
     }
 
+    uint64_t flags = irq_save();
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->type != VFS_HANDLE_DIR) return -1;
+    if (!h->in_use || h->type != VFS_HANDLE_DIR) {
+        irq_restore(flags);
+        return -1;
+    }
 
     FILINFO fno;
     FRESULT res = f_readdir(&h->dir, &fno);
     if (res != FR_OK || fno.fname[0] == '\0') {
+        irq_restore(flags);
         return 0; // Конец каталога
     }
 
     copy_string(out_entry->name, fno.fname, sizeof(out_entry->name));
     out_entry->is_dir = (fno.fattrib & AM_DIR) ? 1u : 0u;
     out_entry->size = (uint32_t)fno.fsize;
+    irq_restore(flags);
     return 1;
 }
 
@@ -291,11 +357,21 @@ void vfs_close(int32_t handle) {
         return;
     }
 
+    uint64_t flags = irq_save();
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use) return;
+    if (!h->in_use) {
+        irq_restore(flags);
+        return;
+    }
 
     if (h->type == VFS_HANDLE_SOCKET) {
-        net_socket_close(h->socket_id);
+        int32_t sock = h->socket_id;
+        h->in_use = 0u;
+        h->type = VFS_HANDLE_FILE;
+        h->socket_id = -1;
+        irq_restore(flags);
+        net_socket_close(sock);
+        return;
     } else if (h->type == VFS_HANDLE_DIR) {
         f_closedir(&h->dir);
     } else {
@@ -305,17 +381,29 @@ void vfs_close(int32_t handle) {
     h->in_use = 0u;
     h->type = VFS_HANDLE_FILE;
     h->socket_id = -1;
+    irq_restore(flags);
 }
 
 int32_t vfs_get_handle_type(int32_t handle) {
-    if (handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES || !g_handles[handle].in_use) return -1;
-    return (int32_t)g_handles[handle].type;
+    if (handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) return -1;
+    uint64_t flags = irq_save();
+    if (!g_handles[handle].in_use) {
+        irq_restore(flags);
+        return -1;
+    }
+    int32_t type = (int32_t)g_handles[handle].type;
+    irq_restore(flags);
+    return type;
 }
 
 int32_t vfs_fstat(int32_t handle, vfs_dirent_t* out_stat) {
     if (!g_vfs_ready || !out_stat || handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) return -1;
+    uint64_t flags = irq_save();
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use) return -1;
+    if (!h->in_use) {
+        irq_restore(flags);
+        return -1;
+    }
     memset(out_stat, 0, sizeof(vfs_dirent_t));
     if (h->type == VFS_HANDLE_DIR) {
         out_stat->is_dir = 1;
@@ -327,50 +415,79 @@ int32_t vfs_fstat(int32_t handle, vfs_dirent_t* out_stat) {
         out_stat->is_dir = 0;
         out_stat->size = (uint32_t)f_size(&h->fil);
     }
+    irq_restore(flags);
     return 0;
 }
 
 int32_t vfs_stat(const char* path, vfs_dirent_t* out_stat) {
     if (!g_vfs_ready || !path || !out_stat) return -1;
+    uint64_t flags = irq_save();
     FILINFO fno;
     FRESULT res = f_stat(path, &fno);
-    if (res != FR_OK) return -1;
+    if (res != FR_OK) {
+        irq_restore(flags);
+        return -1;
+    }
     copy_string(out_stat->name, fno.fname, sizeof(out_stat->name));
     out_stat->is_dir = (fno.fattrib & AM_DIR) ? 1u : 0u;
     out_stat->size = (uint32_t)fno.fsize;
+    irq_restore(flags);
     return 0;
 }
 
 int32_t vfs_mkdir(const char* path) {
     if (!g_vfs_ready || !path) return -1;
+    uint64_t flags = irq_save();
     FRESULT res = f_mkdir(path);
+    irq_restore(flags);
     return (res == FR_OK) ? 0 : -1;
 }
 
 int32_t vfs_unlink(const char* path) {
     if (!g_vfs_ready || !path) return -1;
+    uint64_t flags = irq_save();
     FRESULT res = f_unlink(path);
+    irq_restore(flags);
     return (res == FR_OK) ? 0 : -1;
 }
 
 int32_t vfs_rename(const char* old_path, const char* new_path) {
     if (!g_vfs_ready || !old_path || !new_path) return -1;
+    uint64_t flags = irq_save();
     FRESULT res = f_rename(old_path, new_path);
+    irq_restore(flags);
     return (res == FR_OK) ? 0 : -1;
 }
 
 int32_t vfs_truncate(int32_t handle, uint32_t size) {
     if (!g_vfs_ready || handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) return -1;
+    uint64_t flags = irq_save();
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->type != VFS_HANDLE_FILE) return -1;
-    if (f_lseek(&h->fil, (FSIZE_t)size) != FR_OK) return -1;
-    if (f_truncate(&h->fil) != FR_OK) return -1;
+    if (!h->in_use || h->type != VFS_HANDLE_FILE) {
+        irq_restore(flags);
+        return -1;
+    }
+    if (f_lseek(&h->fil, (FSIZE_t)size) != FR_OK) {
+        irq_restore(flags);
+        return -1;
+    }
+    if (f_truncate(&h->fil) != FR_OK) {
+        irq_restore(flags);
+        return -1;
+    }
+    irq_restore(flags);
     return 0;
 }
 
 int32_t vfs_sync(int32_t handle) {
     if (!g_vfs_ready || handle < 0 || handle >= (int32_t)VFS_MAX_HANDLES) return -1;
+    uint64_t flags = irq_save();
     vfs_handle_t* h = &g_handles[handle];
-    if (!h->in_use || h->type != VFS_HANDLE_FILE) return -1;
-    return (f_sync(&h->fil) == FR_OK) ? 0 : -1;
+    if (!h->in_use || h->type != VFS_HANDLE_FILE) {
+        irq_restore(flags);
+        return -1;
+    }
+    FRESULT res = f_sync(&h->fil);
+    irq_restore(flags);
+    return (res == FR_OK) ? 0 : -1;
 }

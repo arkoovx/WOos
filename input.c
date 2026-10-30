@@ -34,13 +34,11 @@ void input_init(void) {
 }
 
 static inline uint64_t save_interrupts(void) {
-    uint64_t rflags;
-    __asm__ __volatile__("pushf; pop %0; cli" : "=r"(rflags));
-    return rflags;
+    return irq_save();
 }
 
 static inline void restore_interrupts(uint64_t rflags) {
-    __asm__ __volatile__("push %0; popf" : : "r"(rflags));
+    irq_restore(rflags);
 }
 
 uint8_t input_push(const input_event_t* event) {

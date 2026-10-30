@@ -61,6 +61,16 @@ static inline void write_cr3(uint64_t val) {
     __asm__ __volatile__("mov %0, %%cr3" : : "r"(val));
 }
 
+static inline uint64_t irq_save(void) {
+    uint64_t rflags;
+    __asm__ __volatile__("pushf; pop %0; cli" : "=r"(rflags) : : "memory");
+    return rflags;
+}
+
+static inline void irq_restore(uint64_t rflags) {
+    __asm__ __volatile__("push %0; popf" : : "r"(rflags) : "memory", "cc");
+}
+
 video_info_t* get_video_info(void);
 
 #define MAX_WINDOWS 8

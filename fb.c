@@ -668,17 +668,20 @@ extern void* memset(void* s, int c, size_t n);
 extern void* memcpy(void* dest, const void* src, size_t n);
 
 int32_t woos_graphics_create_window_ex(uint32_t w, uint32_t h, const char* title, uint32_t flags) {
-    if (g_window_count >= MAX_WINDOWS) {
-        serial_printf("[WinMgr] Error: MAX_WINDOWS reached!\n");
-        return -1;
-    }
-    
     uint32_t* buf = (uint32_t*)kheap_alloc(w * h * 4);
     if (!buf) {
         serial_printf("[WinMgr] Error: failed to allocate window buffer (%dx%d)\n", w, h);
         return -1;
     }
     memset(buf, 0, w * h * 4);
+
+    uint64_t irq_flags = irq_save();
+    if (g_window_count >= MAX_WINDOWS) {
+        irq_restore(irq_flags);
+        kheap_free(buf);
+        serial_printf("[WinMgr] Error: MAX_WINDOWS reached!\n");
+        return -1;
+    }
     
     uint32_t id = g_next_window_id++;
     uint32_t slot = g_window_count;
@@ -715,6 +718,7 @@ int32_t woos_graphics_create_window_ex(uint32_t w, uint32_t h, const char* title
     }
 
     g_window_count++;
+    irq_restore(irq_flags);
 
     serial_printf("[WinMgr] Created window %d ('%s', %dx%d, flags=0x%x) for thread %d\n", 
                   id, g_windows[slot].title, w, h, g_windows[slot].flags, g_windows[slot].thread_id);
@@ -732,12 +736,12 @@ int32_t woos_graphics_create_window(uint32_t w, uint32_t h) {
 }
 
 int32_t woos_graphics_destroy_window(uint32_t window_id) {
+    uint32_t* buf_to_free = 0;
+    uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
             serial_printf("[WinMgr] Destroying window %d ('%s')\n", window_id, g_windows[i].title);
-            if (g_windows[i].buffer) {
-                kheap_free(g_windows[i].buffer);
-            }
+            buf_to_free = g_windows[i].buffer;
             for (uint32_t j = i; j + 1 < g_window_count; j++) {
                 g_windows[j] = g_windows[j + 1];
             }
@@ -747,6 +751,12 @@ int32_t woos_graphics_destroy_window(uint32_t window_id) {
             if (g_window_count > 0) {
                 g_windows[g_window_count - 1].flags |= WOOS_WIN_FLAG_FOCUSED;
             }
+            irq_restore(flags);
+
+            if (buf_to_free) {
+                kheap_free(buf_to_free);
+            }
+
             input_event_t ev = { .type = INPUT_EVENT_WINDOW_CHANGE, .x = 0, .y = 0, .buttons = 0 };
             input_push(&ev);
             extern void sched_unblock_all(void);
@@ -754,21 +764,31 @@ int32_t woos_graphics_destroy_window(uint32_t window_id) {
             return 0;
         }
     }
+    irq_restore(flags);
     return -1;
 }
 
 int32_t woos_graphics_destroy_thread_windows(uint32_t thread_id) {
     int32_t destroyed = 0;
-    for (int32_t i = (int32_t)g_window_count - 1; i >= 0; i--) {
-        if (g_windows[i].thread_id == thread_id) {
-            woos_graphics_destroy_window(g_windows[i].id);
-            destroyed++;
+    while (1) {
+        uint32_t target_id = 0;
+        uint64_t flags = irq_save();
+        for (int32_t i = (int32_t)g_window_count - 1; i >= 0; i--) {
+            if (g_windows[i].thread_id == thread_id) {
+                target_id = g_windows[i].id;
+                break;
+            }
         }
+        irq_restore(flags);
+        if (target_id == 0) break;
+        woos_graphics_destroy_window(target_id);
+        destroyed++;
     }
     return destroyed;
 }
 
 int32_t woos_graphics_bring_to_front(uint32_t window_id) {
+    uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
             g_windows[i].flags &= ~WOOS_WIN_FLAG_MINIMIZED;
@@ -783,6 +803,7 @@ int32_t woos_graphics_bring_to_front(uint32_t window_id) {
                 g_windows[g_window_count - 1] = tmp;
             }
             g_windows[g_window_count - 1].flags |= WOOS_WIN_FLAG_FOCUSED;
+            irq_restore(flags);
 
             input_event_t ev = { .type = INPUT_EVENT_WINDOW_CHANGE, .x = 0, .y = 0, .buttons = 0 };
             input_push(&ev);
@@ -791,19 +812,28 @@ int32_t woos_graphics_bring_to_front(uint32_t window_id) {
             return 0;
         }
     }
+    irq_restore(flags);
     return -1;
 }
 
 int32_t woos_graphics_bring_thread_to_front(uint32_t thread_id) {
+    uint32_t target_id = 0;
+    uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].thread_id == thread_id) {
-            return woos_graphics_bring_to_front(g_windows[i].id);
+            target_id = g_windows[i].id;
+            break;
         }
+    }
+    irq_restore(flags);
+    if (target_id != 0) {
+        return woos_graphics_bring_to_front(target_id);
     }
     return -1;
 }
 
 int32_t woos_graphics_set_window_title(uint32_t window_id, const char* title) {
+    uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
             memset(g_windows[i].title, 0, sizeof(g_windows[i].title));
@@ -815,26 +845,33 @@ int32_t woos_graphics_set_window_title(uint32_t window_id, const char* title) {
                 }
                 g_windows[i].title[tlen] = '\0';
             }
+            irq_restore(flags);
             return 0;
         }
     }
+    irq_restore(flags);
     return -1;
 }
 
 int32_t woos_graphics_set_window_flags(uint32_t window_id, uint32_t flags) {
+    uint64_t irq_flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
             g_windows[i].flags = flags;
+            irq_restore(irq_flags);
             return 0;
         }
     }
+    irq_restore(irq_flags);
     return -1;
 }
 
 int32_t woos_graphics_toggle_minimize(uint32_t window_id) {
+    uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
             if (g_windows[i].flags & WOOS_WIN_FLAG_MINIMIZED) {
+                irq_restore(flags);
                 return woos_graphics_bring_to_front(window_id);
             } else {
                 g_windows[i].flags |= WOOS_WIN_FLAG_MINIMIZED;
@@ -845,6 +882,7 @@ int32_t woos_graphics_toggle_minimize(uint32_t window_id) {
                         break;
                     }
                 }
+                irq_restore(flags);
                 input_event_t ev = { .type = INPUT_EVENT_WINDOW_CHANGE, .x = 0, .y = 0, .buttons = 0 };
                 input_push(&ev);
                 extern void sched_unblock_all(void);
@@ -853,10 +891,12 @@ int32_t woos_graphics_toggle_minimize(uint32_t window_id) {
             }
         }
     }
+    irq_restore(flags);
     return -1;
 }
 
 int32_t woos_graphics_toggle_maximize(uint32_t window_id) {
+    uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
             if (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) {
@@ -879,42 +919,57 @@ int32_t woos_graphics_toggle_maximize(uint32_t window_id) {
                 }
                 g_windows[i].flags |= WOOS_WIN_FLAG_MAXIMIZED;
             }
+            irq_restore(flags);
             woos_graphics_bring_to_front(window_id);
             return 0;
         }
     }
+    irq_restore(flags);
     return -1;
 }
 
 int32_t woos_graphics_set_window_pos(uint32_t window_id, int32_t x, int32_t y) {
+    uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
             g_windows[i].x = x;
             g_windows[i].y = y;
+            irq_restore(flags);
             return 0;
         }
     }
+    irq_restore(flags);
     return -1;
 }
 
 uint32_t woos_graphics_get_window_count(void) {
-    return g_window_count;
+    uint64_t flags = irq_save();
+    uint32_t count = g_window_count;
+    irq_restore(flags);
+    return count;
 }
 
 int32_t woos_graphics_get_window_info(uint32_t index, woos_window_t* info) {
+    uint64_t flags = irq_save();
     if (index < g_window_count && info) {
         memcpy(info, &g_windows[index], sizeof(woos_window_t));
+        irq_restore(flags);
         return 0;
     }
+    irq_restore(flags);
     return -1;
 }
 
 int32_t woos_graphics_get_focused_tid(void) {
+    uint64_t flags = irq_save();
     for (int32_t i = (int32_t)g_window_count - 1; i >= 0; i--) {
         if ((g_windows[i].flags & WOOS_WIN_FLAG_FOCUSED) && !(g_windows[i].flags & WOOS_WIN_FLAG_MINIMIZED)) {
-            return (int32_t)g_windows[i].thread_id;
+            int32_t tid = (int32_t)g_windows[i].thread_id;
+            irq_restore(flags);
+            return tid;
         }
     }
+    irq_restore(flags);
     return -1;
 }
 
@@ -979,6 +1034,7 @@ void fb_draw_cursor_crosshair(uint8_t* dst, uint32_t width, uint32_t height, uin
 }
 
 int32_t woos_graphics_blit_window_internal(uint32_t window_id, const uint32_t* wasm_buf, uint32_t w, uint32_t h) {
+    uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
             uint32_t buf_w = (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) ? g_windows[i].saved_w : g_windows[i].w;
@@ -1044,11 +1100,14 @@ int32_t woos_graphics_blit_window_internal(uint32_t window_id, const uint32_t* w
                 }
             }
 
+            irq_restore(flags);
+
             extern void sched_unblock_all(void);
             sched_unblock_all();
             return 0;
         }
     }
+    irq_restore(flags);
     return -1;
 }
 
@@ -1056,9 +1115,11 @@ int32_t woos_graphics_draw_window_to_screen_internal(uint32_t window_id) {
     video_info_t* info = get_video_info();
     if (!info) return -1;
     
+    uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
             if (g_windows[i].flags & WOOS_WIN_FLAG_MINIMIZED) {
+                irq_restore(flags);
                 return 0;
             }
             int32_t win_x = g_windows[i].x;
@@ -1091,6 +1152,7 @@ int32_t woos_graphics_draw_window_to_screen_internal(uint32_t window_id) {
             int32_t end_x = (win_x + (int32_t)buf_w > (int32_t)info->width) ? (int32_t)info->width - win_x : (int32_t)buf_w;
             
             if (start_x >= end_x || start_y >= end_y || !g_windows[i].buffer) {
+                irq_restore(flags);
                 return 0;
             }
             
@@ -1125,9 +1187,11 @@ int32_t woos_graphics_draw_window_to_screen_internal(uint32_t window_id) {
                     }
                 }
             }
+            irq_restore(flags);
             return 0;
         }
     }
+    irq_restore(flags);
     return -1;
 }
 
@@ -1157,9 +1221,11 @@ int32_t woos_graphics_draw_window_to_screen(uint32_t window_id) {
 }
 
 int32_t woos_graphics_draw_window_to_buffer(uint32_t window_id, uint32_t* dst_buf, uint32_t dst_w, uint32_t dst_h) {
+    uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
             if (g_windows[i].flags & WOOS_WIN_FLAG_MINIMIZED) {
+                irq_restore(flags);
                 return 0;
             }
             int32_t win_x = g_windows[i].x;
@@ -1198,9 +1264,11 @@ int32_t woos_graphics_draw_window_to_buffer(uint32_t window_id, uint32_t* dst_bu
                     memcpy(dst_row, src_row, copy_width * 4);
                 }
             }
+            irq_restore(flags);
             return 0;
         }
     }
+    irq_restore(flags);
     return -1;
 }
 

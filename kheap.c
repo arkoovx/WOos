@@ -1,6 +1,6 @@
 #include "kheap.h"
 
-#define KHEAP_ARENA_SIZE (32u * 1024u * 1024u)
+#define KHEAP_ARENA_SIZE (48u * 1024u * 1024u)
 #define KHEAP_ALIGN      16u
 
 typedef struct kheap_block {
@@ -45,6 +45,7 @@ void* kheap_alloc(uint64_t size) {
         return 0;
     }
 
+    uint64_t flags = irq_save();
     uint64_t need = align_up(size, KHEAP_ALIGN);
     uint64_t min_split_size = (uint64_t)sizeof(kheap_block_t) + KHEAP_ALIGN;
 
@@ -75,9 +76,11 @@ void* kheap_alloc(uint64_t size) {
 
         block->used = 1;
         g_kheap_used += block_payload_size(block);
+        irq_restore(flags);
         return block_payload(block);
     }
 
+    irq_restore(flags);
     return 0;
 }
 
@@ -101,20 +104,24 @@ void kheap_free(void* ptr) {
         return;
     }
 
+    uint64_t flags = irq_save();
     for (kheap_block_t* block = g_kheap_head; block != 0; block = block->next) {
         if (block_payload(block) != (uint8_t*)ptr) {
             continue;
         }
 
         if (!block->used) {
+            irq_restore(flags);
             return;
         }
 
         block->used = 0;
         g_kheap_used -= block_payload_size(block);
         coalesce_free_blocks();
+        irq_restore(flags);
         return;
     }
+    irq_restore(flags);
 }
 
 extern void* memcpy(void* restrict dest, const void* restrict src, uint64_t n);
@@ -126,12 +133,15 @@ void* kheap_realloc(void* ptr, uint64_t size) {
         return 0;
     }
 
+    uint64_t flags = irq_save();
     kheap_block_t* block = (kheap_block_t*)((uint8_t*)ptr - sizeof(kheap_block_t));
     uint64_t current_payload = block_payload_size(block);
 
     if (current_payload >= size) {
+        irq_restore(flags);
         return ptr;
     }
+    irq_restore(flags);
 
     void* new_ptr = kheap_alloc(size);
     if (!new_ptr) return 0;
@@ -147,9 +157,12 @@ uint64_t kheap_total_bytes(void) {
 }
 
 uint64_t kheap_used_bytes(void) {
-    return g_kheap_used;
+    uint64_t flags = irq_save();
+    uint64_t used = g_kheap_used;
+    irq_restore(flags);
+    return used;
 }
 
 uint64_t kheap_free_bytes(void) {
-    return kheap_total_bytes() - g_kheap_used;
+    return kheap_total_bytes() - kheap_used_bytes();
 }
