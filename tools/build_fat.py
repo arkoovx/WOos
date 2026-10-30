@@ -201,13 +201,36 @@ def main():
     wasi_test_wasm = read_opt("apps/wasi_test.wasm")
     fetch_wasm = read_opt("apps/fetch.wasm")
     imgview_wasm = read_opt("apps/imageview.wasm")
+    browser_wasm = read_opt("apps/browser.wasm")
     wallpap_bmp = create_wallpaper_bmp()
     logo_png = create_logo_png()
     photo_jpg = create_sample_jpg()
 
+    welcome_htm = b"""<!DOCTYPE html>
+<html>
+<head><title>Welcome to WoOS Navigator</title></head>
+<body>
+<h1>WoOS Web Browser</h1>
+<p>Welcome to <b>WoOS Navigator</b> with native <b>HTTPS (TLS 1.2)</b> support!</p>
+<hr>
+<h3>Quick Search &amp; Portals:</h3>
+<p>
+<a href="https://example.com">Example Domain (Cloudflare HTTPS)</a><br>
+<a href="https://www.google.com">Google Search (HTTPS)</a><br>
+<a href="http://frogfind.com">FrogFind Lightweight Search</a><br>
+<a href="http://wiby.me">Wiby Web Search</a><br>
+</p>
+<hr>
+<h3>File Downloads:</h3>
+<p>Click [DL] in the toolbar or navigate to any file link to download directly to your Desktop!</p>
+</body>
+</html>
+"""
+
     root_files = [
         ("HELLO.TXT", b"Hello from WoOS VFS (FAT32)!\n"),
-        ("README.TXT", b"WoOS high-performance read-write FAT32 filesystem image.\n")
+        ("README.TXT", b"WoOS high-performance read-write FAT32 filesystem image.\n"),
+        ("WELCOME.HTM", welcome_htm)
     ]
     if wallpap_bmp: root_files.append(("WALLPAP.BMP", wallpap_bmp))
     if logo_png: root_files.append(("LOGO.PNG", logo_png))
@@ -220,6 +243,7 @@ def main():
     if wasi_test_wasm: root_files.append(("TESTWASI.WAS", wasi_test_wasm))
     if fetch_wasm: root_files.append(("FETCH.WAS", fetch_wasm))
     if imgview_wasm: root_files.append(("IMGVIEW.WAS", imgview_wasm))
+    if browser_wasm: root_files.append(("BROWSER.WAS", browser_wasm))
 
     # Write root files
     for name, content in root_files:
@@ -251,6 +275,8 @@ def main():
     desk_count = 2
 
     desktop_files = [
+        ("BROWSER.WAS", browser_wasm),
+        ("WELCOME.HTM", welcome_htm),
         ("EXPLORER.WAS", explorer_wasm),
         ("IMGVIEW.WAS", imgview_wasm),
         ("NOTEPAD.WAS", notepad_wasm),

@@ -1,10 +1,11 @@
 NASM      := nasm
 CC        := gcc
 LD        := ld
+AR        := ar
 OBJCOPY   := objcopy
 OBJDUMP   := objdump
 
-CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra -I. -Inet -Iexternal/lwip/src/include -Iexternal/wasm3/source -Iexternal/fatfs -DLWIP_ACD=0 -DLWIP_DHCP_DOES_ACD_CHECK=0 -Dd_m3HasFloat=0 -Dd_m3VerboseErrorMessages=0
+CFLAGS    := -m64 -ffreestanding -mcmodel=large -mno-red-zone -fno-stack-protector -fno-pic -fcf-protection=none -nostdlib -nostartfiles -Wall -Wextra -I. -Inet -Iexternal/lwip/src/include -Iexternal/wasm3/source -Iexternal/fatfs -Iexternal/bearssl/inc -Iexternal/bearssl/src -DLWIP_ACD=0 -DLWIP_DHCP_DOES_ACD_CHECK=0 -Dd_m3HasFloat=0 -Dd_m3VerboseErrorMessages=0 -DBR_USE_URANDOM=0 -DBR_USE_UNIX_TIME=0
 LDFLAGS   := -m elf_x86_64 -T linker.ld
 
 BUILD_DIR := build
@@ -83,6 +84,9 @@ WASM3_OBJS_RAW := \
 
 WASM3_OBJS := $(addprefix $(BUILD_DIR)/, $(WASM3_OBJS_RAW))
 
+BEARSSL_SRCS := $(wildcard external/bearssl/src/*/*.c) $(wildcard external/bearssl/src/*.c)
+BEARSSL_OBJS := $(patsubst %.c, $(BUILD_DIR)/%.o, $(BEARSSL_SRCS))
+
 KERNEL_OBJS := $(addprefix $(BUILD_DIR)/, $(KERNEL_OBJS_RAW)) $(LWIP_OBJS) $(WASM3_OBJS)
 
 DBL_BUFFER ?= 1
@@ -124,7 +128,10 @@ apps/fetch.wasm: apps/fetch.c apps/woos.h
 apps/imageview.wasm: apps/imageview.c apps/image.h apps/woos_mem.h apps/woos.h apps/woos_dialog.h
 	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iexternal/stb/include -Wl,--no-entry -Wl,--initial-memory=33554432 -Wl,--export-memory -Wl,--export=_start apps/imageview.c -o apps/imageview.wasm
 
-woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm apps/terminal.wasm apps/notepad.wasm apps/explorer.wasm apps/wasi_test.wasm apps/fetch.wasm apps/imageview.wasm
+apps/browser.wasm: apps/browser.c apps/woos.h apps/icons.h apps/woos_dialog.h apps/image.h apps/woos_mem.h
+	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iapps -Iexternal/stb/include -Wl,--no-entry -Wl,--initial-memory=16777216 -Wl,--export-memory -Wl,--export=_start apps/browser.c -o apps/browser.wasm
+
+woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm apps/terminal.wasm apps/notepad.wasm apps/explorer.wasm apps/wasi_test.wasm apps/fetch.wasm apps/imageview.wasm apps/browser.wasm
 	python3 tools/build_fat.py
 
 boot.bin: kernel.bin boot.asm
@@ -156,8 +163,12 @@ $(BUILD_DIR)/%.o: %.asm
 	@mkdir -p $(dir $@)
 	$(NASM) -f elf64 $< -o $@
 
-kernel.elf: $(KERNEL_OBJS) linker.ld
-	$(LD) $(LDFLAGS) $(KERNEL_OBJS) -o kernel.elf
+$(BUILD_DIR)/libbearssl.a: $(BEARSSL_OBJS)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+kernel.elf: $(KERNEL_OBJS) $(BUILD_DIR)/libbearssl.a linker.ld
+	$(LD) $(LDFLAGS) $(KERNEL_OBJS) $(BUILD_DIR)/libbearssl.a -o kernel.elf
 
 kernel.bin: kernel.elf
 	$(OBJCOPY) -O binary kernel.elf kernel.bin

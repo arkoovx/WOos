@@ -153,6 +153,38 @@ static int is_image_file(const char* name) {
     return 0;
 }
 
+static int is_html_file(const char* name) {
+    if (!name) return 0;
+    int len = (int)strlen(name);
+    if (len >= 5 && (strcmp(&name[len - 5], ".html") == 0 || strcmp(&name[len - 5], ".HTML") == 0)) return 1;
+    if (len >= 4 && (strcmp(&name[len - 4], ".htm") == 0 || strcmp(&name[len - 4], ".HTM") == 0)) return 1;
+    return 0;
+}
+
+static void open_file_in_browser(const char* filepath) {
+    woos_system_set_open_file(filepath);
+    int win_count = woos_graphics_get_window_count();
+    woos_window_info_t win;
+    int found_tid = -1;
+    int found_id = -1;
+    for (int i = 0; i < win_count; i++) {
+        if (woos_graphics_get_window_info(i, &win) == 0) {
+            if (strncmp(win.title, "Web Browser", 11) == 0) {
+                found_id = win.id;
+                found_tid = win.thread_id;
+                break;
+            }
+        }
+    }
+
+    if (found_id >= 0 && found_tid >= 0) {
+        woos_graphics_bring_to_front(found_id);
+        woos_ipc_send(found_tid, MSG_OPEN_FILE, 0, 0, 0, 0, 0);
+    } else {
+        woos_system_spawn("/BROWSER.WAS");
+    }
+}
+
 static void open_file_in_imageview(const char* filepath) {
     woos_system_set_open_file(filepath);
     int win_count = woos_graphics_get_window_count();
@@ -497,13 +529,16 @@ static void launch_item(int idx) {
 
     int len = (int)strlen(it->name);
     if (len >= 4 && (strcmp(&it->name[len - 4], ".WAS") == 0 || strcmp(&it->name[len - 4], ".was") == 0)) {
-        if (strcmp(it->name, "EXPLORER.WAS") == 0) launch_or_focus(it->full_path, "File Explorer");
+        if (strcmp(it->name, "BROWSER.WAS") == 0) launch_or_focus(it->full_path, "Web Browser");
+        else if (strcmp(it->name, "EXPLORER.WAS") == 0) launch_or_focus(it->full_path, "File Explorer");
         else if (strcmp(it->name, "NOTEPAD.WAS") == 0) launch_or_focus(it->full_path, "Notepad");
         else if (strcmp(it->name, "CALC.WAS") == 0) launch_or_focus(it->full_path, "Calculator");
         else if (strcmp(it->name, "TERM.WAS") == 0) launch_or_focus(it->full_path, "Terminal");
         else if (strcmp(it->name, "FETCH.WAS") == 0) launch_or_focus(it->full_path, "HTTP Fetch");
         else if (strcmp(it->name, "IMGVIEW.WAS") == 0) launch_or_focus(it->full_path, "Image Viewer");
         else woos_system_spawn(it->full_path);
+    } else if (is_html_file(it->name)) {
+        open_file_in_browser(it->full_path);
     } else if (is_image_file(it->name)) {
         open_file_in_imageview(it->full_path);
     } else {
@@ -859,7 +894,7 @@ static void render_screen(void) {
     // 6. Start Menu Popup
     if (g_start_menu_open) {
         int sm_w = 200;
-        int sm_h = 280;
+        int sm_h = 316;
         int sm_x = 4;
         int sm_y = SCREEN_H - TASKBAR_H - sm_h - 2;
 
@@ -872,6 +907,7 @@ static void render_screen(void) {
         woos_draw_text(g_screen, SCREEN_W, SCREEN_H, sm_x + 8, sm_y + sm_h - 25, "O", COLOR_TEXT_WHITE);
 
         const char* sm_items[] = {
+            "Web Browser",
             "File Explorer",
             "Notepad",
             "Terminal",
@@ -881,7 +917,7 @@ static void render_screen(void) {
             "WASI Test"
         };
 
-        for (int i = 0; i < 7; i++) {
+        for (int i = 0; i < 8; i++) {
             int iy = sm_y + 10 + i * 36;
             fill_rect(g_screen, SCREEN_W, SCREEN_H, sm_x + 34, iy - 2, sm_w - 38, 30, 0xE4E2D5);
             draw_icon_by_target(g_screen, SCREEN_W, SCREEN_H, sm_x + 38, iy + 3, 24, sm_items[i]);
@@ -923,12 +959,12 @@ static void render_screen(void) {
                 int sub_x = g_ctx_x + g_ctx_w - 4;
                 int sub_y = g_ctx_y + 4 + 1 * 22;
                 int sub_w = 140;
-                int sub_h = 5 * 22 + 8;
+                int sub_h = 6 * 22 + 8;
                 draw_3d_rect(g_screen, SCREEN_W, SCREEN_H, sub_x, sub_y, sub_w, sub_h, 0);
                 fill_rect(g_screen, SCREEN_W, SCREEN_H, sub_x + 1, sub_y + 1, sub_w - 2, sub_h - 2, COLOR_MENU_BG);
 
-                const char* sub_items[] = { "Notepad", "Image Viewer", "File Explorer", "Terminal", "Calculator" };
-                for (int s = 0; s < 5; s++) {
+                const char* sub_items[] = { "Web Browser", "Notepad", "Image Viewer", "File Explorer", "Terminal", "Calculator" };
+                for (int s = 0; s < 6; s++) {
                     int sy = sub_y + 4 + s * 22;
                     woos_draw_text(g_screen, SCREEN_W, SCREEN_H, sub_x + 10, sy + 3, sub_items[s], COLOR_TEXT_BLACK);
                 }
@@ -1187,25 +1223,32 @@ void _start(void) {
                     else if (g_ctx_submenu_open == 1) { // Open with...
                         int sub_x = g_ctx_x + g_ctx_w - 4;
                         int sub_y = g_ctx_y + 4 + 1 * 22;
-                        if (g_cursor_x >= sub_x && g_cursor_x < sub_x + 140 && g_cursor_y >= sub_y && g_cursor_y < sub_y + 5 * 22) {
+                        if (g_cursor_x >= sub_x && g_cursor_x < sub_x + 140 && g_cursor_y >= sub_y && g_cursor_y < sub_y + 6 * 22) {
                             int s_idx = (g_cursor_y - (sub_y + 4)) / 22;
                             if (s_idx == 0) {
+                                if (g_ctx_target_item >= 0) {
+                                    open_file_in_browser(g_items[g_ctx_target_item].full_path);
+                                } else {
+                                    launch_or_focus("/BROWSER.WAS", "Web Browser");
+                                }
+                            }
+                            else if (s_idx == 1) {
                                 if (g_ctx_target_item >= 0) {
                                     open_file_in_notepad(g_items[g_ctx_target_item].full_path);
                                 } else {
                                     launch_or_focus("/NOTEPAD.WAS", "Notepad");
                                 }
                             }
-                            else if (s_idx == 1) {
+                            else if (s_idx == 2) {
                                 if (g_ctx_target_item >= 0) {
                                     open_file_in_imageview(g_items[g_ctx_target_item].full_path);
                                 } else {
                                     launch_or_focus("/IMGVIEW.WAS", "Image Viewer");
                                 }
                             }
-                            else if (s_idx == 2) launch_or_focus("/EXPLORER.WAS", "File Explorer");
-                            else if (s_idx == 3) launch_or_focus("/TERM.WAS", "Terminal");
-                            else if (s_idx == 4) launch_or_focus("/CALC.WAS", "Calculator");
+                            else if (s_idx == 3) launch_or_focus("/EXPLORER.WAS", "File Explorer");
+                            else if (s_idx == 4) launch_or_focus("/TERM.WAS", "Terminal");
+                            else if (s_idx == 5) launch_or_focus("/CALC.WAS", "Calculator");
                             clicked_menu = 1;
                         }
                     } else if (g_ctx_submenu_open == 2) { // New...
@@ -1235,19 +1278,20 @@ void _start(void) {
                 // Handle Start Menu click
                 if (g_start_menu_open) {
                     int sm_w = 200;
-                    int sm_h = 280;
+                    int sm_h = 316;
                     int sm_x = 4;
                     int sm_y = SCREEN_H - TASKBAR_H - sm_h - 2;
 
                     if (g_cursor_x >= sm_x && g_cursor_x < sm_x + sm_w && g_cursor_y >= sm_y && g_cursor_y < sm_y + sm_h) {
                         int it_idx = (g_cursor_y - (sm_y + 10)) / 36;
-                        if (it_idx == 0) launch_or_focus("/EXPLORER.WAS", "File Explorer");
-                        else if (it_idx == 1) launch_or_focus("/NOTEPAD.WAS", "Notepad");
-                        else if (it_idx == 2) launch_or_focus("/TERM.WAS", "Terminal");
-                        else if (it_idx == 3) launch_or_focus("/CALC.WAS", "Calculator");
-                        else if (it_idx == 4) launch_or_focus("/IMGVIEW.WAS", "Image Viewer");
-                        else if (it_idx == 5) launch_or_focus("/FETCH.WAS", "HTTP Fetch");
-                        else if (it_idx == 6) launch_or_focus("/TESTWASI.WAS", "WASI Test");
+                        if (it_idx == 0) launch_or_focus("/BROWSER.WAS", "Web Browser");
+                        else if (it_idx == 1) launch_or_focus("/EXPLORER.WAS", "File Explorer");
+                        else if (it_idx == 2) launch_or_focus("/NOTEPAD.WAS", "Notepad");
+                        else if (it_idx == 3) launch_or_focus("/TERM.WAS", "Terminal");
+                        else if (it_idx == 4) launch_or_focus("/CALC.WAS", "Calculator");
+                        else if (it_idx == 5) launch_or_focus("/IMGVIEW.WAS", "Image Viewer");
+                        else if (it_idx == 6) launch_or_focus("/FETCH.WAS", "HTTP Fetch");
+                        else if (it_idx == 7) launch_or_focus("/TESTWASI.WAS", "WASI Test");
                     }
                     g_start_menu_open = 0;
                     need_redraw = 1;

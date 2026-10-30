@@ -22,5 +22,6 @@ void net_get_arp(char* out_buf, uint32_t max_len);
 int32_t net_nslookup(const char* host, char* out_buf, uint32_t max_len);
 int32_t net_ping(const char* host, uint32_t count, char* out_buf, uint32_t max_len);
 int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len);
+int32_t net_http_download(const char* url, const char* dest_path);
 
 #endif

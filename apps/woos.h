@@ -151,6 +151,9 @@ int woos_net_nslookup(const char* host, char* out_buf, uint32_t max_len);
 WOOS_API("woos_net_fetch")
 int woos_net_fetch(const char* url, char* out_buf, uint32_t max_len);
 
+WOOS_API("woos_net_download")
+int woos_net_download(const char* url, const char* dest_path);
+
 // Compositor & Window Manager APIs
 typedef struct {
     uint32_t width;
@@ -220,6 +223,9 @@ int woos_system_get_status(woos_system_status_t* status);
 
 WOOS_API("woos_graphics_set_window_pos")
 int woos_graphics_set_window_pos(int win_id, int x, int y);
+
+WOOS_API("woos_graphics_set_window_title")
+int woos_graphics_set_window_title(int win_id, const char* title);
 
 WOOS_API("woos_graphics_get_window_count")
 int woos_graphics_get_window_count(void);
@@ -372,6 +378,48 @@ static inline char* strncpy(char* dest, const char* src, size_t n) {
     for (i = 0; i < n && src[i] != '\0'; i++) dest[i] = src[i];
     for (; i < n; i++) dest[i] = '\0';
     return dest;
+}
+
+static inline char* strncat(char* dest, const char* src, size_t n) {
+    char* d = dest;
+    while (*d) d++;
+    while (n-- && (*d = *src)) {
+        d++;
+        src++;
+    }
+    *d = '\0';
+    return dest;
+}
+
+static inline char* strchr(const char* s, int c) {
+    while (*s) {
+        if (*s == (char)c) return (char*)s;
+        s++;
+    }
+    return (c == 0) ? (char*)s : 0;
+}
+
+static inline char* strrchr(const char* s, int c) {
+    const char* last = 0;
+    while (*s) {
+        if (*s == (char)c) last = s;
+        s++;
+    }
+    if (c == 0) return (char*)s;
+    return (char*)last;
+}
+
+static inline char* strstr(const char* haystack, const char* needle) {
+    if (!needle || !*needle) return (char*)haystack;
+    for (; *haystack; haystack++) {
+        if (*haystack == *needle) {
+            const char* h = haystack;
+            const char* n = needle;
+            while (*h && *n && (*h == *n)) { h++; n++; }
+            if (!*n) return (char*)haystack;
+        }
+    }
+    return 0;
 }
 
 static inline int strcmp(const char* s1, const char* s2) {

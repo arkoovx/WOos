@@ -641,6 +641,18 @@ m3ApiRawFunction(wasi_net_fetch) {
     m3ApiReturn(net_http_fetch(url, out_buf, max_len));
 }
 
+m3ApiRawFunction(wasi_net_download) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, url)
+    m3ApiGetArgMem(const char*, dest_path)
+
+    m3ApiCheckMem(url, 1);
+    m3ApiCheckMem(dest_path, 1);
+
+    extern int32_t net_http_download(const char* url, const char* dest_path);
+    m3ApiReturn(net_http_download(url, dest_path));
+}
+
 m3ApiRawFunction(wasi_vfs_open) {
     m3ApiReturnType(int32_t)
     m3ApiGetArgMem(const char*, path)
@@ -2127,6 +2139,8 @@ M3Result link_wasi(IM3Module module) {
     res = link_raw_func(module, "env", "woos_net_nslookup", "i(**i)", &wasi_net_nslookup);
     if (res) return res;
     res = link_raw_func(module, "env", "woos_net_fetch", "i(**i)", &wasi_net_fetch);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_net_download", "i(**)", &wasi_net_download);
     if (res) return res;
 
     // VFS direct in "env"

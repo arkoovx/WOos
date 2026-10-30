@@ -314,6 +314,60 @@ static inline void draw_image_doc_icon(uint32_t* buf, int bw, int bh, int x, int
     draw_imageview_icon(buf, bw, bh, x, y, s);
 }
 
+// 11. Web Browser Icon
+static inline void draw_browser_icon(uint32_t* buf, int bw, int bh, int x, int y, int s) {
+    int pad = s / 10;
+    if (pad < 1) pad = 1;
+    int w = s - pad * 2;
+    int h = s - pad * 2;
+    int ox = x + pad;
+    int oy = y + pad;
+    int r = (w < h ? w : h) / 2;
+    int cx = ox + w / 2;
+    int cy = oy + h / 2;
+
+    // Draw circular globe background
+    for (int dy = -r; dy <= r; dy++) {
+        for (int dx = -r; dx <= r; dx++) {
+            int d2 = dx * dx + dy * dy;
+            if (d2 <= r * r) {
+                uint32_t col = 0x0984E3; // Deep blue ocean
+                if (d2 >= (r - 1) * (r - 1)) {
+                    col = 0x0056B3; // Border
+                } else if (dx > -r / 2 && dx < r / 2 && (dy == 0 || dy == -r / 3 || dy == r / 3)) {
+                    col = 0x74B9FF; // Latitude line
+                } else if ((dx == 0 || dx == -r / 3 || dx == r / 3) && dy > -r && dy < r) {
+                    col = 0x74B9FF; // Longitude line
+                }
+                int px = cx + dx;
+                int py = cy + dy;
+                if (px >= 0 && px < bw && py >= 0 && py < bh) {
+                    buf[py * bw + px] = col;
+                }
+            }
+        }
+    }
+    // Navigator compass needle (red & silver diamond)
+    int nlen = r * 3 / 4;
+    for (int i = 0; i <= nlen; i++) {
+        int span = (i * (r / 4)) / nlen;
+        // North needle (Red)
+        for (int dx = -span; dx <= span; dx++) {
+            int px = cx + (dx * 7 - i * 7) / 10;
+            int py = cy + (dx * 7 + i * 7) / 10;
+            if (px >= 0 && px < bw && py >= 0 && py < bh) buf[py * bw + px] = 0xD63031;
+        }
+        // South needle (White/Silver)
+        for (int dx = -span; dx <= span; dx++) {
+            int px = cx - (dx * 7 - i * 7) / 10;
+            int py = cy - (dx * 7 + i * 7) / 10;
+            if (px >= 0 && px < bw && py >= 0 && py < bh) buf[py * bw + px] = 0xDFE6E9;
+        }
+    }
+    // Center gold pivot
+    icon_fill_rect(buf, bw, bh, cx - 1, cy - 1, 3, 3, 0xFDCB6E);
+}
+
 // Universal Icon Dispatcher
 static inline void draw_icon_by_target(uint32_t* buf, int bw, int bh, int x, int y, int s, const char* name) {
     if (!name || name[0] == '\0') {
@@ -329,6 +383,8 @@ static inline void draw_icon_by_target(uint32_t* buf, int bw, int bh, int x, int
         draw_notepad_icon(buf, bw, bh, x, y, s);
     } else if (strcmp(name, "EXPLORER.WAS") == 0 || strcmp(name, "File Explorer") == 0 || strcmp(name, "Explorer") == 0) {
         draw_explorer_icon(buf, bw, bh, x, y, s);
+    } else if (strcmp(name, "BROWSER.WAS") == 0 || strcmp(name, "Web Browser") == 0 || strcmp(name, "Browser") == 0 || strcmp(name, "WoOS Navigator") == 0) {
+        draw_browser_icon(buf, bw, bh, x, y, s);
     } else if (strcmp(name, "FETCH.WAS") == 0 || strcmp(name, "HTTP Fetch") == 0 || strcmp(name, "Fetch") == 0) {
         draw_fetch_icon(buf, bw, bh, x, y, s);
     } else if (strcmp(name, "IMGVIEW.WAS") == 0 || strcmp(name, "IMAGEVIEW.WAS") == 0 || strcmp(name, "Image Viewer") == 0) {
@@ -339,7 +395,11 @@ static inline void draw_icon_by_target(uint32_t* buf, int bw, int bh, int x, int
         draw_recycle_bin_icon_s(buf, bw, bh, x, y, s);
     } else {
         int len = (int)strlen(name);
-        if (len >= 4 && (strcmp(&name[len - 4], ".bmp") == 0 || strcmp(&name[len - 4], ".BMP") == 0 ||
+        if (len >= 5 && (strcmp(&name[len - 5], ".html") == 0 || strcmp(&name[len - 5], ".HTML") == 0)) {
+            draw_browser_icon(buf, bw, bh, x, y, s);
+        } else if (len >= 4 && (strcmp(&name[len - 4], ".htm") == 0 || strcmp(&name[len - 4], ".HTM") == 0)) {
+            draw_browser_icon(buf, bw, bh, x, y, s);
+        } else if (len >= 4 && (strcmp(&name[len - 4], ".bmp") == 0 || strcmp(&name[len - 4], ".BMP") == 0 ||
                          strcmp(&name[len - 4], ".png") == 0 || strcmp(&name[len - 4], ".PNG") == 0 ||
                          strcmp(&name[len - 4], ".jpg") == 0 || strcmp(&name[len - 4], ".JPG") == 0)) {
             draw_image_doc_icon(buf, bw, bh, x, y, s);
