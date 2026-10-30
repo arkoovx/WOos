@@ -242,6 +242,51 @@ static void open_item(int idx) {
     }
 }
 
+static void generate_unique_explorer_name(const char* base, const char* ext, char* out_name, int max_len) {
+    char candidate[32];
+    candidate[0] = '\0';
+    strcat(candidate, base);
+    strcat(candidate, ext);
+
+    int exists = 0;
+    for (int i = 0; i < g_item_count; i++) {
+        if (strcmp(g_items[i].name, candidate) == 0) {
+            exists = 1;
+            break;
+        }
+    }
+    if (!exists) {
+        strncpy(out_name, candidate, max_len - 1);
+        out_name[max_len - 1] = '\0';
+        return;
+    }
+
+    for (int num = 2; num < 100; num++) {
+        candidate[0] = '\0';
+        strcat(candidate, base);
+        int l = (int)strlen(candidate);
+        if (num >= 10) candidate[l++] = '0' + (num / 10);
+        candidate[l++] = '0' + (num % 10);
+        candidate[l] = '\0';
+        strcat(candidate, ext);
+
+        exists = 0;
+        for (int i = 0; i < g_item_count; i++) {
+            if (strcmp(g_items[i].name, candidate) == 0) {
+                exists = 1;
+                break;
+            }
+        }
+        if (!exists) {
+            strncpy(out_name, candidate, max_len - 1);
+            out_name[max_len - 1] = '\0';
+            return;
+        }
+    }
+    strncpy(out_name, candidate, max_len - 1);
+    out_name[max_len - 1] = '\0';
+}
+
 static void navigate_up(void) {
     if (strcmp(g_current_path, "/") == 0) return;
 
@@ -794,10 +839,18 @@ static void handle_click(int x, int y) {
             if (x >= sx && x < sx + 135 && y >= sy && y < sy + 3 * 22) {
                 int sidx = (y - (sy + 4)) / 22;
                 if (sidx == 0) { // Text Document
+                    char doc_name[32];
+                    generate_unique_explorer_name("NEWDOC", ".TXT", doc_name, sizeof(doc_name));
                     char new_p[64];
-                    if (strcmp(g_current_path, "/") == 0) strcpy(new_p, "/NEWDOC.TXT");
-                    else { strcpy(new_p, g_current_path); strcat(new_p, "/NEWDOC.TXT"); }
-                    int h = woos_vfs_open(new_p, VFS_MODE_WRITE | VFS_MODE_CREATE);
+                    if (strcmp(g_current_path, "/") == 0) {
+                        strcpy(new_p, "/");
+                        strcat(new_p, doc_name);
+                    } else {
+                        strcpy(new_p, g_current_path);
+                        strcat(new_p, "/");
+                        strcat(new_p, doc_name);
+                    }
+                    int h = woos_vfs_open(new_p, VFS_MODE_WRITE | VFS_MODE_CREATE | VFS_MODE_TRUNC);
                     if (h >= 0) woos_vfs_close(h);
                     load_directory(g_current_path);
                 } else if (sidx == 1) {

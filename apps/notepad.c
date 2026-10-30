@@ -35,7 +35,8 @@ static int g_row_off = 0;
 static int g_col_off = 0;
 static int g_dirty = 0;
 
-static char g_filename[64] = "/README.TXT";
+static char g_filename[64] = "/DESKTOP/UNTITLED.TXT";
+static int g_is_untitled = 1;
 static char g_status_msg[128] = "Press Ctrl+S or click [Save] to save file";
 static int g_cursor_blink = 1;
 
@@ -184,7 +185,21 @@ static void load_file(const char* path) {
     g_row_off = 0;
     g_col_off = 0;
     g_dirty = 0;
+    g_is_untitled = 0;
     set_status("File loaded successfully");
+}
+
+static void new_file(void) {
+    g_num_rows = 0;
+    insert_row(0, "", 0);
+    g_cx = 0;
+    g_cy = 0;
+    g_row_off = 0;
+    g_col_off = 0;
+    g_dirty = 0;
+    g_is_untitled = 1;
+    strcpy(g_filename, "/DESKTOP/UNTITLED.TXT");
+    set_status("New document (empty)");
 }
 
 static void save_file(void) {
@@ -204,6 +219,7 @@ static void save_file(void) {
 
     woos_vfs_close(handle);
     g_dirty = 0;
+    g_is_untitled = 0;
     set_status("File saved successfully to FAT32 storage!");
 }
 
@@ -390,10 +406,25 @@ static void handle_click(int x, int y) {
         if (x >= dx + dw - 150 && x <= dx + dw - 90 && y >= dy + dh - 32 && y <= dy + dh - 10) {
             if (g_dialog_input[0]) {
                 if (g_dialog_mode == 1) { // Save As
-                    strncpy(g_filename, g_dialog_input, sizeof(g_filename) - 1);
+                    if (g_dialog_input[0] != '/') {
+                        strcpy(g_filename, "/DESKTOP/");
+                        strcat(g_filename, g_dialog_input);
+                    } else {
+                        strncpy(g_filename, g_dialog_input, sizeof(g_filename) - 1);
+                        g_filename[sizeof(g_filename) - 1] = '\0';
+                    }
+                    g_is_untitled = 0;
                     save_file();
                 } else if (g_dialog_mode == 2) { // Open File
-                    load_file(g_dialog_input);
+                    char open_path[64];
+                    if (g_dialog_input[0] != '/') {
+                        strcpy(open_path, "/DESKTOP/");
+                        strcat(open_path, g_dialog_input);
+                    } else {
+                        strncpy(open_path, g_dialog_input, sizeof(open_path) - 1);
+                        open_path[sizeof(open_path) - 1] = '\0';
+                    }
+                    load_file(open_path);
                 }
             }
             g_dialog_mode = 0;
@@ -412,7 +443,13 @@ static void handle_click(int x, int y) {
     if (y < TOOLBAR_H) {
         // [Save]
         if (x >= 6 && x <= 52) {
-            save_file();
+            if (g_is_untitled) {
+                g_dialog_mode = 1;
+                strncpy(g_dialog_input, g_filename, sizeof(g_dialog_input) - 1);
+                g_dialog_input_len = (int)strlen(g_dialog_input);
+            } else {
+                save_file();
+            }
         }
         // [Save As]
         else if (x >= 56 && x <= 122) {
@@ -464,10 +501,25 @@ static void handle_key(int ascii, int scancode) {
         if (ascii == '\n' || ascii == '\r' || scancode == 0x1C) {
             if (g_dialog_input[0]) {
                 if (g_dialog_mode == 1) { // Save As
-                    strncpy(g_filename, g_dialog_input, sizeof(g_filename) - 1);
+                    if (g_dialog_input[0] != '/') {
+                        strcpy(g_filename, "/DESKTOP/");
+                        strcat(g_filename, g_dialog_input);
+                    } else {
+                        strncpy(g_filename, g_dialog_input, sizeof(g_filename) - 1);
+                        g_filename[sizeof(g_filename) - 1] = '\0';
+                    }
+                    g_is_untitled = 0;
                     save_file();
                 } else if (g_dialog_mode == 2) { // Open
-                    load_file(g_dialog_input);
+                    char open_path[64];
+                    if (g_dialog_input[0] != '/') {
+                        strcpy(open_path, "/DESKTOP/");
+                        strcat(open_path, g_dialog_input);
+                    } else {
+                        strncpy(open_path, g_dialog_input, sizeof(open_path) - 1);
+                        open_path[sizeof(open_path) - 1] = '\0';
+                    }
+                    load_file(open_path);
                 }
             }
             g_dialog_mode = 0;
@@ -500,7 +552,13 @@ static void handle_key(int ascii, int scancode) {
 
     // Ctrl+S: Save
     if (ascii == 19 || (ascii == 's' && (scancode == 0x1F))) {
-        save_file();
+        if (g_is_untitled) {
+            g_dialog_mode = 1;
+            strncpy(g_dialog_input, g_filename, sizeof(g_dialog_input) - 1);
+            g_dialog_input_len = (int)strlen(g_dialog_input);
+        } else {
+            save_file();
+        }
         return;
     }
 
@@ -632,7 +690,7 @@ void _start(void) {
         load_file(open_buf);
         woos_system_clear_open_file();
     } else {
-        load_file("/README.TXT");
+        new_file();
     }
 
     draw_editor();

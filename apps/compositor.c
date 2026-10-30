@@ -208,8 +208,22 @@ static void draw_item_icon(desktop_item_t* it, int x, int y) {
     }
 }
 
-// Scans /DESKTOP/ and reloads desktop items
-static void load_desktop_items(void) {
+// Scans /DESKTOP/ and synchronizes desktop items while preserving existing grid coordinates
+static int sync_desktop_items(void) {
+    desktop_item_t old_items[MAX_DESKTOP_ITEMS];
+    int old_count = g_item_count;
+    if (old_count > MAX_DESKTOP_ITEMS) old_count = MAX_DESKTOP_ITEMS;
+    for (int i = 0; i < old_count; i++) {
+        old_items[i] = g_items[i];
+    }
+
+    uint8_t occupied[GRID_COLS][GRID_ROWS];
+    for (int c = 0; c < GRID_COLS; c++) {
+        for (int r = 0; r < GRID_ROWS; r++) {
+            occupied[c][r] = 0;
+        }
+    }
+
     // Item 0 is always Recycle Bin
     g_items[0].name[0] = '\0';
     strcpy(g_items[0].name, "Recycle Bin");
@@ -217,9 +231,27 @@ static void load_desktop_items(void) {
     g_items[0].is_dir = 1;
     g_items[0].is_recycle_bin = 1;
     g_items[0].size = 0;
-    g_items[0].col = 0;
-    g_items[0].row = 0;
-    g_item_count = 1;
+    if (old_count > 0 && old_items[0].is_recycle_bin &&
+        old_items[0].col >= 0 && old_items[0].col < GRID_COLS &&
+        old_items[0].row >= 0 && old_items[0].row < GRID_ROWS) {
+        g_items[0].col = old_items[0].col;
+        g_items[0].row = old_items[0].row;
+    } else {
+        g_items[0].col = 0;
+        g_items[0].row = 0;
+    }
+    occupied[g_items[0].col][g_items[0].row] = 1;
+    int new_count = 1;
+
+    typedef struct {
+        char name[28];
+        uint8_t is_dir;
+        uint32_t size;
+        int matched_old_idx;
+    } scanned_entry_t;
+
+    scanned_entry_t scanned[MAX_DESKTOP_ITEMS];
+    int scanned_count = 0;
 
     int handle = woos_vfs_open("/DESKTOP", VFS_MODE_READ);
     if (handle < 0) {
@@ -229,37 +261,153 @@ static void load_desktop_items(void) {
 
     if (handle >= 0) {
         woos_dirent_t entry;
-        int next_col = 0;
-        int next_row = 1; // row 0 is Recycle Bin
-
-        while (g_item_count < MAX_DESKTOP_ITEMS) {
+        while (scanned_count < MAX_DESKTOP_ITEMS - 1) {
             int res = woos_vfs_readdir(handle, &entry);
             if (res <= 0) break;
             if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) {
                 continue;
             }
 
-            desktop_item_t* it = &g_items[g_item_count];
-            strncpy(it->name, entry.name, sizeof(it->name) - 1);
-            it->name[sizeof(it->name) - 1] = '\0';
-            it->full_path[0] = '\0';
-            strcpy(it->full_path, "/DESKTOP/");
-            strcat(it->full_path, it->name);
-            it->is_dir = entry.is_dir;
-            it->is_recycle_bin = 0;
-            it->size = entry.size;
-            it->col = next_col;
-            it->row = next_row;
+            strncpy(scanned[scanned_count].name, entry.name, sizeof(scanned[scanned_count].name) - 1);
+            scanned[scanned_count].name[sizeof(scanned[scanned_count].name) - 1] = '\0';
+            scanned[scanned_count].is_dir = entry.is_dir;
+            scanned[scanned_count].size = entry.size;
+            scanned[scanned_count].matched_old_idx = -1;
 
-            next_row++;
-            if (next_row >= GRID_ROWS) {
-                next_row = 0;
-                next_col++;
+            // Check if this file was already on desktop
+            for (int j = 1; j < old_count; j++) {
+                if (!old_items[j].is_recycle_bin && strcmp(old_items[j].name, entry.name) == 0) {
+                    scanned[scanned_count].matched_old_idx = j;
+                    break;
+                }
             }
-            g_item_count++;
+            scanned_count++;
         }
         woos_vfs_close(handle);
     }
+
+    // Pass 1: Retain grid positions for existing desktop items
+    for (int i = 0; i < scanned_count; i++) {
+        if (scanned[i].matched_old_idx >= 0) {
+            int old_idx = scanned[i].matched_old_idx;
+            int col = old_items[old_idx].col;
+            int row = old_items[old_idx].row;
+
+            if (col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS && !occupied[col][row]) {
+                desktop_item_t* it = &g_items[new_count++];
+                strcpy(it->name, scanned[i].name);
+                strcpy(it->full_path, "/DESKTOP/");
+                strcat(it->full_path, it->name);
+                it->is_dir = scanned[i].is_dir;
+                it->is_recycle_bin = 0;
+                it->size = scanned[i].size;
+                it->col = col;
+                it->row = row;
+                occupied[col][row] = 1;
+                scanned[i].matched_old_idx = -2; // Placed
+            }
+        }
+    }
+
+    // Pass 2: Place newly created files in the first free grid cell
+    int cur_col = 0;
+    int cur_row = 0;
+    for (int i = 0; i < scanned_count; i++) {
+        if (scanned[i].matched_old_idx != -2) {
+            while (cur_col < GRID_COLS) {
+                if (!occupied[cur_col][cur_row]) {
+                    break;
+                }
+                cur_row++;
+                if (cur_row >= GRID_ROWS) {
+                    cur_row = 0;
+                    cur_col++;
+                }
+            }
+            if (cur_col >= GRID_COLS) break;
+
+            desktop_item_t* it = &g_items[new_count++];
+            strcpy(it->name, scanned[i].name);
+            strcpy(it->full_path, "/DESKTOP/");
+            strcat(it->full_path, it->name);
+            it->is_dir = scanned[i].is_dir;
+            it->is_recycle_bin = 0;
+            it->size = scanned[i].size;
+            it->col = cur_col;
+            it->row = cur_row;
+            occupied[cur_col][cur_row] = 1;
+
+            cur_row++;
+            if (cur_row >= GRID_ROWS) {
+                cur_row = 0;
+                cur_col++;
+            }
+        }
+    }
+
+    int changed = (new_count != old_count);
+    if (!changed) {
+        for (int i = 0; i < new_count; i++) {
+            if (strcmp(g_items[i].name, old_items[i].name) != 0 ||
+                g_items[i].col != old_items[i].col ||
+                g_items[i].row != old_items[i].row) {
+                changed = 1;
+                break;
+            }
+        }
+    }
+
+    g_item_count = new_count;
+    return changed;
+}
+
+static void load_desktop_items(void) {
+    sync_desktop_items();
+}
+
+static void generate_unique_desktop_name(const char* base, const char* ext, char* out_name, int max_len) {
+    char candidate[32];
+    candidate[0] = '\0';
+    strcat(candidate, base);
+    strcat(candidate, ext);
+
+    int exists = 0;
+    for (int i = 0; i < g_item_count; i++) {
+        if (strcmp(g_items[i].name, candidate) == 0) {
+            exists = 1;
+            break;
+        }
+    }
+    if (!exists) {
+        strncpy(out_name, candidate, max_len - 1);
+        out_name[max_len - 1] = '\0';
+        return;
+    }
+
+    for (int num = 2; num < 100; num++) {
+        candidate[0] = '\0';
+        strcat(candidate, base);
+        int l = (int)strlen(candidate);
+        if (num >= 10) candidate[l++] = '0' + (num / 10);
+        candidate[l++] = '0' + (num % 10);
+        candidate[l] = '\0';
+        strcat(candidate, ext);
+
+        exists = 0;
+        for (int i = 0; i < g_item_count; i++) {
+            if (strcmp(g_items[i].name, candidate) == 0) {
+                exists = 1;
+                break;
+            }
+        }
+        if (!exists) {
+            strncpy(out_name, candidate, max_len - 1);
+            out_name[max_len - 1] = '\0';
+            return;
+        }
+    }
+    strncpy(out_name, candidate, max_len - 1);
+    out_name[max_len - 1] = '\0';
 }
 
 // Check if a grid cell is occupied by any item (excluding ignore_idx)
@@ -317,7 +465,7 @@ static void create_desktop_file(const char* filename, const char* content) {
     strcpy(path, "/DESKTOP/");
     strcat(path, filename);
 
-    int h = woos_vfs_open(path, VFS_MODE_WRITE | VFS_MODE_CREATE);
+    int h = woos_vfs_open(path, VFS_MODE_WRITE | VFS_MODE_CREATE | VFS_MODE_TRUNC);
     if (h >= 0) {
         if (content && content[0]) {
             woos_vfs_write(h, content, (uint32_t)strlen(content));
@@ -967,7 +1115,9 @@ void _start(void) {
                         if (g_cursor_x >= sub_x && g_cursor_x < sub_x + 140 && g_cursor_y >= sub_y && g_cursor_y < sub_y + 3 * 22) {
                             int s_idx = (g_cursor_y - (sub_y + 4)) / 22;
                             if (s_idx == 0) {
-                                create_desktop_file("NEWDOC.TXT", "// New Text Document\n");
+                                char doc_name[32];
+                                generate_unique_desktop_name("NEWDOC", ".TXT", doc_name, sizeof(doc_name));
+                                create_desktop_file(doc_name, "");
                             } else if (s_idx == 1) {
                                 g_dialog_mode = 3;
                                 strcpy(g_dialog_input, "NEWFILE.TXT");
@@ -1102,6 +1252,9 @@ void _start(void) {
                 if (hit_window) continue;
 
                 // Desktop Click
+                if (!g_is_dragging_icon && sync_desktop_items()) {
+                    need_redraw = 1;
+                }
                 int item_idx = find_desktop_item_at(g_cursor_x, g_cursor_y);
                 if (is_right) {
                     // Right Click on Desktop or Desktop Icon
@@ -1192,6 +1345,9 @@ void _start(void) {
                     uint32_t sec = st.uptime_ms / 1000;
                     if (sec != g_last_uptime_sec) {
                         g_last_uptime_sec = sec;
+                        if (!g_is_dragging_icon && sync_desktop_items()) {
+                            need_redraw = 1;
+                        }
                         need_redraw = 1;
                     }
                 }
@@ -1199,6 +1355,9 @@ void _start(void) {
 
             // 5. Window Change Notification
             else if (ev.type == 6) {
+                if (!g_is_dragging_icon && sync_desktop_items()) {
+                    need_redraw = 1;
+                }
                 need_redraw = 1;
             }
 
@@ -1248,10 +1407,15 @@ void _start(void) {
                         }
                     }
                 } else {
-                    // Send keyboard input to focused window
-                    int tid = woos_graphics_get_focused_tid();
-                    if (tid > 0) {
-                        woos_ipc_send(tid, MSG_KEY_DOWN, ascii, scancode, 0, 0, 0);
+                    if (scancode == 0x3F) { // F5 key: refresh desktop
+                        sync_desktop_items();
+                        need_redraw = 1;
+                    } else {
+                        // Send keyboard input to focused window
+                        int tid = woos_graphics_get_focused_tid();
+                        if (tid > 0) {
+                            woos_ipc_send(tid, MSG_KEY_DOWN, ascii, scancode, 0, 0, 0);
+                        }
                     }
                 }
             }
