@@ -268,6 +268,16 @@ static int sync_desktop_items(void) {
                 continue;
             }
 
+            // Deduplicate
+            int dup = 0;
+            for (int k = 0; k < scanned_count; k++) {
+                if (strcasecmp_custom(scanned[k].name, entry.name) == 0) {
+                    dup = 1;
+                    break;
+                }
+            }
+            if (dup) continue;
+
             strncpy(scanned[scanned_count].name, entry.name, sizeof(scanned[scanned_count].name) - 1);
             scanned[scanned_count].name[sizeof(scanned[scanned_count].name) - 1] = '\0';
             scanned[scanned_count].is_dir = entry.is_dir;
@@ -276,7 +286,7 @@ static int sync_desktop_items(void) {
 
             // Check if this file was already on desktop
             for (int j = 1; j < old_count; j++) {
-                if (!old_items[j].is_recycle_bin && strcmp(old_items[j].name, entry.name) == 0) {
+                if (!old_items[j].is_recycle_bin && strcasecmp_custom(old_items[j].name, entry.name) == 0) {
                     scanned[scanned_count].matched_old_idx = j;
                     break;
                 }
@@ -373,7 +383,7 @@ static void generate_unique_desktop_name(const char* base, const char* ext, char
 
     int exists = 0;
     for (int i = 0; i < g_item_count; i++) {
-        if (strcmp(g_items[i].name, candidate) == 0) {
+        if (strcasecmp_custom(g_items[i].name, candidate) == 0) {
             exists = 1;
             break;
         }
@@ -395,7 +405,7 @@ static void generate_unique_desktop_name(const char* base, const char* ext, char
 
         exists = 0;
         for (int i = 0; i < g_item_count; i++) {
-            if (strcmp(g_items[i].name, candidate) == 0) {
+            if (strcasecmp_custom(g_items[i].name, candidate) == 0) {
                 exists = 1;
                 break;
             }
@@ -449,6 +459,7 @@ static void launch_item(int idx) {
 static void delete_item_to_recycle(int idx) {
     if (idx <= 0 || idx >= g_item_count) return; // Cannot delete Recycle Bin!
     desktop_item_t* it = &g_items[idx];
+    if (it->is_recycle_bin || is_system_item(it->name)) return; // Protected system file!
 
     char dest[64];
     dest[0] = '\0';
@@ -798,13 +809,15 @@ static void render_screen(void) {
                 "Properties"
             };
             int count = 7;
+            int is_sys = (g_ctx_target_item == 0) || is_system_item(g_items[g_ctx_target_item].name);
             for (int i = 0; i < count; i++) {
                 int iy = g_ctx_y + 4 + i * 22;
-                int is_hover = (i == g_ctx_hover_idx);
+                int disabled = is_sys && (i == 2 || i == 4 || i == 5);
+                int is_hover = (i == g_ctx_hover_idx) && !disabled;
                 if (is_hover) {
                     fill_rect(g_screen, SCREEN_W, SCREEN_H, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
                 }
-                uint32_t tcol = is_hover ? COLOR_TEXT_WHITE : COLOR_TEXT_BLACK;
+                uint32_t tcol = disabled ? COLOR_TEXT_MUTED : (is_hover ? COLOR_TEXT_WHITE : COLOR_TEXT_BLACK);
                 woos_draw_text(g_screen, SCREEN_W, SCREEN_H, g_ctx_x + 12, iy + 3, items[i], tcol);
             }
 
@@ -1061,21 +1074,28 @@ void _start(void) {
                     if (g_cursor_x >= g_ctx_x && g_cursor_x < g_ctx_x + g_ctx_w && g_cursor_y >= g_ctx_y && g_cursor_y < g_ctx_y + g_ctx_h) {
                         int it_idx = (g_cursor_y - (g_ctx_y + 4)) / 22;
                         if (g_ctx_target_item >= 0) {
+                            int is_sys = (g_ctx_target_item == 0) || is_system_item(g_items[g_ctx_target_item].name);
                             // Icon context actions
                             if (it_idx == 0) launch_item(g_ctx_target_item);
                             else if (it_idx == 2) { // Cut
-                                strcpy(g_clipboard_path, g_items[g_ctx_target_item].full_path);
-                                g_clipboard_is_cut = 1;
+                                if (!is_sys) {
+                                    strcpy(g_clipboard_path, g_items[g_ctx_target_item].full_path);
+                                    g_clipboard_is_cut = 1;
+                                }
                             } else if (it_idx == 3) { // Copy
                                 strcpy(g_clipboard_path, g_items[g_ctx_target_item].full_path);
                                 g_clipboard_is_cut = 0;
                             } else if (it_idx == 4) { // Move to Recycle Bin
-                                delete_item_to_recycle(g_ctx_target_item);
+                                if (!is_sys) {
+                                    delete_item_to_recycle(g_ctx_target_item);
+                                }
                             } else if (it_idx == 5) { // Rename
-                                g_dialog_mode = 2;
-                                g_dialog_target_idx = g_ctx_target_item;
-                                strncpy(g_dialog_input, g_items[g_ctx_target_item].name, 28);
-                                g_dialog_input_len = (int)strlen(g_dialog_input);
+                                if (!is_sys) {
+                                    g_dialog_mode = 2;
+                                    g_dialog_target_idx = g_ctx_target_item;
+                                    strncpy(g_dialog_input, g_items[g_ctx_target_item].name, 28);
+                                    g_dialog_input_len = (int)strlen(g_dialog_input);
+                                }
                             } else if (it_idx == 6) { // Properties
                                 g_dialog_mode = 1;
                                 g_dialog_target_idx = g_ctx_target_item;
@@ -1318,7 +1338,9 @@ void _start(void) {
 
                     // Dropping on Recycle Bin deletes the file!
                     if (tcol == 0 && trow == 0 && !it->is_recycle_bin) {
-                        delete_item_to_recycle(g_drag_icon_idx);
+                        if (!is_system_item(it->name)) {
+                            delete_item_to_recycle(g_drag_icon_idx);
+                        }
                     } else {
                         int occ = is_cell_occupied(tcol, trow, g_drag_icon_idx);
                         if (occ >= 0) {
@@ -1410,6 +1432,14 @@ void _start(void) {
                     if (scancode == 0x3F) { // F5 key: refresh desktop
                         sync_desktop_items();
                         need_redraw = 1;
+                    } else if (scancode == 0x53 && woos_graphics_get_focused_tid() <= 0) { // Delete key on desktop
+                        if (g_selected_icon_idx > 0 && g_selected_icon_idx < g_item_count) {
+                            if (!g_items[g_selected_icon_idx].is_recycle_bin && !is_system_item(g_items[g_selected_icon_idx].name)) {
+                                delete_item_to_recycle(g_selected_icon_idx);
+                                g_selected_icon_idx = -1;
+                                need_redraw = 1;
+                            }
+                        }
                     } else {
                         // Send keyboard input to focused window
                         int tid = woos_graphics_get_focused_tid();

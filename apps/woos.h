@@ -362,6 +362,44 @@ static inline int strncmp(const char* s1, const char* s2, size_t n) {
     return 0;
 }
 
+static inline int strcasecmp_custom(const char* s1, const char* s2) {
+    while (*s1 && *s2) {
+        char c1 = *s1;
+        char c2 = *s2;
+        if (c1 >= 'a' && c1 <= 'z') c1 -= 32;
+        if (c2 >= 'a' && c2 <= 'z') c2 -= 32;
+        if (c1 != c2) return (int)((unsigned char)c1 - (unsigned char)c2);
+        s1++;
+        s2++;
+    }
+    char c1 = *s1;
+    char c2 = *s2;
+    if (c1 >= 'a' && c1 <= 'z') c1 -= 32;
+    if (c2 >= 'a' && c2 <= 'z') c2 -= 32;
+    return (int)((unsigned char)c1 - (unsigned char)c2);
+}
+
+static inline int is_system_item(const char* name) {
+    if (!name || !name[0]) return 0;
+    const char* base = name;
+    for (const char* p = name; *p; p++) {
+        if (*p == '/' || *p == '\\') base = p + 1;
+    }
+    if (!base[0]) return 0;
+
+    if (strcasecmp_custom(base, "DESKTOP") == 0) return 1;
+    if (strcasecmp_custom(base, "RECYCLE") == 0) return 1;
+    if (strcasecmp_custom(base, "Recycle Bin") == 0) return 1;
+    if (strcasecmp_custom(base, "RECYCLE BIN") == 0) return 1;
+    if (strcasecmp_custom(base, "EXPLORER.WAS") == 0) return 1;
+    if (strcasecmp_custom(base, "COMPOSIT.WAS") == 0) return 1;
+    if (strcasecmp_custom(base, "CALC.WAS") == 0) return 1;
+    if (strcasecmp_custom(base, "NOTEPAD.WAS") == 0) return 1;
+    if (strcasecmp_custom(base, "TERM.WAS") == 0) return 1;
+    if (strcasecmp_custom(base, "TESTWASI.WAS") == 0) return 1;
+    return 0;
+}
+
 static inline void fill_rect(uint32_t* buf, int buf_w, int buf_h, int x, int y, int rw, int rh, uint32_t color) {
     if (!buf) return;
     int x1 = x < 0 ? 0 : x;

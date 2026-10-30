@@ -154,7 +154,19 @@ static void load_directory(const char* path) {
         if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) {
             continue;
         }
+
+        // Deduplicate entries by name (case-insensitive)
+        int duplicate = 0;
+        for (int i = 0; i < g_item_count; i++) {
+            if (strcasecmp_custom(g_items[i].name, entry.name) == 0) {
+                duplicate = 1;
+                break;
+            }
+        }
+        if (duplicate) continue;
+
         memcpy(g_items[g_item_count].name, entry.name, 24);
+        g_items[g_item_count].name[23] = '\0';
         g_items[g_item_count].is_dir = entry.is_dir;
         g_items[g_item_count].size = entry.size;
         g_item_count++;
@@ -168,7 +180,7 @@ static void load_directory(const char* path) {
             if (g_items[j].is_dir && !g_items[i].is_dir) {
                 swap = 1;
             } else if (g_items[i].is_dir == g_items[j].is_dir) {
-                if (strcmp(g_items[i].name, g_items[j].name) > 0) {
+                if (strcasecmp_custom(g_items[i].name, g_items[j].name) > 0) {
                     swap = 1;
                 }
             }
@@ -250,7 +262,7 @@ static void generate_unique_explorer_name(const char* base, const char* ext, cha
 
     int exists = 0;
     for (int i = 0; i < g_item_count; i++) {
-        if (strcmp(g_items[i].name, candidate) == 0) {
+        if (strcasecmp_custom(g_items[i].name, candidate) == 0) {
             exists = 1;
             break;
         }
@@ -272,7 +284,7 @@ static void generate_unique_explorer_name(const char* base, const char* ext, cha
 
         exists = 0;
         for (int i = 0; i < g_item_count; i++) {
-            if (strcmp(g_items[i].name, candidate) == 0) {
+            if (strcasecmp_custom(g_items[i].name, candidate) == 0) {
                 exists = 1;
                 break;
             }
@@ -331,6 +343,7 @@ static void empty_recycle_bin(void) {
         int res = woos_vfs_readdir(h, &ent);
         if (res <= 0) break;
         if (ent.name[0] == '.' && (ent.name[1] == '\0' || (ent.name[1] == '.' && ent.name[2] == '\0'))) continue;
+        if (is_system_item(ent.name)) continue;
 
         char del_p[64] = "/RECYCLE/";
         strcat(del_p, ent.name);
@@ -557,15 +570,18 @@ static void draw_explorer(void) {
         draw_3d_rect(g_fb, WIN_W, WIN_H, g_ctx_x, g_ctx_y, g_ctx_w, g_ctx_h, 0);
         fill_rect(g_fb, WIN_W, WIN_H, g_ctx_x + 1, g_ctx_y + 1, g_ctx_w - 2, g_ctx_h - 2, COLOR_MENU_BG);
 
-        if (g_ctx_target_idx >= 0) {
+        if (g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) {
+            int is_sys = is_system_item(g_items[g_ctx_target_idx].name);
             if (is_in_recycle()) {
                 // Recycle Bin Item Menu
                 const char* items[] = { "Restore", "Delete Permanently", "Properties" };
                 for (int i = 0; i < 3; i++) {
                     int iy = g_ctx_y + 4 + i * 22;
-                    int is_h = (i == g_ctx_hover);
+                    int disabled = (i == 1 && is_sys);
+                    int is_h = (i == g_ctx_hover && !disabled);
                     if (is_h) fill_rect(g_fb, WIN_W, WIN_H, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
-                    woos_draw_text(g_fb, WIN_W, WIN_H, g_ctx_x + 10, iy + 3, items[i], is_h ? 0xFFFFFF : 0x000000);
+                    uint32_t col = disabled ? COLOR_TEXT_MUTED : (is_h ? 0xFFFFFF : 0x000000);
+                    woos_draw_text(g_fb, WIN_W, WIN_H, g_ctx_x + 10, iy + 3, items[i], col);
                 }
             } else {
                 // Standard Item Menu
@@ -580,16 +596,20 @@ static void draw_explorer(void) {
                 };
                 for (int i = 0; i < 7; i++) {
                     int iy = g_ctx_y + 4 + i * 22;
-                    int is_h = (i == g_ctx_hover);
+                    int disabled = is_sys && (i == 2 || i == 4 || i == 5);
+                    int is_sub_active = (i == 1 && g_ctx_submenu == 1);
+                    int is_h = ((i == g_ctx_hover) || is_sub_active) && !disabled;
                     if (is_h) fill_rect(g_fb, WIN_W, WIN_H, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
-                    woos_draw_text(g_fb, WIN_W, WIN_H, g_ctx_x + 10, iy + 3, items[i], is_h ? 0xFFFFFF : 0x000000);
+                    uint32_t col = disabled ? COLOR_TEXT_MUTED : (is_h ? 0xFFFFFF : 0x000000);
+                    woos_draw_text(g_fb, WIN_W, WIN_H, g_ctx_x + 10, iy + 3, items[i], col);
                 }
                 // Submenu: Open with...
                 if (g_ctx_submenu == 1) {
-                    int sx = g_ctx_x + g_ctx_w - 4;
-                    int sy = g_ctx_y + 4 + 1 * 22;
                     int sw = 135;
                     int sh = 4 * 22 + 8;
+                    int sx = (g_ctx_x + g_ctx_w - 4 + sw > WIN_W) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
+                    int sy = g_ctx_y + 4 + 1 * 22;
+                    if (sy + sh > WIN_H - STATUSBAR_H) sy = WIN_H - STATUSBAR_H - sh - 2;
                     draw_3d_rect(g_fb, WIN_W, WIN_H, sx, sy, sw, sh, 0);
                     fill_rect(g_fb, WIN_W, WIN_H, sx + 1, sy + 1, sw - 2, sh - 2, COLOR_MENU_BG);
                     const char* sitems[] = { "Notepad", "File Explorer", "Terminal", "Calculator" };
@@ -613,7 +633,8 @@ static void draw_explorer(void) {
                 const char* items[] = { "New... >", "Paste", "Refresh", "Properties" };
                 for (int i = 0; i < 4; i++) {
                     int iy = g_ctx_y + 4 + i * 22;
-                    int is_h = (i == g_ctx_hover);
+                    int is_sub_active = (i == 0 && g_ctx_submenu == 2);
+                    int is_h = (i == g_ctx_hover) || is_sub_active;
                     if (is_h) fill_rect(g_fb, WIN_W, WIN_H, g_ctx_x + 2, iy, g_ctx_w - 4, 20, COLOR_MENU_HOVER);
                     uint32_t col = is_h ? 0xFFFFFF : 0x000000;
                     if (i == 1 && !g_clipboard_path[0]) col = COLOR_TEXT_MUTED;
@@ -621,10 +642,11 @@ static void draw_explorer(void) {
                 }
                 // Submenu: New...
                 if (g_ctx_submenu == 2) {
-                    int sx = g_ctx_x + g_ctx_w - 4;
-                    int sy = g_ctx_y + 4;
                     int sw = 135;
                     int sh = 3 * 22 + 8;
+                    int sx = (g_ctx_x + g_ctx_w - 4 + sw > WIN_W) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
+                    int sy = g_ctx_y + 4;
+                    if (sy + sh > WIN_H - STATUSBAR_H) sy = WIN_H - STATUSBAR_H - sh - 2;
                     draw_3d_rect(g_fb, WIN_W, WIN_H, sx, sy, sw, sh, 0);
                     fill_rect(g_fb, WIN_W, WIN_H, sx + 1, sy + 1, sw - 2, sh - 2, COLOR_MENU_BG);
                     const char* sitems[] = { "Text Document", "New File", "New Folder" };
@@ -725,10 +747,12 @@ static void handle_click(int x, int y) {
                         strcat(full_new, g_dialog_input);
                     }
 
-                    if (g_dialog_mode == 2 && g_ctx_target_idx >= 0) { // Rename
-                        char old_p[64];
-                        get_item_path(g_ctx_target_idx, old_p);
-                        woos_vfs_rename(old_p, full_new);
+                    if (g_dialog_mode == 2 && g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) { // Rename
+                        if (!is_system_item(g_items[g_ctx_target_idx].name)) {
+                            char old_p[64];
+                            get_item_path(g_ctx_target_idx, old_p);
+                            woos_vfs_rename(old_p, full_new);
+                        }
                     } else if (g_dialog_mode == 3) { // New File
                         int h = woos_vfs_open(full_new, VFS_MODE_WRITE | VFS_MODE_CREATE);
                         if (h >= 0) woos_vfs_close(h);
@@ -750,76 +774,19 @@ static void handle_click(int x, int y) {
     // Handle Context Menu Click
     if (g_ctx_open) {
         int clicked_menu = 0;
-        if (x >= g_ctx_x && x < g_ctx_x + g_ctx_w && y >= g_ctx_y && y < g_ctx_y + g_ctx_h) {
-            int item_idx = (y - (g_ctx_y + 4)) / 22;
-            if (g_ctx_target_idx >= 0) {
-                if (is_in_recycle()) {
-                    if (item_idx == 0) { // Restore
-                        char src[64];
-                        get_item_path(g_ctx_target_idx, src);
-                        char dst[64] = "/DESKTOP/";
-                        strcat(dst, g_items[g_ctx_target_idx].name);
-                        woos_vfs_rename(src, dst);
-                        load_directory(g_current_path);
-                    } else if (item_idx == 1) { // Delete Permanently
-                        char src[64];
-                        get_item_path(g_ctx_target_idx, src);
-                        woos_vfs_unlink(src);
-                        load_directory(g_current_path);
-                    } else if (item_idx == 2) { // Properties
-                        g_dialog_mode = 1;
-                    }
-                } else {
-                    if (item_idx == 0) { // Open
-                        open_item(g_ctx_target_idx);
-                    } else if (item_idx == 2) { // Cut
-                        get_item_path(g_ctx_target_idx, g_clipboard_path);
-                        g_clipboard_is_cut = 1;
-                    } else if (item_idx == 3) { // Copy
-                        get_item_path(g_ctx_target_idx, g_clipboard_path);
-                        g_clipboard_is_cut = 0;
-                    } else if (item_idx == 4) { // Move to Recycle Bin
-                        char src[64];
-                        get_item_path(g_ctx_target_idx, src);
-                        char dst[64] = "/RECYCLE/";
-                        strcat(dst, g_items[g_ctx_target_idx].name);
-                        woos_vfs_rename(src, dst);
-                        load_directory(g_current_path);
-                    } else if (item_idx == 5) { // Rename
-                        g_dialog_mode = 2;
-                        strncpy(g_dialog_input, g_items[g_ctx_target_idx].name, 24);
-                        g_dialog_input_len = (int)strlen(g_dialog_input);
-                    } else if (item_idx == 6) { // Properties
-                        g_dialog_mode = 1;
-                    }
-                }
-            } else {
-                if (is_in_recycle()) {
-                    if (item_idx == 0) empty_recycle_bin();
-                    else if (item_idx == 1) load_directory(g_current_path);
-                    else if (item_idx == 2) g_dialog_mode = 1;
-                } else {
-                    if (item_idx == 1) paste_to_current();
-                    else if (item_idx == 2) load_directory(g_current_path);
-                    else if (item_idx == 3) g_dialog_mode = 1;
-                }
-            }
-            clicked_menu = 1;
-        } else if (g_ctx_submenu == 1) { // Submenu: Open with
-            int sx = g_ctx_x + g_ctx_w - 4;
+
+        if (g_ctx_submenu == 1) { // Submenu: Open with...
+            int sw = 135;
+            int sh = 4 * 22 + 8;
+            int sx = (g_ctx_x + g_ctx_w - 4 + sw > WIN_W) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
             int sy = g_ctx_y + 4 + 1 * 22;
-            if (x >= sx && x < sx + 135 && y >= sy && y < sy + 4 * 22) {
+            if (sy + sh > WIN_H - STATUSBAR_H) sy = WIN_H - STATUSBAR_H - sh - 2;
+
+            if (x >= sx && x < sx + sw && y >= sy && y < sy + sh) {
                 int sidx = (y - (sy + 4)) / 22;
                 char target_p[64];
-                if (g_ctx_target_idx >= 0) {
-                    if (strcmp(g_current_path, "/") == 0) {
-                        strcpy(target_p, "/");
-                        strcat(target_p, g_items[g_ctx_target_idx].name);
-                    } else {
-                        strcpy(target_p, g_current_path);
-                        strcat(target_p, "/");
-                        strcat(target_p, g_items[g_ctx_target_idx].name);
-                    }
+                if (g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) {
+                    get_item_path(g_ctx_target_idx, target_p);
                 } else {
                     target_p[0] = '\0';
                 }
@@ -827,16 +794,25 @@ static void handle_click(int x, int y) {
                 if (sidx == 0) {
                     if (target_p[0]) open_file_in_notepad(target_p);
                     else woos_system_spawn("/NOTEPAD.WAS");
+                } else if (sidx == 1) {
+                    woos_system_spawn("/EXPLORER.WAS");
+                } else if (sidx == 2) {
+                    woos_system_spawn("/TERM.WAS");
+                } else if (sidx == 3) {
+                    woos_system_spawn("/CALC.WAS");
                 }
-                else if (sidx == 1) woos_system_spawn("/EXPLORER.WAS");
-                else if (sidx == 2) woos_system_spawn("/TERM.WAS");
-                else if (sidx == 3) woos_system_spawn("/CALC.WAS");
-                clicked_menu = 1;
+                g_ctx_open = 0;
+                g_ctx_submenu = 0;
+                return;
             }
         } else if (g_ctx_submenu == 2) { // Submenu: New...
-            int sx = g_ctx_x + g_ctx_w - 4;
+            int sw = 135;
+            int sh = 3 * 22 + 8;
+            int sx = (g_ctx_x + g_ctx_w - 4 + sw > WIN_W) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
             int sy = g_ctx_y + 4;
-            if (x >= sx && x < sx + 135 && y >= sy && y < sy + 3 * 22) {
+            if (sy + sh > WIN_H - STATUSBAR_H) sy = WIN_H - STATUSBAR_H - sh - 2;
+
+            if (x >= sx && x < sx + sw && y >= sy && y < sy + sh) {
                 int sidx = (y - (sy + 4)) / 22;
                 if (sidx == 0) { // Text Document
                     char doc_name[32];
@@ -853,17 +829,96 @@ static void handle_click(int x, int y) {
                     int h = woos_vfs_open(new_p, VFS_MODE_WRITE | VFS_MODE_CREATE | VFS_MODE_TRUNC);
                     if (h >= 0) woos_vfs_close(h);
                     load_directory(g_current_path);
-                } else if (sidx == 1) {
+                } else if (sidx == 1) { // New File
                     g_dialog_mode = 3;
                     strcpy(g_dialog_input, "NEWFILE.TXT");
                     g_dialog_input_len = (int)strlen(g_dialog_input);
-                } else if (sidx == 2) {
+                } else if (sidx == 2) { // New Folder
                     g_dialog_mode = 4;
                     strcpy(g_dialog_input, "NEWDIR");
                     g_dialog_input_len = (int)strlen(g_dialog_input);
                 }
-                clicked_menu = 1;
+                g_ctx_open = 0;
+                g_ctx_submenu = 0;
+                return;
             }
+        }
+
+        if (x >= g_ctx_x && x < g_ctx_x + g_ctx_w && y >= g_ctx_y && y < g_ctx_y + g_ctx_h) {
+            int item_idx = (y - (g_ctx_y + 4)) / 22;
+            if (g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) {
+                int is_sys = is_system_item(g_items[g_ctx_target_idx].name);
+                if (is_in_recycle()) {
+                    if (item_idx == 0) { // Restore
+                        char src[64];
+                        get_item_path(g_ctx_target_idx, src);
+                        char dst[64] = "/DESKTOP/";
+                        strcat(dst, g_items[g_ctx_target_idx].name);
+                        woos_vfs_rename(src, dst);
+                        load_directory(g_current_path);
+                    } else if (item_idx == 1) { // Delete Permanently
+                        if (!is_sys) {
+                            char src[64];
+                            get_item_path(g_ctx_target_idx, src);
+                            woos_vfs_unlink(src);
+                            load_directory(g_current_path);
+                        }
+                    } else if (item_idx == 2) { // Properties
+                        g_dialog_mode = 1;
+                    }
+                } else {
+                    if (item_idx == 0) { // Open
+                        open_item(g_ctx_target_idx);
+                    } else if (item_idx == 1) { // Open with... >
+                        g_ctx_submenu = (g_ctx_submenu == 1) ? 0 : 1;
+                        return; // Keep menu open!
+                    } else if (item_idx == 2) { // Cut
+                        if (!is_sys) {
+                            get_item_path(g_ctx_target_idx, g_clipboard_path);
+                            g_clipboard_is_cut = 1;
+                        }
+                    } else if (item_idx == 3) { // Copy
+                        get_item_path(g_ctx_target_idx, g_clipboard_path);
+                        g_clipboard_is_cut = 0;
+                    } else if (item_idx == 4) { // Move to Recycle Bin
+                        if (!is_sys) {
+                            char src[64];
+                            get_item_path(g_ctx_target_idx, src);
+                            char dst[64] = "/RECYCLE/";
+                            strcat(dst, g_items[g_ctx_target_idx].name);
+                            woos_vfs_rename(src, dst);
+                            load_directory(g_current_path);
+                        }
+                    } else if (item_idx == 5) { // Rename
+                        if (!is_sys) {
+                            g_dialog_mode = 2;
+                            strncpy(g_dialog_input, g_items[g_ctx_target_idx].name, 24);
+                            g_dialog_input[23] = '\0';
+                            g_dialog_input_len = (int)strlen(g_dialog_input);
+                        }
+                    } else if (item_idx == 6) { // Properties
+                        g_dialog_mode = 1;
+                    }
+                }
+            } else {
+                if (is_in_recycle()) {
+                    if (item_idx == 0) empty_recycle_bin();
+                    else if (item_idx == 1) load_directory(g_current_path);
+                    else if (item_idx == 2) g_dialog_mode = 1;
+                } else {
+                    if (item_idx == 0) { // New... >
+                        g_ctx_submenu = (g_ctx_submenu == 2) ? 0 : 2;
+                        return; // Keep menu open!
+                    } else if (item_idx == 1) {
+                        paste_to_current();
+                    } else if (item_idx == 2) {
+                        load_directory(g_current_path);
+                    } else if (item_idx == 3) {
+                        g_dialog_mode = 1;
+                    }
+                }
+            }
+            clicked_menu = 1;
         }
 
         g_ctx_open = 0;
@@ -968,10 +1023,12 @@ static void handle_key(int ascii, int scancode) {
                     strcat(full_new, g_dialog_input);
                 }
 
-                if (g_dialog_mode == 2 && g_ctx_target_idx >= 0) {
-                    char old_p[64];
-                    get_item_path(g_ctx_target_idx, old_p);
-                    woos_vfs_rename(old_p, full_new);
+                if (g_dialog_mode == 2 && g_ctx_target_idx >= 0 && g_ctx_target_idx < g_item_count) {
+                    if (!is_system_item(g_items[g_ctx_target_idx].name)) {
+                        char old_p[64];
+                        get_item_path(g_ctx_target_idx, old_p);
+                        woos_vfs_rename(old_p, full_new);
+                    }
                 } else if (g_dialog_mode == 3) {
                     int h = woos_vfs_open(full_new, VFS_MODE_WRITE | VFS_MODE_CREATE);
                     if (h >= 0) woos_vfs_close(h);
@@ -1014,6 +1071,9 @@ static void handle_key(int ascii, int scancode) {
     // Delete key (scancode 0x53)
     if (scancode == 0x53) {
         if (g_selected_idx >= 0 && g_selected_idx < g_item_count) {
+            if (is_system_item(g_items[g_selected_idx].name)) {
+                return; // Protected system item!
+            }
             char src[64];
             get_item_path(g_selected_idx, src);
             if (is_in_recycle()) {
