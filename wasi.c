@@ -629,6 +629,32 @@ m3ApiRawFunction(wasi_vfs_readdir) {
     m3ApiReturn(vfs_readdir(handle, entry));
 }
 
+m3ApiRawFunction(wasi_vfs_mkdir) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, path)
+    m3ApiCheckMem(path, 1);
+    extern int32_t vfs_mkdir(const char* path);
+    m3ApiReturn(vfs_mkdir(path));
+}
+
+m3ApiRawFunction(wasi_vfs_unlink) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, path)
+    m3ApiCheckMem(path, 1);
+    extern int32_t vfs_unlink(const char* path);
+    m3ApiReturn(vfs_unlink(path));
+}
+
+m3ApiRawFunction(wasi_vfs_rename) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArgMem(const char*, old_path)
+    m3ApiGetArgMem(const char*, new_path)
+    m3ApiCheckMem(old_path, 1);
+    m3ApiCheckMem(new_path, 1);
+    extern int32_t vfs_rename(const char* old_path, const char* new_path);
+    m3ApiReturn(vfs_rename(old_path, new_path));
+}
+
 
 m3ApiRawFunction(wasi_ipc_send) {
     m3ApiReturnType(int32_t)
@@ -1991,6 +2017,12 @@ M3Result link_wasi(IM3Module module) {
     res = link_raw_func(module, "env", "woos_vfs_size", "i(i)", &wasi_vfs_size);
     if (res) return res;
     res = link_raw_func(module, "env", "woos_vfs_readdir", "i(i*)", &wasi_vfs_readdir);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_vfs_mkdir", "i(*)", &wasi_vfs_mkdir);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_vfs_unlink", "i(*)", &wasi_vfs_unlink);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_vfs_rename", "i(**)", &wasi_vfs_rename);
     if (res) return res;
 
     // IPC & Process in "env"

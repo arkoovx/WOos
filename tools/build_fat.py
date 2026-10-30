@@ -15,6 +15,20 @@ FAT2_START = FAT1_START + SECTORS_PER_FAT
 DATA_START = RESERVED_SECTORS + FAT_COUNT * SECTORS_PER_FAT
 TOTAL_DATA_CLUSTERS = (TOTAL_SECTORS - DATA_START) // SECTORS_PER_CLUSTER
 
+def make_entry(name, ext, attr, start_cluster, size):
+    ent = bytearray(32)
+    ent[0:8] = name.ljust(8, " ")[:8].encode("ascii")
+    ent[8:11] = ext.ljust(3, " ")[:3].encode("ascii")
+    ent[11] = attr
+    struct.pack_into("<HHHHI", ent, 20,
+        (start_cluster >> 16) & 0xFFFF, # DIR_FstClusHI
+        0,                              # DIR_WrtTime
+        0x5CE0,                         # DIR_WrtDate
+        start_cluster & 0xFFFF,         # DIR_FstClusLO
+        size                            # DIR_FileSize
+    )
+    return ent
+
 def main():
     img = bytearray(TOTAL_SECTORS * SECTOR_SIZE)
 
@@ -64,80 +78,126 @@ def main():
 
     # 3. Setup Root Directory (starts at cluster 2)
     root_dir_data = bytearray(ROOT_DIR_CLUSTERS * SECTOR_SIZE * SECTORS_PER_CLUSTER)
-    # Entry 0: Volume label (ATTR_VOLUME_ID = 0x08)
     root_dir_data[0:11] = b"WOOS FAT32 "
-    root_dir_data[11] = 0x08
-
-    # Files to inject
-    files = [
-        ("HELLO.TXT", b"Hello from WoOS VFS (FAT32)!\n"),
-        ("README.TXT", b"WoOS high-performance read-write FAT32 filesystem image.\n")
-    ]
-
-    if os.path.exists("apps/compositor.wasm"):
-        with open("apps/compositor.wasm", "rb") as f:
-            files.append(("COMPOSIT.WAS", f.read()))
-    if os.path.exists("apps/calc.wasm"):
-        with open("apps/calc.wasm", "rb") as f:
-            files.append(("CALC.WAS", f.read()))
-    if os.path.exists("apps/terminal.wasm"):
-        with open("apps/terminal.wasm", "rb") as f:
-            files.append(("TERM.WAS", f.read()))
-    if os.path.exists("apps/notepad.wasm"):
-        with open("apps/notepad.wasm", "rb") as f:
-            files.append(("NOTEPAD.WAS", f.read()))
-    if os.path.exists("apps/explorer.wasm"):
-        with open("apps/explorer.wasm", "rb") as f:
-            files.append(("EXPLORER.WAS", f.read()))
-    if os.path.exists("apps/wasi_test.wasm"):
-        with open("apps/wasi_test.wasm", "rb") as f:
-            files.append(("TESTWASI.WAS", f.read()))
+    root_dir_data[11] = 0x08  # ATTR_VOLUME_ID
+    root_entry_count = 1
 
     current_cluster = 2 + ROOT_DIR_CLUSTERS  # Cluster 6+
 
-    for index, (name, content) in enumerate(files):
-        # Entry index starts at 1 (entry 0 is volume label)
-        entry_idx = index + 1
-        entry_offset = entry_idx * 32
-        if entry_offset + 32 > len(root_dir_data):
-            raise RuntimeError("Root directory overflow: need more root dir clusters!")
+    def write_cluster_data(cluster, data):
+        data_sector = DATA_START + (cluster - 2) * SECTORS_PER_CLUSTER
+        data_offset = data_sector * SECTOR_SIZE
+        img[data_offset : data_offset + len(data)] = data
 
-        parts = name.split(".")
-        fname = parts[0].ljust(8, " ")[:8].encode("ascii")
-        fext = parts[1].ljust(3, " ")[:3].encode("ascii")
-
-        root_dir_data[entry_offset : entry_offset + 8] = fname
-        root_dir_data[entry_offset + 8 : entry_offset + 11] = fext
-        root_dir_data[entry_offset + 11] = 0x20  # ATTR_ARCHIVE
-
+    def write_file(content):
+        nonlocal current_cluster
         start_cluster = current_cluster
-        struct.pack_into("<HHHHI", root_dir_data, entry_offset + 20,
-            (start_cluster >> 16) & 0xFFFF, # DIR_FstClusHI
-            0,                              # DIR_WrtTime
-            0x5CE0,                         # DIR_WrtDate
-            start_cluster & 0xFFFF,         # DIR_FstClusLO
-            len(content)                    # DIR_FileSize
-        )
-
         cluster_bytes = SECTOR_SIZE * SECTORS_PER_CLUSTER
         num_clusters = (len(content) + cluster_bytes - 1) // cluster_bytes
         if num_clusters == 0:
-            num_clusters = 1  # allocate at least 1 cluster if empty
+            num_clusters = 1
 
         for i in range(num_clusters):
             clust = start_cluster + i
             slice_start = i * cluster_bytes
             slice_end = min((i + 1) * cluster_bytes, len(content))
             slice_data = content[slice_start:slice_end]
-
-            data_sector = DATA_START + (clust - 2) * SECTORS_PER_CLUSTER
-            data_offset = data_sector * SECTOR_SIZE
-            img[data_offset : data_offset + len(slice_data)] = slice_data
-
+            write_cluster_data(clust, slice_data)
             next_val = 0x0FFFFFFF if i == num_clusters - 1 else clust + 1
             struct.pack_into("<I", fat_data, clust * 4, next_val)
 
         current_cluster += num_clusters
+        return start_cluster
+
+    # Load binaries
+    def read_opt(path):
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return f.read()
+        return b""
+
+    comp_wasm = read_opt("apps/compositor.wasm")
+    calc_wasm = read_opt("apps/calc.wasm")
+    term_wasm = read_opt("apps/terminal.wasm")
+    notepad_wasm = read_opt("apps/notepad.wasm")
+    explorer_wasm = read_opt("apps/explorer.wasm")
+    wasi_test_wasm = read_opt("apps/wasi_test.wasm")
+
+    root_files = [
+        ("HELLO.TXT", b"Hello from WoOS VFS (FAT32)!\n"),
+        ("README.TXT", b"WoOS high-performance read-write FAT32 filesystem image.\n")
+    ]
+    if comp_wasm: root_files.append(("COMPOSIT.WAS", comp_wasm))
+    if calc_wasm: root_files.append(("CALC.WAS", calc_wasm))
+    if term_wasm: root_files.append(("TERM.WAS", term_wasm))
+    if notepad_wasm: root_files.append(("NOTEPAD.WAS", notepad_wasm))
+    if explorer_wasm: root_files.append(("EXPLORER.WAS", explorer_wasm))
+    if wasi_test_wasm: root_files.append(("TESTWASI.WAS", wasi_test_wasm))
+
+    # Write root files
+    for name, content in root_files:
+        start_c = write_file(content)
+        parts = name.split(".")
+        ent = make_entry(parts[0], parts[1] if len(parts) > 1 else "", 0x20, start_c, len(content))
+        off = root_entry_count * 32
+        root_dir_data[off : off + 32] = ent
+        root_entry_count += 1
+
+    # --- Setup /DESKTOP directory ---
+    desktop_cluster = current_cluster
+    current_cluster += 1
+    struct.pack_into("<I", fat_data, desktop_cluster * 4, 0x0FFFFFFF)
+
+    # Directory entry in root
+    ent_desktop = make_entry("DESKTOP", "", 0x10, desktop_cluster, 0)
+    off = root_entry_count * 32
+    root_dir_data[off : off + 32] = ent_desktop
+    root_entry_count += 1
+
+    # Desktop directory cluster data
+    desktop_data = bytearray(SECTOR_SIZE * SECTORS_PER_CLUSTER)
+    # Entry 0: .
+    desktop_data[0:32] = make_entry(".", "", 0x10, desktop_cluster, 0)
+    # Entry 1: ..
+    desktop_data[32:64] = make_entry("..", "", 0x10, 0, 0)
+    desk_count = 2
+
+    desktop_files = [
+        ("EXPLORER.WAS", explorer_wasm),
+        ("NOTEPAD.WAS", notepad_wasm),
+        ("TERM.WAS", term_wasm),
+        ("CALC.WAS", calc_wasm),
+        ("README.TXT", b"Welcome to WoOS Desktop!\nFiles placed in /DESKTOP appear directly on your desktop screen.\n"),
+        ("TESTWASI.WAS", wasi_test_wasm)
+    ]
+
+    for name, content in desktop_files:
+        if not content: continue
+        start_c = write_file(content)
+        parts = name.split(".")
+        ent = make_entry(parts[0], parts[1] if len(parts) > 1 else "", 0x20, start_c, len(content))
+        d_off = desk_count * 32
+        desktop_data[d_off : d_off + 32] = ent
+        desk_count += 1
+
+    write_cluster_data(desktop_cluster, desktop_data)
+
+    # --- Setup /RECYCLE directory ---
+    recycle_cluster = current_cluster
+    current_cluster += 1
+    struct.pack_into("<I", fat_data, recycle_cluster * 4, 0x0FFFFFFF)
+
+    # Directory entry in root
+    ent_recycle = make_entry("RECYCLE", "", 0x10, recycle_cluster, 0)
+    off = root_entry_count * 32
+    root_dir_data[off : off + 32] = ent_recycle
+    root_entry_count += 1
+
+    # Recycle directory cluster data
+    recycle_data = bytearray(SECTOR_SIZE * SECTORS_PER_CLUSTER)
+    recycle_data[0:32] = make_entry(".", "", 0x10, recycle_cluster, 0)
+    recycle_data[32:64] = make_entry("..", "", 0x10, 0, 0)
+    write_cluster_data(recycle_cluster, recycle_data)
 
     # 4. Setup Sector 1 (FSInfo)
     clusters_used = current_cluster - 2
@@ -164,7 +224,7 @@ def main():
     # 7. Write woosfs.bin
     with open("woosfs.bin", "wb") as f:
         f.write(img)
-    print(f"woosfs.bin created successfully (FAT32, {TOTAL_SECTORS * SECTOR_SIZE // (1024*1024)}MB, {free_clusters * cluster_bytes // (1024*1024)}MB free)")
+    print(f"woosfs.bin created successfully (FAT32, {TOTAL_SECTORS * SECTOR_SIZE // (1024*1024)}MB, {free_clusters * SECTOR_SIZE * SECTORS_PER_CLUSTER // (1024*1024)}MB free)")
 
 if __name__ == "__main__":
     main()

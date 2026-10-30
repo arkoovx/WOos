@@ -100,8 +100,8 @@ all: os.img
 
 WAT2WASM := $(shell which wat2wasm 2>/dev/null || echo "npx -y -p wabt wat2wasm")
 
-apps/compositor.wasm: apps/compositor.wat
-	$(WAT2WASM) apps/compositor.wat -o apps/compositor.wasm
+apps/compositor.wasm: apps/compositor.c apps/woos.h
+	clang --target=wasm32 -nostdlib -O2 -fno-builtin -Wl,--no-entry -Wl,--initial-memory=8388608 -Wl,--export-memory -Wl,--export=_start apps/compositor.c -o apps/compositor.wasm
 
 apps/calc.wasm: apps/calc.wat
 	$(WAT2WASM) apps/calc.wat -o apps/calc.wasm

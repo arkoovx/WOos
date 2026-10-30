@@ -82,6 +82,8 @@ void vfs_init(void) {
     }
 
     g_vfs_ready = 1u;
+    f_mkdir("/DESKTOP");
+    f_mkdir("/RECYCLE");
     const char* fs_type_str = (g_fatfs.fs_type == FS_FAT32) ? "FAT32" :
                               (g_fatfs.fs_type == FS_FAT16) ? "FAT16" :
                               (g_fatfs.fs_type == FS_FAT12) ? "FAT12" : "FAT";

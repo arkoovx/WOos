@@ -6,11 +6,33 @@ typedef unsigned short uint16_t;
 typedef unsigned int   uint32_t;
 typedef signed int     int32_t;
 typedef unsigned long  size_t;
+typedef unsigned long long uint64_t;
+typedef signed long long   int64_t;
 
 #define NULL ((void*)0)
 
+static inline void int_to_str(int val, char* dst) {
+    if (val == 0) {
+        dst[0] = '0';
+        dst[1] = '\0';
+        return;
+    }
+    char tmp[16];
+    int idx = 0;
+    while (val > 0) {
+        tmp[idx++] = (char)('0' + (val % 10));
+        val /= 10;
+    }
+    int out = 0;
+    for (int i = idx - 1; i >= 0; i--) {
+        dst[out++] = tmp[i];
+    }
+    dst[out] = '\0';
+}
+
 // IPC Message types
 #define MSG_CLICK        1
+#define MSG_RIGHT_CLICK  2
 #define MSG_CLOSE        3
 #define MSG_KEY_DOWN     4
 
@@ -40,6 +62,7 @@ int woos_create_window(int w, int h, const char* title, int flags);
 
 WOOS_API("woos_graphics_destroy_window")
 int woos_destroy_window(int win_id);
+#define woos_graphics_destroy_window woos_destroy_window
 
 WOOS_API("woos_graphics_blit_window")
 int woos_blit_window(int win_id, const void* buffer, int w, int h);
@@ -83,11 +106,111 @@ typedef struct woos_dirent {
 WOOS_API("woos_vfs_readdir")
 int woos_vfs_readdir(int handle, woos_dirent_t* entry);
 
+WOOS_API("woos_vfs_mkdir")
+int woos_vfs_mkdir(const char* path);
+
+WOOS_API("woos_vfs_unlink")
+int woos_vfs_unlink(const char* path);
+
+WOOS_API("woos_vfs_rename")
+int woos_vfs_rename(const char* old_path, const char* new_path);
+
+// Compositor & Window Manager APIs
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+    uint32_t pitch;
+    uint32_t bpp;
+    uint64_t buffer_ptr;
+} woos_graphics_info_t;
+
+typedef struct {
+    uint32_t type;
+    uint16_t x;
+    uint16_t y;
+    uint8_t buttons;
+} __attribute__((packed)) woos_input_event_t;
+
+#define WOOS_WIN_TITLE_LEN 32
+
+typedef struct {
+    uint32_t id;
+    uint32_t thread_id;
+    int32_t x;
+    int32_t y;
+    uint32_t w;
+    uint32_t h;
+    uint32_t flags;
+    int32_t saved_x;
+    int32_t saved_y;
+    uint32_t saved_w;
+    uint32_t saved_h;
+    char title[WOOS_WIN_TITLE_LEN];
+    uint32_t active;
+    uint32_t* buffer;
+} __attribute__((packed)) woos_window_info_t;
+
+typedef struct {
+    uint32_t uptime_ms;
+    uint32_t total_pages;
+    uint32_t free_pages;
+    uint64_t heap_used;
+    uint64_t heap_free;
+    uint32_t keyboard_irq_count;
+    uint32_t mouse_irq_count;
+    uint32_t storage_last_lba;
+    uint32_t ip_addr;
+    uint8_t storage_ready;
+    uint8_t storage_read_ok;
+    uint8_t net_ready;
+    uint8_t net_active;
+    uint8_t net_link_up;
+} __attribute__((packed)) woos_system_status_t;
+
+WOOS_API("woos_graphics_get_info")
+int woos_graphics_get_info(woos_graphics_info_t* info);
+
+WOOS_API("woos_graphics_present_rect")
+int woos_graphics_present_rect(const void* buf, int x, int y, int w, int h);
+
+WOOS_API("woos_input_poll_event")
+int woos_input_poll_event(woos_input_event_t* event);
+
+WOOS_API("woos_input_wait_event")
+int woos_input_wait_event(void);
+
+WOOS_API("woos_system_get_status")
+int woos_system_get_status(woos_system_status_t* status);
+
+WOOS_API("woos_graphics_set_window_pos")
+int woos_graphics_set_window_pos(int win_id, int x, int y);
+
+WOOS_API("woos_graphics_get_window_count")
+int woos_graphics_get_window_count(void);
+
+WOOS_API("woos_graphics_get_window_info")
+int woos_graphics_get_window_info(int index, woos_window_info_t* info);
+
+WOOS_API("woos_graphics_draw_window_to_buffer")
+int woos_graphics_draw_window_to_buffer(int win_id, void* dst_buf, int dst_w, int dst_h);
+
+WOOS_API("woos_graphics_bring_to_front")
+int woos_graphics_bring_to_front(int win_id);
+
+WOOS_API("woos_graphics_toggle_minimize")
+int woos_graphics_toggle_minimize(int win_id);
+
+WOOS_API("woos_graphics_toggle_maximize")
+int woos_graphics_toggle_maximize(int win_id);
+
+WOOS_API("woos_graphics_get_focused_tid")
+int woos_graphics_get_focused_tid(void);
+
+WOOS_API("woos_ipc_send")
+int woos_ipc_send(int dest_id, int type, int arg1, int arg2, int arg3, int arg4, int arg5);
+
 // WASI Snapshot Preview 1 Imports
 #define WASI_API(name) __attribute__((import_module("wasi_snapshot_preview1"), import_name(name)))
-
-typedef unsigned long long uint64_t;
-typedef signed long long   int64_t;
 
 typedef struct {
     uint32_t buf;

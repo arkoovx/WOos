@@ -82,7 +82,7 @@
   (data (i32.const 1780) "  fetch <url> - Fetch web page via HTTP client\00")
   (data (i32.const 1830) "  calc        - Launch Calculator application\00")
   (data (i32.const 1870) "  notepad     - Launch Notepad text editor\00")
-  (data (i32.const 1910) "  explorer    - Launch Windows File Explorer\00")
+  (data (i32.const 1910) "  explorer    - Launch File Explorer\00")
   (data (i32.const 1950) "  exit        - Close terminal\00")
 
   ;; PS header

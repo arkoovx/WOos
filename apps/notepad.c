@@ -203,24 +203,6 @@ static void scroll(void) {
     }
 }
 
-static void int_to_str(int val, char* dst) {
-    if (val == 0) {
-        dst[0] = '0';
-        dst[1] = '\0';
-        return;
-    }
-    char tmp[16];
-    int idx = 0;
-    while (val > 0) {
-        tmp[idx++] = (char)('0' + (val % 10));
-        val /= 10;
-    }
-    int out = 0;
-    for (int i = idx - 1; i >= 0; i--) {
-        dst[out++] = tmp[i];
-    }
-    dst[out] = '\0';
-}
 
 static void draw_editor(void) {
     scroll();

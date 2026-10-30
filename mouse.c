@@ -229,9 +229,13 @@ static void handle_mouse_packet(const uint8_t packet[MOUSE_PACKET_SIZE]) {
         uint8_t old_buttons = g_mouse.buttons;
         g_mouse.buttons = next_buttons;
 
-        if ((next_buttons & 1u) != (old_buttons & 1u)) {
-            input_event_type_t ev_type = (next_buttons & 1u) ? INPUT_EVENT_MOUSE_BUTTON : INPUT_EVENT_MOUSE_RELEASE;
-            input_event_t button_event = {ev_type, g_mouse.x, g_mouse.y, g_mouse.buttons};
+        if ((next_buttons & ~old_buttons) != 0) {
+            input_event_t button_event = {INPUT_EVENT_MOUSE_BUTTON, g_mouse.x, g_mouse.y, g_mouse.buttons};
+            input_push(&button_event);
+            g_perf_stats.mouse_push++;
+        }
+        if ((old_buttons & ~next_buttons) != 0) {
+            input_event_t button_event = {INPUT_EVENT_MOUSE_RELEASE, g_mouse.x, g_mouse.y, g_mouse.buttons};
             input_push(&button_event);
             g_perf_stats.mouse_push++;
         }
