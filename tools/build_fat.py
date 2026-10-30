@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import struct
 import os
+import zlib
+import subprocess
 
 SECTOR_SIZE = 512
 TOTAL_SECTORS = 131072       # 64 MB FAT32 image
@@ -34,7 +36,7 @@ def main():
 
     # 1. Setup Sector 0 (VBR / Boot Sector)
     img[0:3] = b"\xeb\x58\x90"
-    img[3:11] = b"MSWIN4.1"
+    img[3:11] = b"WOOSFS10"
     struct.pack_into("<HBHBHHBHHHII", img, 11,
         SECTOR_SIZE,          # BPB_BytsPerSec (512)
         SECTORS_PER_CLUSTER,  # BPB_SecPerClus (1)
@@ -116,6 +118,81 @@ def main():
                 return f.read()
         return b""
 
+    def create_wallpaper_bmp(width=320, height=240):
+        row_bytes = (width * 3 + 3) & ~3
+        image_size = row_bytes * height
+        file_size = 54 + image_size
+        data = bytearray(file_size)
+        data[0:2] = b'BM'
+        struct.pack_into('<IHHI', data, 2, file_size, 0, 0, 54)
+        struct.pack_into('<IIIHHIIIIII', data, 14,
+            40, width, height, 1, 24, 0, image_size, 2835, 2835, 0, 0
+        )
+        for y in range(height):
+            row_offset = 54 + y * row_bytes
+            v = y / height
+            for x in range(width):
+                u = x / width
+                cx = u - 0.5
+                cy = v - 0.5
+                dist = (cx*cx + cy*cy) ** 0.5
+                r = int(max(0, min(255, 12 + 35 * (1.0 - dist) + 20 * u)))
+                g = int(max(0, min(255, 25 + 75 * (1.0 - dist) + 40 * (1.0 - v))))
+                b = int(max(0, min(255, 55 + 130 * (1.0 - dist) + 70 * (1.0 - u))))
+                if (x % 32 == 0) or (y % 32 == 0):
+                    r = min(255, r + 12)
+                    g = min(255, g + 16)
+                    b = min(255, b + 24)
+                dx = abs(x - width // 2)
+                dy = abs(y - height // 2)
+                if abs(dx + dy - 24) <= 1:
+                    r, g, b = 0, 210, 255
+                data[row_offset + x * 3 + 0] = b
+                data[row_offset + x * 3 + 1] = g
+                data[row_offset + x * 3 + 2] = r
+        return bytes(data)
+
+    def make_png(width, height, raw_rgb):
+        def chunk(tag, data):
+            crc = zlib.crc32(tag + data) & 0xffffffff
+            return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', crc)
+        ihdr = struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)
+        raw_lines = bytearray()
+        for y in range(height):
+            raw_lines.append(0)
+            raw_lines.extend(raw_rgb[y * width * 3 : (y + 1) * width * 3])
+        idat = zlib.compress(bytes(raw_lines))
+        return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat) + chunk(b'IEND', b'')
+
+    def create_logo_png(width=128, height=128):
+        rgb = bytearray(width * height * 3)
+        for y in range(height):
+            for x in range(width):
+                cx = (x - width // 2)
+                cy = (y - height // 2)
+                d = (cx*cx + cy*cy) ** 0.5
+                off = (y * width + x) * 3
+                if d < width * 0.45:
+                    light = max(0.0, min(1.0, 1.0 - (cx*0.7 + cy*0.7 + d) / (width * 0.8)))
+                    r = int(20 + 100 * light)
+                    g = int(120 + 130 * light)
+                    b = int(200 + 55 * light)
+                else:
+                    r, g, b = 30, 39, 46
+                rgb[off] = r
+                rgb[off + 1] = g
+                rgb[off + 2] = b
+        return make_png(width, height, rgb)
+
+    def create_sample_jpg():
+        tmp_jpg = '/tmp/woos_photo_sample.jpg'
+        try:
+            subprocess.run(['magick', '-size', '160x160', 'radial-gradient:#ff7675-#6c5ce7', tmp_jpg], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with open(tmp_jpg, 'rb') as f:
+                return f.read()
+        except Exception:
+            return b""
+
     comp_wasm = read_opt("apps/compositor.wasm")
     calc_wasm = read_opt("apps/calc.wasm")
     term_wasm = read_opt("apps/terminal.wasm")
@@ -123,11 +200,18 @@ def main():
     explorer_wasm = read_opt("apps/explorer.wasm")
     wasi_test_wasm = read_opt("apps/wasi_test.wasm")
     fetch_wasm = read_opt("apps/fetch.wasm")
+    imgview_wasm = read_opt("apps/imageview.wasm")
+    wallpap_bmp = create_wallpaper_bmp()
+    logo_png = create_logo_png()
+    photo_jpg = create_sample_jpg()
 
     root_files = [
         ("HELLO.TXT", b"Hello from WoOS VFS (FAT32)!\n"),
         ("README.TXT", b"WoOS high-performance read-write FAT32 filesystem image.\n")
     ]
+    if wallpap_bmp: root_files.append(("WALLPAP.BMP", wallpap_bmp))
+    if logo_png: root_files.append(("LOGO.PNG", logo_png))
+    if photo_jpg: root_files.append(("PHOTO.JPG", photo_jpg))
     if comp_wasm: root_files.append(("COMPOSIT.WAS", comp_wasm))
     if calc_wasm: root_files.append(("CALC.WAS", calc_wasm))
     if term_wasm: root_files.append(("TERM.WAS", term_wasm))
@@ -135,6 +219,7 @@ def main():
     if explorer_wasm: root_files.append(("EXPLORER.WAS", explorer_wasm))
     if wasi_test_wasm: root_files.append(("TESTWASI.WAS", wasi_test_wasm))
     if fetch_wasm: root_files.append(("FETCH.WAS", fetch_wasm))
+    if imgview_wasm: root_files.append(("IMGVIEW.WAS", imgview_wasm))
 
     # Write root files
     for name, content in root_files:
@@ -145,32 +230,37 @@ def main():
         root_dir_data[off : off + 32] = ent
         root_entry_count += 1
 
-    # --- Setup /DESKTOP directory ---
-    desktop_cluster = current_cluster
-    current_cluster += 1
-    struct.pack_into("<I", fat_data, desktop_cluster * 4, 0x0FFFFFFF)
+    # --- Setup /DESKTOP directory (4 clusters = 64 directory entries) ---
+    desktop_clusters = 4
+    desktop_start_cluster = current_cluster
+    for i in range(desktop_clusters - 1):
+        struct.pack_into("<I", fat_data, (desktop_start_cluster + i) * 4, desktop_start_cluster + i + 1)
+    struct.pack_into("<I", fat_data, (desktop_start_cluster + desktop_clusters - 1) * 4, 0x0FFFFFFF)
+    current_cluster += desktop_clusters
 
     # Directory entry in root
-    ent_desktop = make_entry("DESKTOP", "", 0x10, desktop_cluster, 0)
+    ent_desktop = make_entry("DESKTOP", "", 0x10, desktop_start_cluster, 0)
     off = root_entry_count * 32
     root_dir_data[off : off + 32] = ent_desktop
     root_entry_count += 1
 
     # Desktop directory cluster data
-    desktop_data = bytearray(SECTOR_SIZE * SECTORS_PER_CLUSTER)
-    # Entry 0: .
-    desktop_data[0:32] = make_entry(".", "", 0x10, desktop_cluster, 0)
-    # Entry 1: ..
+    desktop_data = bytearray(desktop_clusters * SECTOR_SIZE * SECTORS_PER_CLUSTER)
+    desktop_data[0:32] = make_entry(".", "", 0x10, desktop_start_cluster, 0)
     desktop_data[32:64] = make_entry("..", "", 0x10, 0, 0)
     desk_count = 2
 
     desktop_files = [
         ("EXPLORER.WAS", explorer_wasm),
+        ("IMGVIEW.WAS", imgview_wasm),
         ("NOTEPAD.WAS", notepad_wasm),
         ("TERM.WAS", term_wasm),
         ("CALC.WAS", calc_wasm),
         ("FETCH.WAS", fetch_wasm),
         ("README.TXT", b"Welcome to WoOS Desktop!\nFiles placed in /DESKTOP appear directly on your desktop screen.\n"),
+        ("WALLPAP.BMP", wallpap_bmp),
+        ("LOGO.PNG", logo_png),
+        ("PHOTO.JPG", photo_jpg),
         ("TESTWASI.WAS", wasi_test_wasm)
     ]
 
@@ -183,7 +273,9 @@ def main():
         desktop_data[d_off : d_off + 32] = ent
         desk_count += 1
 
-    write_cluster_data(desktop_cluster, desktop_data)
+    for i in range(desktop_clusters):
+        c_slice = desktop_data[i * SECTOR_SIZE * SECTORS_PER_CLUSTER : (i + 1) * SECTOR_SIZE * SECTORS_PER_CLUSTER]
+        write_cluster_data(desktop_start_cluster + i, c_slice)
 
     # --- Setup /RECYCLE directory ---
     recycle_cluster = current_cluster

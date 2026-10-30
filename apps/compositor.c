@@ -1,4 +1,5 @@
 #include "woos.h"
+#include "icons.h"
 
 #define SCREEN_W 1280
 #define SCREEN_H 1024
@@ -36,6 +37,10 @@ typedef struct {
 
 // Framebuffer
 static uint32_t g_screen[SCREEN_W * SCREEN_H];
+
+// Wallpaper buffer
+static uint32_t g_wallpaper[SCREEN_W * (SCREEN_H - TASKBAR_H)];
+static int g_has_wallpaper = 0;
 
 // Desktop State
 static desktop_item_t g_items[MAX_DESKTOP_ITEMS];
@@ -132,49 +137,107 @@ static void open_file_in_notepad(const char* filepath) {
     }
 }
 
+static int is_image_file(const char* name) {
+    if (!name) return 0;
+    int len = (int)strlen(name);
+    if (len >= 4 && (strcmp(&name[len - 4], ".bmp") == 0 || strcmp(&name[len - 4], ".BMP") == 0 ||
+                     strcmp(&name[len - 4], ".png") == 0 || strcmp(&name[len - 4], ".PNG") == 0 ||
+                     strcmp(&name[len - 4], ".jpg") == 0 || strcmp(&name[len - 4], ".JPG") == 0)) {
+        return 1;
+    }
+    if (len >= 5 && (strcmp(&name[len - 5], ".jpeg") == 0 || strcmp(&name[len - 5], ".JPEG") == 0)) {
+        return 1;
+    }
+    return 0;
+}
+
+static void open_file_in_imageview(const char* filepath) {
+    woos_system_set_open_file(filepath);
+    int win_count = woos_graphics_get_window_count();
+    woos_window_info_t win;
+    int found_tid = -1;
+    int found_id = -1;
+    for (int i = 0; i < win_count; i++) {
+        if (woos_graphics_get_window_info(i, &win) == 0) {
+            if (strncmp(win.title, "Image Viewer", 12) == 0) {
+                found_id = win.id;
+                found_tid = win.thread_id;
+                break;
+            }
+        }
+    }
+
+    if (found_id >= 0 && found_tid >= 0) {
+        woos_graphics_bring_to_front(found_id);
+        woos_ipc_send(found_tid, MSG_OPEN_FILE, 0, 0, 0, 0, 0);
+    } else {
+        woos_system_spawn("/IMGVIEW.WAS");
+    }
+}
+
+static void load_wallpaper(void) {
+    g_has_wallpaper = 0;
+    int32_t fd = woos_vfs_open("/WALLPAP.BMP", VFS_MODE_READ);
+    if (fd < 0) return;
+
+    uint8_t header[54];
+    uint32_t r = woos_vfs_read(fd, header, 54);
+    if (r < 54 || header[0] != 'B' || header[1] != 'M') {
+        woos_vfs_close(fd);
+        return;
+    }
+
+    uint32_t offset = *(const uint32_t*)&header[10];
+    int32_t w = *(const int32_t*)&header[18];
+    int32_t h = *(const int32_t*)&header[22];
+    uint16_t bpp = *(const uint16_t*)&header[28];
+    uint32_t comp = *(const uint32_t*)&header[30];
+
+    if ((comp != 0 && comp != 3) || (bpp != 24 && bpp != 32) || w <= 0 || h == 0) {
+        woos_vfs_close(fd);
+        return;
+    }
+
+    int is_top_down = (h < 0);
+    int abs_h = is_top_down ? -h : h;
+    int target_w = SCREEN_W;
+    int target_h = SCREEN_H - TASKBAR_H;
+
+    int row_bytes = ((w * (bpp / 8) + 3) & ~3);
+    static uint8_t row_buf[4096 * 4];
+    int last_src_y = -1;
+
+    for (int y = 0; y < target_h; y++) {
+        int src_y = (y * abs_h) / target_h;
+        if (!is_top_down) src_y = abs_h - 1 - src_y;
+
+        if (src_y != last_src_y) {
+            woos_vfs_seek(fd, offset + (uint32_t)src_y * row_bytes);
+            if (woos_vfs_read(fd, row_buf, (uint32_t)row_bytes) <= 0) break;
+            last_src_y = src_y;
+        }
+
+        uint32_t* dst_row = g_wallpaper + y * target_w;
+        for (int x = 0; x < target_w; x++) {
+            int sx = (x * w) / target_w;
+            if (bpp == 32) {
+                uint8_t b = row_buf[sx * 4 + 0];
+                uint8_t g = row_buf[sx * 4 + 1];
+                uint8_t r = row_buf[sx * 4 + 2];
+                dst_row[x] = (0xFF << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+            } else {
+                uint8_t b = row_buf[sx * 3 + 0];
+                uint8_t g = row_buf[sx * 3 + 1];
+                uint8_t r = row_buf[sx * 3 + 2];
+                dst_row[x] = (0xFF << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+            }
+        }
+    }
+    woos_vfs_close(fd);
+    g_has_wallpaper = 1;
+}
+
 // Icon Drawing Helpers
-static void draw_recycle_bin_icon(int x, int y) {
-    // Wastebasket rim
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 4, y + 2, 28, 4, 0x8FA4BA);
-    draw_rect(g_screen, SCREEN_W, SCREEN_H, x + 4, y + 2, 28, 4, 0x485A6E);
-    // Body
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 6, y + 6, 24, 26, 0x4B6584);
-    draw_rect(g_screen, SCREEN_W, SCREEN_H, x + 6, y + 6, 24, 26, 0x2C3A47);
-    // Inner mesh lines
-    for (int l = 0; l < 4; l++) {
-        fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 10 + l * 5, y + 9, 2, 18, 0x778CA3);
-    }
-    // Recycle Emblem in Green
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 13, y + 15, 10, 8, 0x20BF6B);
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 15, y + 17, 6, 4, 0x4B6584);
-}
-
-static void draw_app_icon(int x, int y) {
-    // Outer window frame
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 3, y + 2, 30, 30, 0xBDC3C7);
-    draw_rect(g_screen, SCREEN_W, SCREEN_H, x + 3, y + 2, 30, 30, 0x2C3E50);
-    // Blue titlebar
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 4, y + 3, 28, 6, 0x2980B9);
-    // Client area
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 4, y + 9, 28, 22, 0xECF0F1);
-    // Inner symbol
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 10, y + 14, 16, 12, 0xE74C3C);
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 13, y + 17, 10, 6, 0xFFFFFF);
-}
-
-static void draw_text_icon(int x, int y) {
-    // Sheet of paper
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 6, y + 2, 24, 30, 0xFFFFFF);
-    draw_rect(g_screen, SCREEN_W, SCREEN_H, x + 6, y + 2, 24, 30, 0x7F8C8D);
-    // Folded top-right corner
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 22, y + 2, 8, 8, 0xBDC3C7);
-    draw_rect(g_screen, SCREEN_W, SCREEN_H, x + 22, y + 2, 8, 8, 0x7F8C8D);
-    // Text lines
-    for (int l = 0; l < 4; l++) {
-        fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 10, y + 12 + l * 4, 14, 2, 0x34495E);
-    }
-}
-
 static void draw_folder_icon(int x, int y) {
     // Tab
     fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 4, y + 4, 12, 5, 0xD4AC0D);
@@ -185,26 +248,13 @@ static void draw_folder_icon(int x, int y) {
     draw_rect(g_screen, SCREEN_W, SCREEN_H, x + 4, y + 8, 28, 22, 0xB7950B);
 }
 
-static void draw_file_icon(int x, int y) {
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 6, y + 2, 24, 30, 0xEAEDED);
-    draw_rect(g_screen, SCREEN_W, SCREEN_H, x + 6, y + 2, 24, 30, 0x95A5A6);
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, x + 11, y + 10, 14, 14, 0x3498DB);
-}
-
 static void draw_item_icon(desktop_item_t* it, int x, int y) {
     if (it->is_recycle_bin) {
-        draw_recycle_bin_icon(x, y);
+        draw_recycle_bin_icon_s(g_screen, SCREEN_W, SCREEN_H, x, y, 32);
     } else if (it->is_dir) {
         draw_folder_icon(x, y);
     } else {
-        int len = (int)strlen(it->name);
-        if (len >= 4 && (strcmp(&it->name[len - 4], ".WAS") == 0 || strcmp(&it->name[len - 4], ".was") == 0)) {
-            draw_app_icon(x, y);
-        } else if (len >= 4 && (strcmp(&it->name[len - 4], ".TXT") == 0 || strcmp(&it->name[len - 4], ".txt") == 0)) {
-            draw_text_icon(x, y);
-        } else {
-            draw_file_icon(x, y);
-        }
+        draw_icon_by_target(g_screen, SCREEN_W, SCREEN_H, x, y, 32, it->name);
     }
 }
 
@@ -450,7 +500,10 @@ static void launch_item(int idx) {
         else if (strcmp(it->name, "CALC.WAS") == 0) launch_or_focus(it->full_path, "Calculator");
         else if (strcmp(it->name, "TERM.WAS") == 0) launch_or_focus(it->full_path, "Terminal");
         else if (strcmp(it->name, "FETCH.WAS") == 0) launch_or_focus(it->full_path, "HTTP Fetch");
+        else if (strcmp(it->name, "IMGVIEW.WAS") == 0) launch_or_focus(it->full_path, "Image Viewer");
         else woos_system_spawn(it->full_path);
+    } else if (is_image_file(it->name)) {
+        open_file_in_imageview(it->full_path);
     } else {
         // Document: open with Notepad!
         open_file_in_notepad(it->full_path);
@@ -566,12 +619,11 @@ static void draw_window_decorations(woos_window_info_t* win) {
     // Titlebar rectangle (22px high)
     fill_rect(g_screen, SCREEN_W, SCREEN_H, win_x, win_y - 22, win_w, 22, title_col);
 
-    // Mini Window Icon (at win_x + 5, win_y - 17)
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, win_x + 5, win_y - 17, 10, 10, 0x3498DB);
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, win_x + 7, win_y - 15, 6, 6, 0xFFFFFF);
+    // Mini Window Icon (at win_x + 4, win_y - 18)
+    draw_icon_by_target(g_screen, SCREEN_W, SCREEN_H, win_x + 4, win_y - 18, 14, win->title);
 
     // Window Title String
-    woos_draw_text(g_screen, SCREEN_W, SCREEN_H, win_x + 19, win_y - 15, win->title, text_col);
+    woos_draw_text(g_screen, SCREEN_W, SCREEN_H, win_x + 22, win_y - 15, win->title, text_col);
 
     // [X] Close button
     int bx = win_x + win_w - 24;
@@ -612,14 +664,19 @@ static void draw_window_decorations(woos_window_info_t* win) {
 // Rendering Main Function
 static void render_screen(void) {
     // 1. Wallpaper background
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, 0, 0, SCREEN_W, SCREEN_H - TASKBAR_H, COLOR_WALLPAPER);
-
-    // Subtle grid guide dots
-    for (int r = 0; r < GRID_ROWS; r++) {
-        for (int c = 0; c < GRID_COLS; c++) {
-            int gx = GRID_MARGIN_X + c * GRID_CELL_W + GRID_CELL_W / 2;
-            int gy = GRID_MARGIN_Y + r * GRID_CELL_H + GRID_CELL_H / 2;
-            fill_rect(g_screen, SCREEN_W, SCREEN_H, gx, gy, 1, 1, 0x2A3547);
+    if (g_has_wallpaper) {
+        for (int i = 0; i < SCREEN_W * (SCREEN_H - TASKBAR_H); i++) {
+            g_screen[i] = g_wallpaper[i];
+        }
+    } else {
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, 0, 0, SCREEN_W, SCREEN_H - TASKBAR_H, COLOR_WALLPAPER);
+        // Subtle grid guide dots
+        for (int r = 0; r < GRID_ROWS; r++) {
+            for (int c = 0; c < GRID_COLS; c++) {
+                int gx = GRID_MARGIN_X + c * GRID_CELL_W + GRID_CELL_W / 2;
+                int gy = GRID_MARGIN_Y + r * GRID_CELL_H + GRID_CELL_H / 2;
+                fill_rect(g_screen, SCREEN_W, SCREEN_H, gx, gy, 1, 1, 0x2A3547);
+            }
         }
     }
 
@@ -701,20 +758,53 @@ static void render_screen(void) {
     fill_rect(g_screen, SCREEN_W, SCREEN_H, 19, tb_y + 18, 8, 8, 0xF1C40F);
     woos_draw_text(g_screen, SCREEN_W, SCREEN_H, 32, tb_y + 11, "Start", COLOR_TEXT_WHITE);
 
-    // Window Tabs on Taskbar
+    // Window Tabs on Taskbar (Icons instead of text!)
+    int hover_tab_idx = -1;
     for (int i = 0; i < win_count; i++) {
         if (woos_graphics_get_window_info(i, &win) == 0) {
-            int tab_x = 86 + i * 145;
-            int tab_w = 140;
+            int tab_w = 42;
+            int tab_gap = 4;
+            int tab_x = 86 + i * (tab_w + tab_gap);
             int is_focused = (win.flags & 8) != 0;
-            draw_3d_rect(g_screen, SCREEN_W, SCREEN_H, tab_x, tb_y + 4, tab_w, 28, is_focused);
-            fill_rect(g_screen, SCREEN_W, SCREEN_H, tab_x + 1, tb_y + 5, tab_w - 2, 26, is_focused ? 0x1E2734 : 0x2B3442);
-            // Title
-            char title_trunc[16];
-            strncpy(title_trunc, win.title, 14);
-            title_trunc[14] = '\0';
-            woos_draw_text(g_screen, SCREEN_W, SCREEN_H, tab_x + 10, tb_y + 11, title_trunc, is_focused ? 0xFFFFFF : 0xAAAAAA);
+            int is_min = (win.flags & 1) != 0;
+            int is_hover = (g_cursor_x >= tab_x && g_cursor_x < tab_x + tab_w &&
+                            g_cursor_y >= tb_y + 4 && g_cursor_y < tb_y + 32);
+            if (is_hover) hover_tab_idx = i;
+
+            uint32_t bg_col = is_focused ? 0x263345 : (is_hover ? 0x354359 : 0x1E2734);
+            fill_rect(g_screen, SCREEN_W, SCREEN_H, tab_x, tb_y + 4, tab_w, 28, bg_col);
+            draw_rect(g_screen, SCREEN_W, SCREEN_H, tab_x, tb_y + 4, tab_w, 28, is_focused ? 0x485C77 : 0x2A3547);
+
+            // Draw custom 20x20 application icon inside the button
+            int icon_x = tab_x + (tab_w - 20) / 2;
+            int icon_y = tb_y + 4 + (28 - 20) / 2;
+            draw_icon_by_target(g_screen, SCREEN_W, SCREEN_H, icon_x, icon_y, 20, win.title);
+
+            // Active glowing underline bar
+            if (is_focused) {
+                fill_rect(g_screen, SCREEN_W, SCREEN_H, tab_x + 2, tb_y + 29, tab_w - 4, 2, 0x00D2FF);
+            } else if (!is_min) {
+                fill_rect(g_screen, SCREEN_W, SCREEN_H, tab_x + 6, tb_y + 29, tab_w - 12, 2, 0x5D718C);
+            }
         }
+    }
+
+    // Tooltip popup for hovered taskbar button
+    if (hover_tab_idx >= 0 && woos_graphics_get_window_info(hover_tab_idx, &win) == 0) {
+        int tab_w = 42;
+        int tab_gap = 4;
+        int tab_x = 86 + hover_tab_idx * (tab_w + tab_gap);
+        int tlen = (int)strlen(win.title);
+        int tip_w = tlen * 8 + 12;
+        int tip_h = 20;
+        int tip_x = tab_x + tab_w / 2 - tip_w / 2;
+        if (tip_x < 4) tip_x = 4;
+        if (tip_x + tip_w > SCREEN_W - 4) tip_x = SCREEN_W - tip_w - 4;
+        int tip_y = tb_y - tip_h - 4;
+
+        fill_rect(g_screen, SCREEN_W, SCREEN_H, tip_x, tip_y, tip_w, tip_h, 0x1B212B);
+        draw_rect(g_screen, SCREEN_W, SCREEN_H, tip_x, tip_y, tip_w, tip_h, 0x485A6E);
+        woos_draw_text(g_screen, SCREEN_W, SCREEN_H, tip_x + 6, tip_y + 4, win.title, 0x00FFCC);
     }
 
     // System Tray Area (Status metrics & Clock)
@@ -765,7 +855,7 @@ static void render_screen(void) {
     // 6. Start Menu Popup
     if (g_start_menu_open) {
         int sm_w = 200;
-        int sm_h = 240;
+        int sm_h = 280;
         int sm_x = 4;
         int sm_y = SCREEN_H - TASKBAR_H - sm_h - 2;
 
@@ -782,14 +872,15 @@ static void render_screen(void) {
             "Notepad",
             "Terminal",
             "Calculator",
+            "Image Viewer",
             "HTTP Fetch",
             "WASI Test"
         };
 
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 7; i++) {
             int iy = sm_y + 10 + i * 36;
             fill_rect(g_screen, SCREEN_W, SCREEN_H, sm_x + 34, iy - 2, sm_w - 38, 30, 0xE4E2D5);
-            draw_app_icon(sm_x + 38, iy + 4);
+            draw_icon_by_target(g_screen, SCREEN_W, SCREEN_H, sm_x + 38, iy + 3, 24, sm_items[i]);
             woos_draw_text(g_screen, SCREEN_W, SCREEN_H, sm_x + 72, iy + 8, sm_items[i], COLOR_TEXT_BLACK);
         }
     }
@@ -828,12 +919,12 @@ static void render_screen(void) {
                 int sub_x = g_ctx_x + g_ctx_w - 4;
                 int sub_y = g_ctx_y + 4 + 1 * 22;
                 int sub_w = 140;
-                int sub_h = 4 * 22 + 8;
+                int sub_h = 5 * 22 + 8;
                 draw_3d_rect(g_screen, SCREEN_W, SCREEN_H, sub_x, sub_y, sub_w, sub_h, 0);
                 fill_rect(g_screen, SCREEN_W, SCREEN_H, sub_x + 1, sub_y + 1, sub_w - 2, sub_h - 2, COLOR_MENU_BG);
 
-                const char* sub_items[] = { "Notepad", "File Explorer", "Terminal", "Calculator" };
-                for (int s = 0; s < 4; s++) {
+                const char* sub_items[] = { "Notepad", "Image Viewer", "File Explorer", "Terminal", "Calculator" };
+                for (int s = 0; s < 5; s++) {
                     int sy = sub_y + 4 + s * 22;
                     woos_draw_text(g_screen, SCREEN_W, SCREEN_H, sub_x + 10, sy + 3, sub_items[s], COLOR_TEXT_BLACK);
                 }
@@ -959,6 +1050,7 @@ void _start(void) {
     woos_graphics_info_t ginfo;
     woos_graphics_get_info(&ginfo);
 
+    load_wallpaper();
     load_desktop_items();
     render_screen();
     woos_graphics_present_rect(g_screen, 0, 0, SCREEN_W, SCREEN_H);
@@ -1105,7 +1197,7 @@ void _start(void) {
                         } else {
                             // Desktop context actions
                             if (it_idx == 1) paste_clipboard();
-                            else if (it_idx == 2) load_desktop_items();
+                            else if (it_idx == 2) { load_wallpaper(); load_desktop_items(); }
                             else if (it_idx == 3) {
                                 g_dialog_mode = 1;
                                 g_dialog_target_idx = -1;
@@ -1117,7 +1209,7 @@ void _start(void) {
                     else if (g_ctx_submenu_open == 1) { // Open with...
                         int sub_x = g_ctx_x + g_ctx_w - 4;
                         int sub_y = g_ctx_y + 4 + 1 * 22;
-                        if (g_cursor_x >= sub_x && g_cursor_x < sub_x + 140 && g_cursor_y >= sub_y && g_cursor_y < sub_y + 4 * 22) {
+                        if (g_cursor_x >= sub_x && g_cursor_x < sub_x + 140 && g_cursor_y >= sub_y && g_cursor_y < sub_y + 5 * 22) {
                             int s_idx = (g_cursor_y - (sub_y + 4)) / 22;
                             if (s_idx == 0) {
                                 if (g_ctx_target_item >= 0) {
@@ -1126,9 +1218,16 @@ void _start(void) {
                                     launch_or_focus("/NOTEPAD.WAS", "Notepad");
                                 }
                             }
-                            else if (s_idx == 1) launch_or_focus("/EXPLORER.WAS", "File Explorer");
-                            else if (s_idx == 2) launch_or_focus("/TERM.WAS", "Terminal");
-                            else if (s_idx == 3) launch_or_focus("/CALC.WAS", "Calculator");
+                            else if (s_idx == 1) {
+                                if (g_ctx_target_item >= 0) {
+                                    open_file_in_imageview(g_items[g_ctx_target_item].full_path);
+                                } else {
+                                    launch_or_focus("/IMGVIEW.WAS", "Image Viewer");
+                                }
+                            }
+                            else if (s_idx == 2) launch_or_focus("/EXPLORER.WAS", "File Explorer");
+                            else if (s_idx == 3) launch_or_focus("/TERM.WAS", "Terminal");
+                            else if (s_idx == 4) launch_or_focus("/CALC.WAS", "Calculator");
                             clicked_menu = 1;
                         }
                     } else if (g_ctx_submenu_open == 2) { // New...
@@ -1162,7 +1261,7 @@ void _start(void) {
                 // Handle Start Menu click
                 if (g_start_menu_open) {
                     int sm_w = 200;
-                    int sm_h = 240;
+                    int sm_h = 280;
                     int sm_x = 4;
                     int sm_y = SCREEN_H - TASKBAR_H - sm_h - 2;
 
@@ -1172,8 +1271,9 @@ void _start(void) {
                         else if (it_idx == 1) launch_or_focus("/NOTEPAD.WAS", "Notepad");
                         else if (it_idx == 2) launch_or_focus("/TERM.WAS", "Terminal");
                         else if (it_idx == 3) launch_or_focus("/CALC.WAS", "Calculator");
-                        else if (it_idx == 4) launch_or_focus("/FETCH.WAS", "HTTP Fetch");
-                        else if (it_idx == 5) launch_or_focus("/TESTWASI.WAS", "WASI Test");
+                        else if (it_idx == 4) launch_or_focus("/IMGVIEW.WAS", "Image Viewer");
+                        else if (it_idx == 5) launch_or_focus("/FETCH.WAS", "HTTP Fetch");
+                        else if (it_idx == 6) launch_or_focus("/TESTWASI.WAS", "WASI Test");
                     }
                     g_start_menu_open = 0;
                     need_redraw = 1;
@@ -1190,11 +1290,13 @@ void _start(void) {
                         continue;
                     }
 
-                    // Window Tabs
+                    // Window Tabs (Icons instead of text)
                     int win_count = woos_graphics_get_window_count();
                     for (int i = 0; i < win_count; i++) {
-                        int tab_x = 86 + i * 145;
-                        if (g_cursor_x >= tab_x && g_cursor_x <= tab_x + 140) {
+                        int tab_w = 42;
+                        int tab_gap = 4;
+                        int tab_x = 86 + i * (tab_w + tab_gap);
+                        if (g_cursor_x >= tab_x && g_cursor_x <= tab_x + tab_w) {
                             woos_window_info_t win;
                             if (woos_graphics_get_window_info(i, &win) == 0) {
                                 if (win.flags & 8) { // focused -> minimize

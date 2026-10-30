@@ -684,6 +684,14 @@ m3ApiRawFunction(wasi_vfs_size) {
     m3ApiReturn(vfs_size(handle));
 }
 
+m3ApiRawFunction(wasi_vfs_seek) {
+    m3ApiReturnType(int32_t)
+    m3ApiGetArg(int32_t, handle)
+    m3ApiGetArg(uint32_t, offset)
+    extern int32_t vfs_seek(int32_t handle, uint32_t offset);
+    m3ApiReturn(vfs_seek(handle, offset));
+}
+
 m3ApiRawFunction(wasi_vfs_readdir) {
     m3ApiReturnType(int32_t)
     m3ApiGetArg(int32_t, handle)
@@ -2131,6 +2139,8 @@ M3Result link_wasi(IM3Module module) {
     res = link_raw_func(module, "env", "woos_vfs_close", "i(i)", &wasi_vfs_close);
     if (res) return res;
     res = link_raw_func(module, "env", "woos_vfs_size", "i(i)", &wasi_vfs_size);
+    if (res) return res;
+    res = link_raw_func(module, "env", "woos_vfs_seek", "i(ii)", &wasi_vfs_seek);
     if (res) return res;
     res = link_raw_func(module, "env", "woos_vfs_readdir", "i(i*)", &wasi_vfs_readdir);
     if (res) return res;

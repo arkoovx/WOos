@@ -64,8 +64,8 @@ static uint8_t page_is_reserved(uint64_t page_addr) {
         return 1u;
     }
 
-    // Резервируем 48 МБ для кучи ядра kheap (0x02000000 - 0x05000000)
-    if (range_overlaps(page_addr, page_end, 0x02000000ull, 0x05000000ull)) {
+    // Резервируем 64 МБ для кучи ядра kheap (0x02000000 - 0x06000000)
+    if (range_overlaps(page_addr, page_end, 0x02000000ull, 0x06000000ull)) {
         return 1u;
     }
 

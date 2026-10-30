@@ -1,4 +1,5 @@
 #include "woos.h"
+#include "icons.h"
 
 #define WIN_W 640
 #define WIN_H 420
@@ -88,12 +89,31 @@ static const char* get_file_type(const char* name, int is_dir) {
     int len = (int)strlen(name);
     if (len >= 4) {
         const char* ext = &name[len - 4];
-        if (strcmp(ext, ".WAS") == 0 || strcmp(ext, ".was") == 0) return "WoOS Application";
-        if (strcmp(ext, ".TXT") == 0 || strcmp(ext, ".txt") == 0) return "Text Document";
-        if (strcmp(ext, ".BIN") == 0 || strcmp(ext, ".bin") == 0) return "Binary Image";
-        if (strcmp(ext, ".BMP") == 0 || strcmp(ext, ".bmp") == 0) return "Bitmap Image";
+        if (strcasecmp_custom(ext, ".WAS") == 0) return "WoOS Application";
+        if (strcasecmp_custom(ext, ".TXT") == 0) return "Text Document";
+        if (strcasecmp_custom(ext, ".BIN") == 0) return "Binary Image";
+        if (strcasecmp_custom(ext, ".BMP") == 0) return "Bitmap Image";
+        if (strcasecmp_custom(ext, ".PNG") == 0) return "PNG Image";
+        if (strcasecmp_custom(ext, ".JPG") == 0) return "JPEG Image";
     }
+    if (len >= 5 && strcasecmp_custom(&name[len - 5], ".JPEG") == 0) return "JPEG Image";
     return "System File";
+}
+
+static int is_image_file(const char* fn) {
+    if (!fn) return 0;
+    int len = (int)strlen(fn);
+    if (len < 4) return 0;
+    const char* ext = &fn[len - 4];
+    if (strcasecmp_custom(ext, ".BMP") == 0 ||
+        strcasecmp_custom(ext, ".PNG") == 0 ||
+        strcasecmp_custom(ext, ".JPG") == 0) {
+        return 1;
+    }
+    if (len >= 5 && strcasecmp_custom(&fn[len - 5], ".JPEG") == 0) {
+        return 1;
+    }
+    return 0;
 }
 
 static void draw_folder_icon(int x, int y) {
@@ -217,6 +237,30 @@ static void open_file_in_notepad(const char* filepath) {
     }
 }
 
+static void open_file_in_imageview(const char* filepath) {
+    woos_system_set_open_file(filepath);
+    int win_count = woos_graphics_get_window_count();
+    woos_window_info_t win;
+    int found_tid = -1;
+    int found_id = -1;
+    for (int i = 0; i < win_count; i++) {
+        if (woos_graphics_get_window_info(i, &win) == 0) {
+            if (strcmp(win.title, "Image Viewer") == 0 || strncmp(win.title, "Image Viewer", 12) == 0) {
+                found_id = win.id;
+                found_tid = win.thread_id;
+                break;
+            }
+        }
+    }
+
+    if (found_id >= 0 && found_tid >= 0) {
+        woos_graphics_bring_to_front(found_id);
+        woos_ipc_send(found_tid, MSG_OPEN_FILE, 0, 0, 0, 0, 0);
+    } else {
+        woos_system_spawn("/IMGVIEW.WAS");
+    }
+}
+
 static void open_item(int idx) {
     if (idx < 0 || idx >= g_item_count) return;
 
@@ -246,7 +290,9 @@ static void open_item(int idx) {
 
         const char* fn = g_items[idx].name;
         int len = (int)strlen(fn);
-        if (len >= 4 && (strcmp(&fn[len - 4], ".WAS") == 0 || strcmp(&fn[len - 4], ".was") == 0)) {
+        if (is_image_file(fn)) {
+            open_file_in_imageview(full_path);
+        } else if (len >= 4 && (strcmp(&fn[len - 4], ".WAS") == 0 || strcmp(&fn[len - 4], ".was") == 0)) {
             woos_system_spawn(full_path);
         } else {
             open_file_in_notepad(full_path);
@@ -518,13 +564,7 @@ static void draw_explorer(void) {
         if (g_items[idx].is_dir) {
             draw_folder_icon(icon_x, icon_y);
         } else {
-            const char* fn = g_items[idx].name;
-            int len = (int)strlen(fn);
-            if (len >= 4 && (strcmp(&fn[len - 4], ".WAS") == 0 || strcmp(&fn[len - 4], ".was") == 0)) {
-                draw_app_icon(icon_x, icon_y);
-            } else {
-                draw_text_icon(icon_x, icon_y);
-            }
+            draw_icon_by_target(g_fb, WIN_W, WIN_H, icon_x, icon_y - 1, 16, g_items[idx].name);
         }
 
         // Name
@@ -606,14 +646,14 @@ static void draw_explorer(void) {
                 // Submenu: Open with...
                 if (g_ctx_submenu == 1) {
                     int sw = 135;
-                    int sh = 4 * 22 + 8;
+                    int sh = 5 * 22 + 8;
                     int sx = (g_ctx_x + g_ctx_w - 4 + sw > WIN_W) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
                     int sy = g_ctx_y + 4 + 1 * 22;
                     if (sy + sh > WIN_H - STATUSBAR_H) sy = WIN_H - STATUSBAR_H - sh - 2;
                     draw_3d_rect(g_fb, WIN_W, WIN_H, sx, sy, sw, sh, 0);
                     fill_rect(g_fb, WIN_W, WIN_H, sx + 1, sy + 1, sw - 2, sh - 2, COLOR_MENU_BG);
-                    const char* sitems[] = { "Notepad", "File Explorer", "Terminal", "Calculator" };
-                    for (int s = 0; s < 4; s++) {
+                    const char* sitems[] = { "Notepad", "Image Viewer", "File Explorer", "Terminal", "Calculator" };
+                    for (int s = 0; s < 5; s++) {
                         int ssy = sy + 4 + s * 22;
                         woos_draw_text(g_fb, WIN_W, WIN_H, sx + 10, ssy + 3, sitems[s], 0x000000);
                     }
@@ -777,7 +817,7 @@ static void handle_click(int x, int y) {
 
         if (g_ctx_submenu == 1) { // Submenu: Open with...
             int sw = 135;
-            int sh = 4 * 22 + 8;
+            int sh = 5 * 22 + 8;
             int sx = (g_ctx_x + g_ctx_w - 4 + sw > WIN_W) ? (g_ctx_x - sw + 4) : (g_ctx_x + g_ctx_w - 4);
             int sy = g_ctx_y + 4 + 1 * 22;
             if (sy + sh > WIN_H - STATUSBAR_H) sy = WIN_H - STATUSBAR_H - sh - 2;
@@ -795,10 +835,13 @@ static void handle_click(int x, int y) {
                     if (target_p[0]) open_file_in_notepad(target_p);
                     else woos_system_spawn("/NOTEPAD.WAS");
                 } else if (sidx == 1) {
-                    woos_system_spawn("/EXPLORER.WAS");
+                    if (target_p[0]) open_file_in_imageview(target_p);
+                    else woos_system_spawn("/IMGVIEW.WAS");
                 } else if (sidx == 2) {
-                    woos_system_spawn("/TERM.WAS");
+                    woos_system_spawn("/EXPLORER.WAS");
                 } else if (sidx == 3) {
+                    woos_system_spawn("/TERM.WAS");
+                } else if (sidx == 4) {
                     woos_system_spawn("/CALC.WAS");
                 }
                 g_ctx_open = 0;

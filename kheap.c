@@ -1,7 +1,7 @@
 #include "kheap.h"
 
 #define KHEAP_BASE       0x02000000ull
-#define KHEAP_ARENA_SIZE (48u * 1024u * 1024u)
+#define KHEAP_ARENA_SIZE (64u * 1024u * 1024u)
 #define KHEAP_ALIGN      16u
 
 typedef struct kheap_block {

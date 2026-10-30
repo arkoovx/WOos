@@ -107,6 +107,9 @@ int woos_vfs_close(int handle);
 WOOS_API("woos_vfs_size")
 uint32_t woos_vfs_size(int handle);
 
+WOOS_API("woos_vfs_seek")
+int woos_vfs_seek(int handle, uint32_t offset);
+
 typedef struct woos_dirent {
     char name[24];
     uint8_t is_dir;
@@ -420,6 +423,8 @@ static inline int is_system_item(const char* name) {
     if (strcasecmp_custom(base, "TERM.WAS") == 0) return 1;
     if (strcasecmp_custom(base, "FETCH.WAS") == 0) return 1;
     if (strcasecmp_custom(base, "TESTWASI.WAS") == 0) return 1;
+    if (strcasecmp_custom(base, "IMGVIEW.WAS") == 0) return 1;
+    if (strcasecmp_custom(base, "IMAGEVIEW.WAS") == 0) return 1;
     return 0;
 }
 
