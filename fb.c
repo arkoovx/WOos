@@ -1078,27 +1078,51 @@ int32_t woos_graphics_blit_window_internal(uint32_t window_id, const uint32_t* w
     uint64_t flags = irq_save();
     for (uint32_t i = 0; i < g_window_count; i++) {
         if (g_windows[i].id == window_id) {
-            // Reallocate buffer if application is blitting at a different size
-            if (w != g_windows[i].w || h != g_windows[i].h) {
-                uint32_t* new_buf = (uint32_t*)kheap_realloc(g_windows[i].buffer, (uint64_t)w * h * 4);
-                if (new_buf) {
-                    g_windows[i].buffer = new_buf;
-                    g_windows[i].w = w;
-                    g_windows[i].h = h;
+            // Reallocate buffer if application is blitting at a different size (and not maximized)
+            if (!(g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED)) {
+                if (w != g_windows[i].w || h != g_windows[i].h) {
+                    uint32_t* new_buf = (uint32_t*)kheap_realloc(g_windows[i].buffer, (uint64_t)w * h * 4);
+                    if (new_buf) {
+                        g_windows[i].buffer = new_buf;
+                        g_windows[i].w = w;
+                        g_windows[i].h = h;
+                    }
                 }
             }
 
             uint32_t buf_w = g_windows[i].w;
             uint32_t buf_h = g_windows[i].h;
 
-            uint32_t copy_w = (w < buf_w) ? w : buf_w;
-            uint32_t copy_h = (h < buf_h) ? h : buf_h;
-            
-            for (uint32_t r = 0; r < copy_h; r++) {
-                const uint32_t* src_row = wasm_buf + r * w;
-                uint32_t* dst_row = g_windows[i].buffer + r * buf_w;
-                memcpy(dst_row, src_row, copy_w * 4);
+            if (w == buf_w && h == buf_h) {
+                // Direct fast 1:1 copy
+                for (uint32_t r = 0; r < buf_h; r++) {
+                    const uint32_t* src_row = wasm_buf + r * w;
+                    uint32_t* dst_row = g_windows[i].buffer + r * buf_w;
+                    memcpy(dst_row, src_row, buf_w * 4);
+                }
+            } else if (g_windows[i].flags & WOOS_WIN_FLAG_MAXIMIZED) {
+                // Application blitted at fixed dimensions; scale to fill full maximized window!
+                for (uint32_t dy = 0; dy < buf_h; dy++) {
+                    uint32_t sy = (dy * h) / buf_h;
+                    const uint32_t* src_row = wasm_buf + sy * w;
+                    uint32_t* dst_row = g_windows[i].buffer + dy * buf_w;
+                    for (uint32_t dx = 0; dx < buf_w; dx++) {
+                        uint32_t sx = (dx * w) / buf_w;
+                        dst_row[dx] = src_row[sx];
+                    }
+                }
+            } else {
+                uint32_t copy_w_sub = (w < buf_w) ? w : buf_w;
+                uint32_t copy_h_sub = (h < buf_h) ? h : buf_h;
+                for (uint32_t r = 0; r < copy_h_sub; r++) {
+                    const uint32_t* src_row = wasm_buf + r * w;
+                    uint32_t* dst_row = g_windows[i].buffer + r * buf_w;
+                    memcpy(dst_row, src_row, copy_w_sub * 4);
+                }
             }
+
+            uint32_t copy_w = buf_w;
+            uint32_t copy_h = buf_h;
             
             // Present window region if not minimized
             if (!(g_windows[i].flags & WOOS_WIN_FLAG_MINIMIZED)) {

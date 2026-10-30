@@ -3,7 +3,7 @@
 
 #include "woos.h"
 
-#define WASM_HEAP_SIZE (8 * 1024 * 1024)
+#define WASM_HEAP_SIZE (16 * 1024 * 1024)
 
 typedef struct wasm_block {
     uint32_t size;

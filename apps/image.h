@@ -223,6 +223,71 @@ static inline void image_blit_alpha_clipped(uint32_t* dst, int dst_w, int dst_h,
     }
 }
 
+static inline void image_scale_blit_direct(uint32_t* dst, int dst_w, int dst_h, int dx, int dy,
+                                          const uint32_t* src, int sw, int sh,
+                                          int dw, int dh,
+                                          int clip_x, int clip_y, int clip_w, int clip_h) {
+    if (!dst || !src || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
+
+    int min_y = clip_y > 0 ? clip_y : 0;
+    int max_y = (clip_y + clip_h < dst_h) ? (clip_y + clip_h) : dst_h;
+    int min_x = clip_x > 0 ? clip_x : 0;
+    int max_x = (clip_x + clip_w < dst_w) ? (clip_x + clip_w) : dst_w;
+
+    int x_ratio = ((sw - 1) << 16) / (dw > 1 ? dw - 1 : 1);
+    int y_ratio = ((sh - 1) << 16) / (dh > 1 ? dh - 1 : 1);
+
+    for (int y = 0; y < dh; y++) {
+        int target_y = dy + y;
+        if (target_y < min_y || target_y >= max_y) continue;
+
+        int sy = (y * y_ratio) >> 16;
+        int y_diff = (y * y_ratio) & 0xFFFF;
+        int y_diff_inv = 65536 - y_diff;
+        uint32_t* dst_row = dst + target_y * dst_w;
+
+        for (int x = 0; x < dw; x++) {
+            int target_x = dx + x;
+            if (target_x < min_x || target_x >= max_x) continue;
+
+            int sx = (x * x_ratio) >> 16;
+            int x_diff = (x * x_ratio) & 0xFFFF;
+            int x_diff_inv = 65536 - x_diff;
+
+            uint32_t p00 = src[sy * sw + sx];
+            uint32_t p01 = (sx + 1 < sw) ? src[sy * sw + sx + 1] : p00;
+            uint32_t p10 = (sy + 1 < sh) ? src[(sy + 1) * sw + sx] : p00;
+            uint32_t p11 = (sx + 1 < sw && sy + 1 < sh) ? src[(sy + 1) * sw + sx + 1] : p00;
+
+            uint32_t sa = ((((p00 >> 24) * x_diff_inv + (p01 >> 24) * x_diff) >> 16) * y_diff_inv +
+                           (((p10 >> 24) * x_diff_inv + (p11 >> 24) * x_diff) >> 16) * y_diff) >> 16;
+            if (sa == 0) continue;
+
+            uint32_t sr = (((((p00 >> 16) & 0xFF) * x_diff_inv + ((p01 >> 16) & 0xFF) * x_diff) >> 16) * y_diff_inv +
+                           ((((p10 >> 16) & 0xFF) * x_diff_inv + ((p11 >> 16) & 0xFF) * x_diff) >> 16) * y_diff) >> 16;
+            uint32_t sg = (((((p00 >> 8) & 0xFF) * x_diff_inv + ((p01 >> 8) & 0xFF) * x_diff) >> 16) * y_diff_inv +
+                           ((((p10 >> 8) & 0xFF) * x_diff_inv + ((p11 >> 8) & 0xFF) * x_diff) >> 16) * y_diff) >> 16;
+            uint32_t sb = ((((p00 & 0xFF) * x_diff_inv + (p01 & 0xFF) * x_diff) >> 16) * y_diff_inv +
+                           (((p10 & 0xFF) * x_diff_inv + (p11 & 0xFF) * x_diff) >> 16) * y_diff) >> 16;
+
+            if (sa >= 255) {
+                dst_row[target_x] = (0xFF << 24) | (sr << 16) | (sg << 8) | sb;
+            } else {
+                uint32_t dp = dst_row[target_x];
+                uint32_t dr = (dp >> 16) & 0xFF;
+                uint32_t dg = (dp >> 8) & 0xFF;
+                uint32_t db = dp & 0xFF;
+
+                uint32_t r = (sr * sa + dr * (255 - sa)) / 255;
+                uint32_t g = (sg * sa + dg * (255 - sa)) / 255;
+                uint32_t b = (sb * sa + db * (255 - sa)) / 255;
+
+                dst_row[target_x] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+            }
+        }
+    }
+}
+
 // Rotate 90 degrees clockwise
 static inline uint32_t* image_rotate_90_cw(const uint32_t* src, int w, int h) {
     if (!src || w <= 0 || h <= 0) return 0;
@@ -279,7 +344,6 @@ static inline woos_image_t* image_decode_bmp(const uint8_t* data, size_t len) {
                 uint8_t g = row[x * 4 + 1];
                 uint8_t r = row[x * 4 + 2];
                 uint8_t a = row[x * 4 + 3];
-                // If all alpha is 0 in 32-bit BMP, treat as opaque
                 dst_row[x] = ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
             }
         } else if (bpp == 24) {
@@ -288,6 +352,21 @@ static inline woos_image_t* image_decode_bmp(const uint8_t* data, size_t len) {
                 uint8_t g = row[x * 3 + 1];
                 uint8_t r = row[x * 3 + 2];
                 dst_row[x] = 0xFF000000 | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+            }
+        }
+    }
+
+    if (bpp == 32) {
+        int has_alpha = 0;
+        for (int i = 0; i < w * abs_h; i++) {
+            if ((pixels[i] >> 24) != 0) {
+                has_alpha = 1;
+                break;
+            }
+        }
+        if (!has_alpha) {
+            for (int i = 0; i < w * abs_h; i++) {
+                pixels[i] |= 0xFF000000;
             }
         }
     }
@@ -402,15 +481,19 @@ static inline woos_image_t* image_load_file(const char* path) {
     int32_t fd = woos_vfs_open(path, VFS_MODE_READ);
     if (fd < 0) return 0;
 
-    // Max 4 MB image file
-    size_t max_size = 4 * 1024 * 1024;
-    uint8_t* buf = (uint8_t*)woos_malloc(max_size);
+    uint32_t fsize = woos_vfs_size(fd);
+    if (fsize == 0 || fsize > 16 * 1024 * 1024) {
+        woos_vfs_close(fd);
+        return 0;
+    }
+
+    uint8_t* buf = (uint8_t*)woos_malloc(fsize + 32);
     if (!buf) {
         woos_vfs_close(fd);
         return 0;
     }
 
-    int32_t bytes_read = woos_vfs_read(fd, buf, (uint32_t)max_size);
+    int32_t bytes_read = woos_vfs_read(fd, buf, fsize);
     woos_vfs_close(fd);
 
     if (bytes_read <= 0) {

@@ -144,6 +144,11 @@ static void render_screen(void) {
             image_blit_alpha_clipped(g_fb, win_w, win_h, img_x, img_y, scaled, disp_w, disp_h, disp_w,
                                      0, canvas_y, canvas_w, canvas_h);
             woos_free(scaled);
+        } else {
+            // Direct scaled blit fallback (zero allocation needed!)
+            image_scale_blit_direct(g_fb, win_w, win_h, img_x, img_y,
+                                    g_current_image->pixels, g_current_image->width, g_current_image->height,
+                                    disp_w, disp_h, 0, canvas_y, canvas_w, canvas_h);
         }
     } else {
         // Placeholder text
