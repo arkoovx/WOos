@@ -38,6 +38,10 @@ void net_init(void) {
     ip_addr_t dns_server;
     IP4_ADDR(&dns_server, 10, 0, 2, 3);
     dns_setserver(0, &dns_server);
+
+    ip_addr_t dns_server2;
+    IP4_ADDR(&dns_server2, 8, 8, 8, 8);
+    dns_setserver(1, &dns_server2);
 }
 
 void net_poll(void) {
@@ -73,8 +77,8 @@ const net_status_t* net_get_status(void) {
 }
 
 typedef struct {
-    uint8_t resolved;
-    uint8_t failed;
+    volatile uint8_t resolved;
+    volatile uint8_t failed;
     ip_addr_t addr;
 } dns_query_ctx_t;
 
@@ -105,16 +109,18 @@ int32_t net_resolve_host(const char* hostname, char* out_ip, uint32_t max_len) {
         return 0;
     }
     if (err != ERR_INPROGRESS) {
+        serial_printf("[DNS] gethostbyname('%s') returned error: %d\n", hostname, (int)err);
         return -1;
     }
 
     extern void thread_yield(void);
     uint64_t start_tsc = rdtsc();
-    uint64_t timeout_tsc = 3000ULL * g_tsc_per_ms;
+    uint64_t timeout_tsc = 3500ULL * g_tsc_per_ms;
 
     while (!ctx.resolved && !ctx.failed) {
         net_poll();
         if ((rdtsc() - start_tsc) > timeout_tsc) {
+            serial_printf("[DNS] Resolution for '%s' timed out (3.5s)\n", hostname);
             return -1; // timeout
         }
         thread_yield();
@@ -124,6 +130,7 @@ int32_t net_resolve_host(const char* hostname, char* out_ip, uint32_t max_len) {
         ipaddr_ntoa_r(&ctx.addr, out_ip, (int)max_len);
         return 0;
     }
+    serial_printf("[DNS] Resolution for '%s' failed (host not found)\n", hostname);
     return -1;
 }
 
@@ -496,6 +503,10 @@ static void insecure_end_cert(const br_x509_class **ctx) {
 
 static unsigned insecure_end_chain(const br_x509_class **ctx) {
     x509_insecure_context *xc = (x509_insecure_context *)ctx;
+    const br_x509_pkey *pk = br_x509_decoder_get_pkey(&xc->ctx);
+    if (pk != NULL) {
+        return 0; // Public key successfully decoded; allow connection
+    }
     return (unsigned)br_x509_decoder_last_error(&xc->ctx);
 }
 
@@ -526,8 +537,8 @@ static int tls_sock_read(void *ctx, unsigned char *buf, size_t len) {
         if (r > 0) return r;
         if (r == 0) return -1; // Connection closed / EOF
         net_poll();
-        if ((rdtsc() - t_start) > (10000ULL * g_tsc_per_ms)) {
-            return -1; // 10s Timeout
+        if ((rdtsc() - t_start) > (4000ULL * g_tsc_per_ms)) {
+            return -1; // 4s Timeout
         }
         thread_yield();
     }
@@ -545,8 +556,8 @@ static int tls_sock_write(void *ctx, const unsigned char *buf, size_t len) {
             t_start = rdtsc();
         } else {
             net_poll();
-            if ((rdtsc() - t_start) > (10000ULL * g_tsc_per_ms)) {
-                return -1; // 10s Timeout
+            if ((rdtsc() - t_start) > (4000ULL * g_tsc_per_ms)) {
+                return -1; // 4s Timeout
             }
             thread_yield();
         }
@@ -562,19 +573,75 @@ typedef struct {
     unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];
 } tls_session_t;
 
-static int parse_url(const char* url, int* is_https, char* host, uint32_t host_sz, uint16_t* port, const char** path) {
-    if (!url) return -1;
+static char* find_substr(char* haystack, const char* needle) {
+    if (!haystack || !needle) return NULL;
+    if (*needle == '\0') return haystack;
+    for (; *haystack != '\0'; haystack++) {
+        if (*haystack == *needle) {
+            char* h = haystack;
+            const char* n = needle;
+            while (*h != '\0' && *n != '\0' && *h == *n) {
+                h++;
+                n++;
+            }
+            if (*n == '\0') return haystack;
+        }
+    }
+    return NULL;
+}
+
+static const char* find_case_header(const char* buf, const char* name) {
+    if (!buf || !name) return NULL;
+    int nlen = 0;
+    while (name[nlen] != '\0') nlen++;
+    const char* p = buf;
+    while (*p != '\0') {
+        int match = 1;
+        for (int i = 0; i < nlen; i++) {
+            char c1 = p[i];
+            char c2 = name[i];
+            if (c1 >= 'A' && c1 <= 'Z') c1 += 32;
+            if (c2 >= 'A' && c2 <= 'Z') c2 += 32;
+            if (c1 != c2) { match = 0; break; }
+        }
+        if (match) return p + nlen;
+        while (*p != '\0' && *p != '\n') p++;
+        if (*p == '\n') p++;
+    }
+    return NULL;
+}
+
+static int parse_url(const char* url, int* is_https, char* host, uint32_t host_sz, uint16_t* port, const char** path, int* had_scheme) {
+    if (!url || !host || host_sz < 4) return -1;
     const char* p = url;
-    *is_https = 0;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p == '\0') return -1;
+
+    *is_https = 1;
+    *had_scheme = 0;
+
     if (p[0] == 'h' && p[1] == 't' && p[2] == 't' && p[3] == 'p' && p[4] == 's' && p[5] == ':' && p[6] == '/' && p[7] == '/') {
         *is_https = 1;
+        *had_scheme = 1;
         p += 8;
     } else if (p[0] == 'h' && p[1] == 't' && p[2] == 't' && p[3] == 'p' && p[4] == ':' && p[5] == '/' && p[6] == '/') {
         *is_https = 0;
+        *had_scheme = 1;
         p += 7;
+    } else if (p[0] == 'h' && p[1] == 't' && p[2] == 't' && p[3] == 'p' && p[4] == 's' && (p[5] == ' ' || p[5] == ':')) {
+        *is_https = 1;
+        *had_scheme = 1;
+        p += 5;
+        while (*p == ' ' || *p == '/' || *p == ':') p++;
+    } else if (p[0] == 'h' && p[1] == 't' && p[2] == 't' && p[3] == 'p' && (p[4] == ' ' || p[4] == ':')) {
+        *is_https = 0;
+        *had_scheme = 1;
+        p += 4;
+        while (*p == ' ' || *p == '/' || *p == ':') p++;
     }
+
     uint32_t h_idx = 0;
-    while (*p != '\0' && *p != ':' && *p != '/' && h_idx + 1 < host_sz) {
+    while (*p != '\0' && *p != ':' && *p != '/' && *p != ' ' && h_idx + 1 < host_sz) {
         host[h_idx++] = *p++;
     }
     host[h_idx] = '\0';
@@ -592,23 +659,28 @@ static int parse_url(const char* url, int* is_https, char* host, uint32_t host_s
             *port = (uint16_t)p_val;
         }
     }
+    while (*p == ' ') p++;
     *path = (*p == '/') ? p : "/";
     return 0;
 }
 
-int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
+static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t max_len, char* next_url, uint32_t next_sz) {
     if (!url || !out_buf || max_len < 64) return -1;
     out_buf[0] = '\0';
+    if (next_url && next_sz > 0) next_url[0] = '\0';
 
-    int is_https = 0;
+    int is_https = 1;
+    int had_scheme = 0;
     char host_buf[64];
-    uint16_t port = 80;
+    uint16_t port = 443;
     const char* path = "/";
 
-    if (parse_url(url, &is_https, host_buf, sizeof(host_buf), &port, &path) != 0) {
+    if (parse_url(url, &is_https, host_buf, sizeof(host_buf), &port, &path, &had_scheme) != 0) {
         str_cat(out_buf, "fetch: invalid URL or host\n", max_len);
         return -1;
     }
+
+    serial_printf("[HTTP] Fetch '%s' -> host='%s' port=%u https=%d path='%s'\n", url, host_buf, (uint32_t)port, is_https, path);
 
     char ip_str[32];
     if (net_resolve_host(host_buf, ip_str, sizeof(ip_str)) != 0) {
@@ -626,8 +698,21 @@ int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
 
     if (net_socket_connect(sock, ip_str, port) != 0) {
         net_socket_close(sock);
-        str_cat(out_buf, "fetch: connect call failed\n", max_len);
-        return -1;
+        // If default HTTPS failed, try HTTP port 80
+        if (!had_scheme && is_https) {
+            serial_printf("[HTTP] HTTPS connect failed, retrying plain HTTP:80...\n");
+            is_https = 0;
+            port = 80;
+            sock = net_socket_create(SOCKET_TYPE_TCP);
+            if (sock < 0 || net_socket_connect(sock, ip_str, port) != 0) {
+                if (sock >= 0) net_socket_close(sock);
+                str_cat(out_buf, "fetch: connect call failed\n", max_len);
+                return -1;
+            }
+        } else {
+            str_cat(out_buf, "fetch: connect call failed\n", max_len);
+            return -1;
+        }
     }
 
     extern void thread_yield(void);
@@ -635,7 +720,7 @@ int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
     uint64_t t_conn = rdtsc();
     while (net_socket_get_state(sock) == 5 /* CONNECTING */) {
         net_poll();
-        if ((rdtsc() - t_conn) > (6000ULL * g_tsc_per_ms)) {
+        if ((rdtsc() - t_conn) > (3500ULL * g_tsc_per_ms)) {
             break;
         }
         thread_yield();
@@ -643,6 +728,24 @@ int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
 
     if (net_socket_get_state(sock) != 3 /* CONNECTED */) {
         net_socket_close(sock);
+        if (!had_scheme && is_https) {
+            serial_printf("[HTTP] HTTPS connect timed out, retrying plain HTTP:80...\n");
+            is_https = 0;
+            port = 80;
+            sock = net_socket_create(SOCKET_TYPE_TCP);
+            if (sock >= 0 && net_socket_connect(sock, ip_str, port) == 0) {
+                t_conn = rdtsc();
+                while (net_socket_get_state(sock) == 5) {
+                    net_poll();
+                    if ((rdtsc() - t_conn) > (3500ULL * g_tsc_per_ms)) break;
+                    thread_yield();
+                }
+            }
+        }
+    }
+
+    if (net_socket_get_state(sock) != 3 /* CONNECTED */) {
+        if (sock >= 0) net_socket_close(sock);
         str_cat(out_buf, "fetch: connection failed to ", max_len);
         str_cat(out_buf, host_buf, max_len);
         str_cat(out_buf, "\n", max_len);
@@ -653,12 +756,14 @@ int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
     req[0] = '\0';
     str_cat(req, "GET ", sizeof(req));
     str_cat(req, path, sizeof(req));
-    str_cat(req, " HTTP/1.0\r\nHost: ", sizeof(req));
+    str_cat(req, " HTTP/1.1\r\nHost: ", sizeof(req));
     str_cat(req, host_buf, sizeof(req));
-    str_cat(req, "\r\nUser-Agent: WoOS-Browser/1.54\r\nConnection: close\r\n\r\n", sizeof(req));
+    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (compatible; WoOS/1.55; +http://woos.org)\r\nAccept: text/html,*/*\r\nConnection: close\r\n\r\n", sizeof(req));
 
     uint32_t req_len = 0;
     while (req[req_len] != '\0') req_len++;
+
+    uint32_t total_rx = 0;
 
     if (is_https) {
         tls_session_t *tls = (tls_session_t *)kheap_alloc(sizeof(tls_session_t));
@@ -696,7 +801,6 @@ int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
             return -1;
         }
 
-        uint32_t total_rx = 0;
         while (total_rx + 1 < max_len) {
             int r = br_sslio_read(&tls->sctx, out_buf + total_rx, max_len - 1 - total_rx);
             if (r > 0) {
@@ -706,71 +810,143 @@ int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
             }
         }
         out_buf[total_rx] = '\0';
-        br_sslio_close(&tls->sctx);
+        br_ssl_engine_close(&tls->cc.eng);
         kheap_free(tls);
         net_socket_close(sock);
-
-        if (total_rx == 0) {
-            str_cat(out_buf, "fetch: TLS connected, no data returned\n", max_len);
-            return 0;
-        }
-        return (int32_t)total_rx;
-    }
-
-    // Plain HTTP
-    uint32_t sent = 0;
-    uint64_t t_send = rdtsc();
-    while (sent < req_len) {
-        int32_t s = net_socket_send(sock, req + sent, req_len - sent);
-        if (s > 0) {
-            sent += (uint32_t)s;
-            t_send = rdtsc();
-        } else {
-            net_poll();
-            if ((rdtsc() - t_send) > (3000ULL * g_tsc_per_ms)) {
-                break;
+    } else {
+        // Plain HTTP
+        uint32_t sent = 0;
+        uint64_t t_send = rdtsc();
+        while (sent < req_len) {
+            int32_t s = net_socket_send(sock, req + sent, req_len - sent);
+            if (s > 0) {
+                sent += (uint32_t)s;
+                t_send = rdtsc();
+            } else {
+                net_poll();
+                if ((rdtsc() - t_send) > (3000ULL * g_tsc_per_ms)) {
+                    break;
+                }
+                thread_yield();
             }
-            thread_yield();
         }
-    }
 
-    uint32_t total_rx = 0;
-    uint64_t t_last_rx = rdtsc();
-    while (total_rx + 1 < max_len) {
-        int32_t r = net_socket_recv(sock, out_buf + total_rx, max_len - 1 - total_rx);
-        if (r > 0) {
-            total_rx += (uint32_t)r;
-            t_last_rx = rdtsc();
-        } else if (r == 0) {
-            break;
-        } else {
-            net_poll();
-            if ((rdtsc() - t_last_rx) > (4000ULL * g_tsc_per_ms)) {
+        uint64_t t_last_rx = rdtsc();
+        while (total_rx + 1 < max_len) {
+            int32_t r = net_socket_recv(sock, out_buf + total_rx, max_len - 1 - total_rx);
+            if (r > 0) {
+                total_rx += (uint32_t)r;
+                t_last_rx = rdtsc();
+            } else if (r == 0) {
                 break;
+            } else {
+                net_poll();
+                if ((rdtsc() - t_last_rx) > (3000ULL * g_tsc_per_ms)) {
+                    break;
+                }
+                thread_yield();
             }
-            thread_yield();
         }
+        out_buf[total_rx] = '\0';
+        net_socket_close(sock);
     }
-    out_buf[total_rx] = '\0';
-    net_socket_close(sock);
 
     if (total_rx == 0) {
         str_cat(out_buf, "fetch: connected, no data returned\n", max_len);
         return 0;
     }
+
+    serial_printf("[HTTP] Received %u raw bytes from '%s'\n", total_rx, host_buf);
+
+    // Check for HTTP 3xx Redirect (301, 302, 303, 307, 308)
+    if (total_rx >= 12 && (out_buf[0] == 'H' && out_buf[1] == 'T' && out_buf[2] == 'T' && out_buf[3] == 'P') &&
+        (out_buf[9] == '3')) {
+        const char* loc = find_case_header(out_buf, "location:");
+        if (loc && next_url && next_sz > 0) {
+            while (*loc == ' ' || *loc == '\t') loc++;
+            uint32_t n_idx = 0;
+            // Handle relative redirect (e.g. Location: /index.html)
+            if (*loc == '/') {
+                if (is_https) str_cat(next_url, "https://", next_sz);
+                else str_cat(next_url, "http://", next_sz);
+                str_cat(next_url, host_buf, next_sz);
+                while (next_url[n_idx] != '\0') n_idx++;
+            }
+            while (*loc != '\0' && *loc != '\r' && *loc != '\n' && n_idx + 1 < next_sz) {
+                next_url[n_idx++] = *loc++;
+            }
+            next_url[n_idx] = '\0';
+            serial_printf("[HTTP] 3xx Redirect to '%s'\n", next_url);
+            return 0; // Trigger redirect follow
+        }
+    }
+
+    // Strip HTTP response headers so browser gets clean HTML
+    char* body = find_substr(out_buf, "\r\n\r\n");
+    if (body) {
+        body += 4;
+    } else {
+        body = find_substr(out_buf, "\n\n");
+        if (body) body += 2;
+    }
+
+    if (body) {
+        extern void* memmove(void* dest, const void* src, size_t n);
+        uint32_t body_len = 0;
+        while (body[body_len] != '\0') body_len++;
+        memmove(out_buf, body, body_len + 1);
+        total_rx = body_len;
+    }
+
     return (int32_t)total_rx;
+}
+
+int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
+    if (!url || !out_buf || max_len < 64) return -1;
+    char current_url[256];
+    uint32_t u_idx = 0;
+    while (url[u_idx] != '\0' && u_idx + 1 < sizeof(current_url)) {
+        current_url[u_idx] = url[u_idx];
+        u_idx++;
+    }
+    current_url[u_idx] = '\0';
+
+    int redirects = 0;
+    while (redirects < 4) {
+        char next_url[256] = "";
+        int32_t res = net_http_fetch_single(current_url, out_buf, max_len, next_url, sizeof(next_url));
+        if (res > 0) {
+            return res; // Webpage successfully fetched!
+        }
+        if (res == 0 && next_url[0] != '\0') {
+            redirects++;
+            serial_printf("[HTTP] Redirect #%d: '%s' -> '%s'\n", redirects, current_url, next_url);
+            u_idx = 0;
+            while (next_url[u_idx] != '\0' && u_idx + 1 < sizeof(current_url)) {
+                current_url[u_idx] = next_url[u_idx];
+                u_idx++;
+            }
+            current_url[u_idx] = '\0';
+            continue;
+        }
+        return -1; // Failure
+    }
+
+    str_cat(out_buf, "fetch: exceeded redirect limit (>3)\n", max_len);
+    return -1;
 }
 
 // Потоковое скачивание файлов напрямую на диск в FAT32 (поддерживает HTTP и HTTPS)
 int32_t net_http_download(const char* url, const char* dest_path) {
     if (!url || !dest_path) return -1;
 
-    int is_https = 0;
+    int is_https = 1;
+    int had_scheme = 0;
     char host_buf[64];
-    uint16_t port = 80;
+    uint16_t port = 443;
     const char* path = "/";
 
-    if (parse_url(url, &is_https, host_buf, sizeof(host_buf), &port, &path) != 0) {
+    if (parse_url(url, &is_https, host_buf, sizeof(host_buf), &port, &path, &had_scheme) != 0) {
         return -1;
     }
 
@@ -792,7 +968,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
     uint64_t t_conn = rdtsc();
     while (net_socket_get_state(sock) == 5 /* CONNECTING */) {
         net_poll();
-        if ((rdtsc() - t_conn) > (6000ULL * g_tsc_per_ms)) {
+        if ((rdtsc() - t_conn) > (4000ULL * g_tsc_per_ms)) {
             break;
         }
         thread_yield();
@@ -807,9 +983,9 @@ int32_t net_http_download(const char* url, const char* dest_path) {
     req[0] = '\0';
     str_cat(req, "GET ", sizeof(req));
     str_cat(req, path, sizeof(req));
-    str_cat(req, " HTTP/1.0\r\nHost: ", sizeof(req));
+    str_cat(req, " HTTP/1.1\r\nHost: ", sizeof(req));
     str_cat(req, host_buf, sizeof(req));
-    str_cat(req, "\r\nUser-Agent: WoOS-Browser/1.54\r\nConnection: close\r\n\r\n", sizeof(req));
+    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (compatible; WoOS/1.55; +http://woos.org)\r\nAccept: */*\r\nConnection: close\r\n\r\n", sizeof(req));
 
     uint32_t req_len = 0;
     while (req[req_len] != '\0') req_len++;
@@ -879,7 +1055,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
                 r = net_socket_recv(sock, &ch, 1);
                 if (r > 0 || r == 0) break;
                 net_poll();
-                if ((rdtsc() - t_rx) > (5000ULL * g_tsc_per_ms)) { r = -1; break; }
+                if ((rdtsc() - t_rx) > (4000ULL * g_tsc_per_ms)) { r = -1; break; }
                 thread_yield();
             }
         }
@@ -896,7 +1072,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
     }
 
     if (body_start_idx < 0) {
-        if (tls) { br_sslio_close(&tls->sctx); kheap_free(tls); }
+        if (tls) { br_ssl_engine_close(&tls->cc.eng); kheap_free(tls); }
         net_socket_close(sock);
         return -1;
     }
@@ -904,7 +1080,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
     // Открываем целевой файл для записи
     int32_t fd = vfs_open(dest_path, VFS_MODE_WRITE | VFS_MODE_CREATE | VFS_MODE_TRUNC);
     if (fd < 0) {
-        if (tls) { br_sslio_close(&tls->sctx); kheap_free(tls); }
+        if (tls) { br_ssl_engine_close(&tls->cc.eng); kheap_free(tls); }
         net_socket_close(sock);
         return -1;
     }
@@ -923,7 +1099,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
                 r = net_socket_recv(sock, chunk, sizeof(chunk));
                 if (r > 0 || r == 0) break;
                 net_poll();
-                if ((rdtsc() - t_rx) > (5000ULL * g_tsc_per_ms)) { r = -1; break; }
+                if ((rdtsc() - t_rx) > (4000ULL * g_tsc_per_ms)) { r = -1; break; }
                 thread_yield();
             }
         }
@@ -934,7 +1110,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
     }
 
     vfs_close(fd);
-    if (tls) { br_sslio_close(&tls->sctx); kheap_free(tls); }
+    if (tls) { br_ssl_engine_close(&tls->cc.eng); kheap_free(tls); }
     net_socket_close(sock);
 
     return (int32_t)total_written;

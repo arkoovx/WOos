@@ -8,16 +8,16 @@
 #define LWIP_NO_CTYPE_H                 1
 
 #define MEM_ALIGNMENT                   16
-#define MEMP_NUM_PBUF                   32
-#define MEMP_NUM_UDP_PCB                4
-#define MEMP_NUM_TCP_PCB                4
+#define MEMP_NUM_PBUF                   64
+#define MEMP_NUM_UDP_PCB                8
+#define MEMP_NUM_TCP_PCB                8
 #define MEMP_NUM_TCP_PCB_LISTEN         4
-#define MEMP_NUM_TCP_SEG                16
-#define MEMP_NUM_REASSDATA              4
-#define MEMP_NUM_FRAG_PBUF              16
+#define MEMP_NUM_TCP_SEG                64
+#define MEMP_NUM_REASSDATA              8
+#define MEMP_NUM_FRAG_PBUF              32
 #define MEMP_NUM_ARP_QUEUE              16
 
-#define PBUF_POOL_SIZE                  32
+#define PBUF_POOL_SIZE                  64
 #define PBUF_POOL_BUFSIZE               1536
 
 #define LWIP_ARP                        1
@@ -32,15 +32,15 @@
 #define LWIP_UDP                        1
 #define LWIP_TCP                        1
 #define LWIP_DNS                        1
-#define DNS_TABLE_SIZE                  4
-#define DNS_MAX_NAME_LENGTH             64
+#define DNS_TABLE_SIZE                  8
+#define DNS_MAX_NAME_LENGTH             128
 
 #define LWIP_ACD                        0
 #define LWIP_DHCP_DOES_ACD_CHECK        0
 
 #define TCP_MSS                         1460
-#define TCP_WND                         (4 * TCP_MSS)
-#define TCP_SND_BUF                     (4 * TCP_MSS)
+#define TCP_WND                         (16 * TCP_MSS)
+#define TCP_SND_BUF                     (16 * TCP_MSS)
 
 #define LWIP_STATS                      0
 #define LWIP_NETIF_LINK_CALLBACK        1

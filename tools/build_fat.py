@@ -211,18 +211,19 @@ def main():
 <head><title>Welcome to WoOS Navigator</title></head>
 <body>
 <h1>WoOS Web Browser</h1>
-<p>Welcome to <b>WoOS Navigator</b> with native <b>HTTPS (TLS 1.2)</b> support!</p>
+<p>Welcome to <b>WoOS Navigator</b> with native <b>HTTPS (TLS 1.2)</b> and HTTP browsing!</p>
 <hr>
-<h3>Quick Search &amp; Portals:</h3>
+<h3>Quick Search &amp; Popular Portals:</h3>
 <p>
-<a href="https://example.com">Example Domain (Cloudflare HTTPS)</a><br>
+<a href="https://www.wikipedia.org">Wikipedia - The Free Encyclopedia (HTTPS)</a><br>
 <a href="https://www.google.com">Google Search (HTTPS)</a><br>
-<a href="http://frogfind.com">FrogFind Lightweight Search</a><br>
-<a href="http://wiby.me">Wiby Web Search</a><br>
+<a href="https://wiby.me">Wiby Web Search (HTTPS)</a><br>
+<a href="http://frogfind.com">FrogFind Lightweight Search (HTTP)</a><br>
+<a href="https://example.com">Example Domain (Cloudflare HTTPS)</a><br>
 </p>
 <hr>
 <h3>File Downloads:</h3>
-<p>Click [DL] in the toolbar or navigate to any file link to download directly to your Desktop!</p>
+<p>Click [Download] in the toolbar or navigate to any file link (.zip, .png, .jpg, .wasm) to download directly to your Desktop!</p>
 </body>
 </html>
 """

@@ -7,7 +7,7 @@
 #include "serial.h"
 
 #define NET_MAX_SOCKETS 8
-#define NET_SOCKET_BUF_SIZE 2048
+#define NET_SOCKET_BUF_SIZE 65536
 
 typedef struct net_socket {
     uint8_t in_use;
@@ -212,7 +212,6 @@ static err_t tcp_connect_callback(void* arg, struct tcp_pcb* tpcb, err_t err) {
     if (err == ERR_OK) {
         s->state = 3; // CONNECTED
         tcp_recv(tpcb, tcp_recv_callback);
-        tcp_err(tpcb, tcp_err_callback);
     } else {
         s->state = 4; // ERROR
     }
@@ -237,6 +236,7 @@ int32_t net_socket_connect(int32_t sock, const char* remote_ip, uint16_t remote_
 
     s->state = 5; // CONNECTING
     tcp_arg(s->tcp, (void*)(uintptr_t)sock);
+    tcp_err(s->tcp, tcp_err_callback);
     err_t err = tcp_connect(s->tcp, &remote_addr, remote_port, tcp_connect_callback);
     if (err == ERR_OK) {
         // Прокачиваем пакеты для отправки SYN

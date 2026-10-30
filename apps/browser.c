@@ -398,12 +398,26 @@ static void do_download(const char* url) {
 static void navigate_to(const char* target_url, int add_history) {
     if (!target_url || target_url[0] == '\0') return;
 
-    if (is_downloadable(target_url)) {
-        do_download(target_url);
+    // Normalize URL: trim whitespace
+    char norm_url[128];
+    const char* p = target_url;
+    while (*p == ' ' || *p == '\t') p++;
+    int nlen = 0;
+    while (p[nlen] != '\0' && nlen < 127) {
+        norm_url[nlen] = p[nlen];
+        nlen++;
+    }
+    while (nlen > 0 && (norm_url[nlen - 1] == ' ' || norm_url[nlen - 1] == '\r' || norm_url[nlen - 1] == '\n')) {
+        nlen--;
+    }
+    norm_url[nlen] = '\0';
+
+    if (is_downloadable(norm_url)) {
+        do_download(norm_url);
         return;
     }
 
-    strncpy(g_url, target_url, sizeof(g_url) - 1);
+    strncpy(g_url, norm_url, sizeof(g_url) - 1);
     g_url[sizeof(g_url) - 1] = '\0';
     g_url_len = (int)strlen(g_url);
     g_cursor_pos = g_url_len;
@@ -446,10 +460,24 @@ static void navigate_to(const char* target_url, int add_history) {
     int32_t res = woos_net_fetch(g_url, g_html, sizeof(g_html) - 1);
 
     if (res < 0) {
-        g_html[0] = '\0';
-        g_html_len = 0;
+        char err_msg[128] = "Connection failed. Check network or address.";
+        if (g_html[0] != '\0') {
+            int k = 0;
+            while (g_html[k] != '\0' && g_html[k] != '\n' && k < 127) {
+                err_msg[k] = g_html[k];
+                k++;
+            }
+            err_msg[k] = '\0';
+        }
+
+        strcpy(g_html, "<html><body><h1>Unable to connect</h1><hr/>"
+                       "<p>WoOS Browser could not load the requested webpage.</p>"
+                       "<p><b>Diagnostic:</b> ");
+        strcat(g_html, err_msg);
+        strcat(g_html, "</p><p><a href=\"/WELCOME.HTM\">Return to Home</a></p></body></html>");
+        g_html_len = (uint32_t)strlen(g_html);
         parse_html_to_lines();
-        set_status("Failed to connect or fetch webpage. Check network/URL.");
+        set_status(err_msg);
     } else {
         g_html_len = (uint32_t)res;
         g_html[g_html_len] = '\0';
@@ -524,9 +552,10 @@ static void redraw(void) {
     draw_rect(g_fb, g_win_w, g_win_h, 0, TOPBAR_H + BOOKMARKS_H - 1, g_win_w, 1, 0x353B48);
 
     draw_btn(8, TOPBAR_H + 3, 64, 20, "Google", 0, 0x2F3542);
-    draw_btn(76, TOPBAR_H + 3, 72, 20, "FrogFind", 0, 0x2F3542);
-    draw_btn(152, TOPBAR_H + 3, 54, 20, "Wiby", 0, 0x2F3542);
-    draw_btn(210, TOPBAR_H + 3, 64, 20, "Welcome", 0, 0x2F3542);
+    draw_btn(76, TOPBAR_H + 3, 80, 20, "Wikipedia", 0, 0x2F3542);
+    draw_btn(160, TOPBAR_H + 3, 72, 20, "FrogFind", 0, 0x2F3542);
+    draw_btn(236, TOPBAR_H + 3, 50, 20, "Wiby", 0, 0x2F3542);
+    draw_btn(290, TOPBAR_H + 3, 64, 20, "Welcome", 0, 0x2F3542);
 
     // 3. Render HTML Content Viewport (y = HEADER_H .. win_h - STATUSBAR_H)
     int view_y = HEADER_H;
@@ -660,9 +689,10 @@ static void handle_click(int x, int y) {
     if (y >= TOPBAR_H && y < HEADER_H) {
         g_url_focus = 0;
         if (x >= 8 && x <= 72) { navigate_to("https://www.google.com", 1); return; }
-        if (x >= 76 && x <= 148) { navigate_to("http://frogfind.com", 1); return; }
-        if (x >= 152 && x <= 206) { navigate_to("https://wiby.me", 1); return; }
-        if (x >= 210 && x <= 274) { navigate_to("/WELCOME.HTM", 1); return; }
+        if (x >= 76 && x <= 156) { navigate_to("https://www.wikipedia.org", 1); return; }
+        if (x >= 160 && x <= 232) { navigate_to("http://frogfind.com", 1); return; }
+        if (x >= 236 && x <= 286) { navigate_to("https://wiby.me", 1); return; }
+        if (x >= 290 && x <= 354) { navigate_to("/WELCOME.HTM", 1); return; }
     }
 
     // 3. Content Viewport

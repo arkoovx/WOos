@@ -85,12 +85,17 @@ static void do_fetch(void) {
     set_status("Connecting and fetching data...");
     woos_draw_text(g_fb, g_win_w, g_win_h, 10, g_win_h - STATUSBAR_H + 5, g_status_msg, 0x0055AA);
 
-    int32_t res = woos_net_fetch(g_url, g_response, sizeof(g_response));
+    int32_t res = woos_net_fetch(g_url, g_response, sizeof(g_response) - 1);
     if (res < 0) {
+        char err_msg[128] = "Fetch error: unable to connect";
+        if (g_response[0] != '\0') {
+            err_msg[0] = '\0';
+            strncat(err_msg, g_response, 120);
+        }
         g_response[0] = '\0';
         g_resp_len = 0;
         parse_response_lines();
-        set_status("Fetch error: unable to connect or receive response.");
+        set_status(err_msg);
     } else {
         g_resp_len = (uint32_t)res;
         parse_response_lines();
