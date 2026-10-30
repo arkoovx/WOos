@@ -9,6 +9,11 @@
 #define STBI_NO_THREAD_LOCALS
 #define STBI_NO_LINEAR
 #define STBI_NO_HDR
+#define STBI_NO_PSD
+#define STBI_NO_TGA
+#define STBI_NO_GIF
+#define STBI_NO_PIC
+#define STBI_NO_PNM
 
 #define STBI_MALLOC(sz)        woos_malloc(sz)
 #define STBI_FREE(p)           woos_free(p)
@@ -445,10 +450,8 @@ static inline int image_save_file(const char* path, const uint32_t* pixels, int 
     }
 
     int res = 0;
-    if (is_png) {
+    if (is_png || is_jpg) {
         res = stbi_write_png_to_func(stbi_write_func_cb, &ctx, w, h, 4, rgba, w * 4);
-    } else if (is_jpg) {
-        res = stbi_write_jpg_to_func(stbi_write_func_cb, &ctx, w, h, 4, rgba, 90);
     }
     woos_free(rgba);
 
