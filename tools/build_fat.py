@@ -208,27 +208,32 @@ def main():
 
     welcome_htm = """<!DOCTYPE html>
 <html>
-<head><title>Welcome to WoOS NetSurf Navigator</title></head>
+<head><title>Welcome to WoOS Web Browser</title></head>
 <body>
 <h1>WoOS Web Browser</h1>
 <p><img src="/LOGO.PNG" width="160" height="48"></p>
 <p>Welcome to <b>WoOS Navigator</b> powered by NetSurf layout engine with native <b>HTTPS (TLS 1.2)</b>, inline images, and interactive web search!</p>
-<p>Быстрый веб-браузер с поддержкой протокола <b>HTTPS</b>, поиска Google, DuckDuckGo и переключения языка ввода (Shift+Alt / Alt+Shift).</p>
+<p>Быстрый веб-браузер с поддержкой протокола <b>HTTPS</b>, русской раскладки клавиатуры (Shift+Alt / Alt+Shift) и декодирования HTML-сущностей.</p>
 <hr>
-<h3>Search the Web</h3>
-<form action="https://lite.duckduckgo.com/lite/" method="GET">
-<input type="text" name="q" placeholder="Поиск в интернете (Google, Wikipedia, DuckDuckGo)..." value="">
+<h3>Search the Web (Wiby)</h3>
+<form action="https://wiby.me/" method="GET">
+<input type="text" name="q" placeholder="Search the web (Wiby)..." value="">
 <input type="submit" value="Search">
+</form>
+<br>
+<h3>Поиск в Википедии (Wikipedia RU)</h3>
+<form action="https://ru.m.wikipedia.org/w/index.php" method="GET">
+<input type="text" name="search" placeholder="Поиск в Википедии..." value="">
+<input type="submit" value="Найти">
 </form>
 <hr>
 <h3>Popular Web Portals:</h3>
 <p>
-<a href="https://www.google.com/?gbv=1">Google Search (Pure HTML)</a><br>
-<a href="https://lite.duckduckgo.com/lite/">DuckDuckGo Lite Search</a><br>
+<a href="https://ru.m.wikipedia.org">Википедия (Русская версия)</a><br>
 <a href="https://en.m.wikipedia.org">Wikipedia - The Free Encyclopedia (Mobile HTTPS)</a><br>
-<a href="https://wiby.me">Wiby Web Search</a><br>
-<a href="http://frogfind.com">FrogFind Lightweight Portal</a><br>
+<a href="https://wiby.me">Wiby Web Search (Lightweight Engine)</a><br>
 <a href="https://example.com">Example Domain (Cloudflare HTTPS)</a><br>
+<a href="https://www.google.com/?gbv=1">Google Search (Warning: Google requires JS on modern searches)</a><br>
 </p>
 <hr>
 <h3>Local Images &amp; Downloads:</h3>

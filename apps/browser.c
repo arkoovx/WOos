@@ -63,11 +63,11 @@ static fbtk_widget_t *g_fbtk = NULL;
 #define COLOR_SCROLL_TRACK  0xDFE6E9
 #define COLOR_SCROLL_THUMB  0xB2BEC3
 
-#define MAX_HTML_SIZE 262144
-#define MAX_BOXES 4096
-#define MAX_LINKS 160
+#define MAX_HTML_SIZE 393216
+#define MAX_BOXES 8192
+#define MAX_LINKS 512
 #define MAX_IMAGES 16
-#define MAX_INPUTS 8
+#define MAX_INPUTS 16
 #define MAX_HISTORY 32
 
 typedef enum {
@@ -128,7 +128,7 @@ static int g_url_focus = 0;
 
 static char g_html[MAX_HTML_SIZE];
 static uint32_t g_html_len = 0;
-static char g_page_title[64] = "NetSurf Browser";
+static char g_page_title[256] = "Web Browser";
 
 static layout_box_t g_boxes[MAX_BOXES];
 static int g_num_boxes = 0;
@@ -207,6 +207,38 @@ static inline int utf8_charlen(const char* s, int max_len) {
         count++;
     }
     return count;
+}
+
+static int utf8_encode_codepoint(uint32_t cp, char* out) {
+    if (cp <= 0x7F) {
+        out[0] = (char)cp;
+        return 1;
+    } else if (cp <= 0x7FF) {
+        out[0] = (char)(0xC0 | ((cp >> 6) & 0x1F));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    } else if (cp <= 0xFFFF) {
+        out[0] = (char)(0xE0 | ((cp >> 12) & 0x0F));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    } else if (cp <= 0x10FFFF) {
+        out[0] = (char)(0xF0 | ((cp >> 18) & 0x07));
+        out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[3] = (char)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+    return 0;
+}
+
+static int has_utf8_cyrillic(const char* s) {
+    if (!s) return 0;
+    while (*s) {
+        unsigned char c = (unsigned char)*s++;
+        if (c >= 0xD0 && c <= 0xD1) return 1;
+    }
+    return 0;
 }
 
 static void resolve_url(const char* base_url, const char* href, char* out_url, int max_len) {
@@ -475,7 +507,7 @@ static void parse_html_to_boxes(int fetch_images) {
     char word_buf[128];
     int word_len = 0;
 
-    char title_buf[64];
+    char title_buf[256];
     int title_len = 0;
 
     const char* p = g_html;
@@ -548,7 +580,7 @@ static void parse_html_to_boxes(int fetch_images) {
                 else if (tag_match(tag_buf, "/title")) {
                     in_title = 0;
                     title_buf[title_len] = '\0';
-                    strncpy(g_page_title, title_buf, sizeof(g_page_title) - 1);
+                    snprintf(g_page_title, sizeof(g_page_title), "Web Browser: %s", title_buf);
                     if (g_win_idx >= 0) woos_graphics_set_window_title(g_win_idx, g_page_title);
                 }
                 else if (tag_buf[0] == 'h' && tag_buf[1] >= '1' && tag_buf[1] <= '6') {
@@ -796,6 +828,35 @@ static void parse_html_to_boxes(int fetch_images) {
         }
 
         if (in_title) {
+            if (*p == '&' && *(p + 1) == '#') {
+                const char* semi = strchr(p, ';');
+                if (semi && (semi - p) < 12) {
+                    uint32_t cp = 0;
+                    if (*(p + 2) == 'x' || *(p + 2) == 'X') {
+                        const char* h = p + 3;
+                        while (h < semi) {
+                            char ch = *h++;
+                            cp <<= 4;
+                            if (ch >= '0' && ch <= '9') cp |= (ch - '0');
+                            else if (ch >= 'a' && ch <= 'f') cp |= (ch - 'a' + 10);
+                            else if (ch >= 'A' && ch <= 'F') cp |= (ch - 'A' + 10);
+                        }
+                    } else {
+                        const char* d = p + 2;
+                        while (d < semi) {
+                            char ch = *d++;
+                            if (ch >= '0' && ch <= '9') cp = cp * 10 + (ch - '0');
+                        }
+                    }
+                    char enc[4];
+                    int elen = utf8_encode_codepoint(cp, enc);
+                    if (elen > 0 && title_len + elen < (int)sizeof(title_buf) - 1) {
+                        for (int k = 0; k < elen; k++) title_buf[title_len++] = enc[k];
+                    }
+                    p = semi + 1;
+                    continue;
+                }
+            }
             if (title_len + 1 < (int)sizeof(title_buf)) title_buf[title_len++] = *p;
             p++;
             continue;
@@ -803,6 +864,35 @@ static void parse_html_to_boxes(int fetch_images) {
 
         // Entity decoding
         if (*p == '&') {
+            if (*(p + 1) == '#') {
+                const char* semi = strchr(p, ';');
+                if (semi && (semi - p) < 12) {
+                    uint32_t cp = 0;
+                    if (*(p + 2) == 'x' || *(p + 2) == 'X') {
+                        const char* h = p + 3;
+                        while (h < semi) {
+                            char ch = *h++;
+                            cp <<= 4;
+                            if (ch >= '0' && ch <= '9') cp |= (ch - '0');
+                            else if (ch >= 'a' && ch <= 'f') cp |= (ch - 'a' + 10);
+                            else if (ch >= 'A' && ch <= 'F') cp |= (ch - 'A' + 10);
+                        }
+                    } else {
+                        const char* d = p + 2;
+                        while (d < semi) {
+                            char ch = *d++;
+                            if (ch >= '0' && ch <= '9') cp = cp * 10 + (ch - '0');
+                        }
+                    }
+                    char enc[4];
+                    int elen = utf8_encode_codepoint(cp, enc);
+                    if (elen > 0 && word_len + elen < 127) {
+                        for (int k = 0; k < elen; k++) word_buf[word_len++] = enc[k];
+                    }
+                    p = semi + 1;
+                    continue;
+                }
+            }
             if (strncmp(p, "&nbsp;", 6) == 0) { p += 6; if (word_len + 1 < 127) word_buf[word_len++] = ' '; continue; }
             if (strncmp(p, "&amp;", 5) == 0) { p += 5; if (word_len + 1 < 127) word_buf[word_len++] = '&'; continue; }
             if (strncmp(p, "&lt;", 4) == 0) { p += 4; if (word_len + 1 < 127) word_buf[word_len++] = '<'; continue; }
@@ -911,9 +1001,15 @@ static void navigate_to(const char* target_url, int add_history) {
     if (norm_url[0] != '/' && strncmp(norm_url, "http://", 7) != 0 &&
         strncmp(norm_url, "https://", 8) != 0 && strncmp(norm_url, "file://", 7) != 0) {
         if (strchr(norm_url, ' ') != NULL || strchr(norm_url, '.') == NULL) {
-            char search_url[160] = "https://lite.duckduckgo.com/lite/?q=";
+            char search_url[160];
             char enc[100];
             url_encode(norm_url, enc, sizeof(enc));
+            if (has_utf8_cyrillic(norm_url)) {
+                strncpy(search_url, "https://ru.m.wikipedia.org/w/index.php?search=", sizeof(search_url) - 1);
+            } else {
+                strncpy(search_url, "https://wiby.me/?q=", sizeof(search_url) - 1);
+            }
+            search_url[sizeof(search_url) - 1] = '\0';
             strncat(search_url, enc, sizeof(search_url) - (int)strlen(search_url) - 1);
             strncpy(norm_url, search_url, sizeof(norm_url) - 1);
             norm_url[sizeof(norm_url) - 1] = '\0';
@@ -1014,7 +1110,7 @@ static void navigate_to(const char* target_url, int add_history) {
 static void draw_btn(int x, int y, int w, int h, const char* label, int hover, uint32_t bg_col) {
     fill_rect(g_fb, g_win_w, g_win_h, x, y, w, h, hover ? COLOR_BTN_HOVER : bg_col);
     draw_rect(g_fb, g_win_w, g_win_h, x, y, w, h, COLOR_BTN_BORDER);
-    int tx = x + (w - (int)strlen(label) * CHAR_W) / 2;
+    int tx = x + (w - utf8_charlen(label, (int)strlen(label)) * CHAR_W) / 2;
     int ty = y + (h - 10) / 2;
     woos_draw_text(g_fb, g_win_w, g_win_h, tx, ty, label, COLOR_TEXT_WHITE);
 }
@@ -1182,11 +1278,10 @@ static void redraw(void) {
     draw_rect(g_fb, g_win_w, g_win_h, 0, TOPBAR_H + BOOKMARKS_H - 1, g_win_w, 1, 0x353B48);
 
     draw_btn(8, TOPBAR_H + 3, 60, 20, "Google", 0, 0x2F3542);
-    draw_btn(72, TOPBAR_H + 3, 84, 20, "DuckDuckGo", 0, 0x2F3542);
-    draw_btn(160, TOPBAR_H + 3, 76, 20, "Wikipedia", 0, 0x2F3542);
-    draw_btn(240, TOPBAR_H + 3, 68, 20, "FrogFind", 0, 0x2F3542);
-    draw_btn(312, TOPBAR_H + 3, 48, 20, "Wiby", 0, 0x2F3542);
-    draw_btn(364, TOPBAR_H + 3, 64, 20, "Welcome", 0, 0x2F3542);
+    draw_btn(72, TOPBAR_H + 3, 104, 20, "Wikipedia RU", 0, 0x2F3542);
+    draw_btn(180, TOPBAR_H + 3, 104, 20, "Wikipedia EN", 0, 0x2F3542);
+    draw_btn(288, TOPBAR_H + 3, 96, 20, "Wiby Search", 0, 0x2F3542);
+    draw_btn(388, TOPBAR_H + 3, 64, 20, "Welcome", 0, 0x2F3542);
 
     // Layer 6: BROWSER CHROME ON TOP: Status Bar (y = win_h - STATUSBAR_H .. win_h)
     int sb_y = g_win_h - STATUSBAR_H;
@@ -1281,11 +1376,10 @@ static void handle_click(int x, int y) {
         g_url_focus = 0;
         if (g_focused_input >= 0) { g_inputs[g_focused_input].is_focused = 0; g_focused_input = -1; }
         if (x >= 8 && x <= 68) { navigate_to("https://www.google.com/?gbv=1", 1); return; }
-        if (x >= 72 && x <= 156) { navigate_to("https://lite.duckduckgo.com/lite/", 1); return; }
-        if (x >= 160 && x <= 236) { navigate_to("https://en.m.wikipedia.org", 1); return; }
-        if (x >= 240 && x <= 308) { navigate_to("http://frogfind.com", 1); return; }
-        if (x >= 312 && x <= 360) { navigate_to("https://wiby.me", 1); return; }
-        if (x >= 364 && x <= 428) { navigate_to("/WELCOME.HTM", 1); return; }
+        if (x >= 72 && x <= 176) { navigate_to("https://ru.m.wikipedia.org", 1); return; }
+        if (x >= 180 && x <= 284) { navigate_to("https://en.m.wikipedia.org", 1); return; }
+        if (x >= 288 && x <= 384) { navigate_to("https://wiby.me", 1); return; }
+        if (x >= 388 && x <= 452) { navigate_to("/WELCOME.HTM", 1); return; }
     }
 
     // 3. Content Viewport
