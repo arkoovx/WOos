@@ -39,6 +39,8 @@ static inline void int_to_str(int val, char* dst) {
 #define MSG_KEY_DOWN     4
 #define MSG_RESIZE       5
 #define MSG_SCROLL       6
+#define MSG_MOUSE_MOVE   7
+#define MSG_MOUSE_UP     8
 #define MSG_OPEN_FILE    10
 
 // VFS Modes
@@ -207,6 +209,7 @@ typedef struct {
     uint8_t net_ready;
     uint8_t net_active;
     uint8_t net_link_up;
+    uint8_t kbd_layout;
 } __attribute__((packed)) woos_system_status_t;
 
 WOOS_API("woos_graphics_get_info")

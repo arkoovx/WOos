@@ -243,11 +243,15 @@ static inline int woos_dialog_handle_key(woos_file_dialog_t* d, int ascii, int s
     // 3. Backspace: delete character before cursor
     if (scancode == 0x0E || ascii == 8 || ascii == 127) {
         if (d->cursor_pos > 0 && d->input_len > 0) {
-            for (int i = d->cursor_pos - 1; i < d->input_len; i++) {
-                d->input[i] = d->input[i + 1];
+            int del = 1;
+            if (d->cursor_pos >= 2 && ((unsigned char)d->input[d->cursor_pos - 1] & 0xC0) == 0x80) {
+                del = 2;
             }
-            d->cursor_pos--;
-            d->input_len--;
+            for (int i = d->cursor_pos - del; i + del <= d->input_len; i++) {
+                d->input[i] = d->input[i + del];
+            }
+            d->cursor_pos -= del;
+            d->input_len -= del;
             d->input[d->input_len] = '\0';
         }
         return WOOS_DIALOG_RES_NONE;
@@ -289,7 +293,7 @@ static inline int woos_dialog_handle_key(woos_file_dialog_t* d, int ascii, int s
         return WOOS_DIALOG_RES_NONE;
     }
 
-    // 9. Printable characters (32..126)
+    // 9. Printable characters (ASCII or Cyrillic)
     if (ascii >= 32 && ascii <= 126) {
         if (d->input_len + 1 < (int)sizeof(d->input)) {
             // Shift characters right
@@ -299,6 +303,20 @@ static inline int woos_dialog_handle_key(woos_file_dialog_t* d, int ascii, int s
             d->input[d->cursor_pos] = (char)ascii;
             d->cursor_pos++;
             d->input_len++;
+            d->input[d->input_len] = '\0';
+        }
+        return WOOS_DIALOG_RES_NONE;
+    } else if (ascii >= 0x0400 && ascii <= 0x04FF) {
+        if (d->input_len + 2 < (int)sizeof(d->input)) {
+            uint8_t b1 = (uint8_t)(0xC0 | ((ascii >> 6) & 0x1F));
+            uint8_t b2 = (uint8_t)(0x80 | (ascii & 0x3F));
+            for (int i = d->input_len; i >= d->cursor_pos; i--) {
+                d->input[i + 2] = d->input[i];
+            }
+            d->input[d->cursor_pos] = (char)b1;
+            d->input[d->cursor_pos + 1] = (char)b2;
+            d->cursor_pos += 2;
+            d->input_len += 2;
             d->input[d->input_len] = '\0';
         }
         return WOOS_DIALOG_RES_NONE;

@@ -341,6 +341,7 @@ typedef struct {
     uint8_t net_ready;
     uint8_t net_active;
     uint8_t net_link_up;
+    uint8_t kbd_layout;
 } __attribute__((packed)) woos_system_status_t;
 
 m3ApiRawFunction(wasi_system_get_status) {
@@ -370,6 +371,8 @@ m3ApiRawFunction(wasi_system_get_status) {
     status->net_ready = net->ready;
     status->net_active = net->active;
     status->net_link_up = net->link_up;
+    extern uint8_t idt_get_keyboard_layout(void);
+    status->kbd_layout = idt_get_keyboard_layout();
 
     m3ApiReturn(0); // success
 }

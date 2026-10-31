@@ -48,12 +48,31 @@ static int g_cursor_blink = 1;
 
 static woos_file_dialog_t g_dialog;
 
+static int g_is_dragging_scrollbar = 0;
+static int g_scrollbar_drag_start_y = 0;
+static int g_scrollbar_drag_start_row = 0;
+
 static int visible_rows(void) {
     return (g_win_h - TOOLBAR_H - STATUSBAR_H) / LINE_H;
 }
 
 static int visible_cols(void) {
     return (g_win_w - MARGIN_LEFT - 4) / CHAR_W;
+}
+
+static inline int utf8_charlen(const char* s, int max_len) {
+    int count = 0;
+    int i = 0;
+    while (i < max_len && s[i] != '\0') {
+        unsigned char c = (unsigned char)s[i];
+        if (c < 0x80) i += 1;
+        else if ((c & 0xE0) == 0xC0) i += 2;
+        else if ((c & 0xF0) == 0xE0) i += 3;
+        else if ((c & 0xF8) == 0xF0) i += 4;
+        else i += 1;
+        count++;
+    }
+    return count;
 }
 
 static void set_status(const char* msg) {
@@ -326,11 +345,27 @@ static void draw_editor(void) {
 
     // 5. Draw cursor
     if (g_cursor_blink && g_cy >= g_row_off && g_cy < g_row_off + v_rows) {
-        if (g_cx >= g_col_off && g_cx <= g_col_off + v_cols) {
-            int cursor_screen_x = MARGIN_LEFT + 4 + (g_cx - g_col_off) * CHAR_W;
+        int visual_col = utf8_charlen(g_rows[g_cy], g_cx);
+        if (visual_col >= g_col_off && visual_col <= g_col_off + v_cols) {
+            int cursor_screen_x = MARGIN_LEFT + 4 + (visual_col - g_col_off) * CHAR_W;
             int cursor_screen_y = TOOLBAR_H + (g_cy - g_row_off) * LINE_H + 1;
             fill_rect(g_fb, g_win_w, g_win_h, cursor_screen_x, cursor_screen_y, 2, LINE_H - 1, COLOR_CURSOR);
         }
+    }
+
+    // Vertical scrollbar
+    int editor_h = g_win_h - TOOLBAR_H - STATUSBAR_H;
+    int max_s = (g_num_rows > v_rows) ? (g_num_rows - v_rows) : 0;
+    if (max_s > 0) {
+        int sb_w = 14;
+        int sb_x = g_win_w - sb_w;
+        fill_rect(g_fb, g_win_w, g_win_h, sb_x, TOOLBAR_H, sb_w, editor_h, 0xEEF2F7);
+        fill_rect(g_fb, g_win_w, g_win_h, sb_x, TOOLBAR_H, 1, editor_h, 0xCBD5E1);
+        int thumb_h = (editor_h * v_rows) / g_num_rows;
+        if (thumb_h < 20) thumb_h = 20;
+        int track_avail = editor_h - thumb_h;
+        int thumb_y = TOOLBAR_H + (g_row_off * track_avail) / max_s;
+        fill_rect(g_fb, g_win_w, g_win_h, sb_x + 2, thumb_y, sb_w - 4, thumb_h, g_is_dragging_scrollbar ? 0x64748B : 0x94A3B8);
     }
 
     // 6. Status bar
@@ -421,6 +456,28 @@ static void handle_click(int x, int y) {
     }
 
     if (y >= TOOLBAR_H && y < g_win_h - STATUSBAR_H) {
+        int v_rows = visible_rows();
+        int max_s = (g_num_rows > v_rows) ? (g_num_rows - v_rows) : 0;
+        if (max_s > 0 && x >= g_win_w - 16) {
+            int editor_h = g_win_h - TOOLBAR_H - STATUSBAR_H;
+            int thumb_h = (editor_h * v_rows) / g_num_rows;
+            if (thumb_h < 20) thumb_h = 20;
+            int track_avail = editor_h - thumb_h;
+            int thumb_y = TOOLBAR_H + (g_row_off * track_avail) / max_s;
+            if (y >= thumb_y && y <= thumb_y + thumb_h) {
+                g_is_dragging_scrollbar = 1;
+                g_scrollbar_drag_start_y = y;
+                g_scrollbar_drag_start_row = g_row_off;
+            } else if (y < thumb_y) {
+                g_row_off -= (v_rows - 2);
+                if (g_row_off < 0) g_row_off = 0;
+            } else {
+                g_row_off += (v_rows - 2);
+                if (g_row_off > max_s) g_row_off = max_s;
+            }
+            return;
+        }
+
         if (g_num_rows <= 0) {
             g_cy = 0;
             g_cx = 0;
@@ -442,6 +499,30 @@ static void handle_click(int x, int y) {
         g_cursor_blink = 1;
         set_status("Cursor moved");
     }
+}
+
+static void handle_mouse_move(int x, int y) {
+    (void)x;
+    if (g_is_dragging_scrollbar) {
+        int v_rows = visible_rows();
+        int max_s = (g_num_rows > v_rows) ? (g_num_rows - v_rows) : 0;
+        int editor_h = g_win_h - TOOLBAR_H - STATUSBAR_H;
+        int thumb_h = (editor_h * v_rows) / (g_num_rows > 0 ? g_num_rows : 1);
+        if (thumb_h < 20) thumb_h = 20;
+        int track_avail = editor_h - thumb_h;
+        if (track_avail > 0 && max_s > 0) {
+            int dy = y - g_scrollbar_drag_start_y;
+            int new_row = g_scrollbar_drag_start_row + (dy * max_s) / track_avail;
+            if (new_row < 0) new_row = 0;
+            if (new_row > max_s) new_row = max_s;
+            g_row_off = new_row;
+        }
+    }
+}
+
+static void handle_mouse_up(int x, int y) {
+    (void)x; (void)y;
+    g_is_dragging_scrollbar = 0;
 }
 
 static void handle_key(int ascii, int scancode) {
@@ -498,8 +579,14 @@ static void handle_key(int ascii, int scancode) {
     // Backspace
     if (ascii == '\b' || scancode == 0x0E) {
         if (g_cx > 0) {
-            row_delete_char(g_cy, g_cx - 1);
-            g_cx--;
+            int del = 1;
+            if (g_cx >= 2 && ((unsigned char)g_rows[g_cy][g_cx - 1] & 0xC0) == 0x80) {
+                del = 2;
+            }
+            for (int k = 0; k < del; k++) {
+                row_delete_char(g_cy, g_cx - 1);
+                g_cx--;
+            }
         } else if (g_cy > 0) {
             int prev_len = g_row_len[g_cy - 1];
             int cur_len = g_row_len[g_cy];
@@ -578,6 +665,13 @@ static void handle_key(int ascii, int scancode) {
         row_insert_char(g_cy, g_cx, (char)ascii);
         g_cx++;
         return;
+    } else if (ascii >= 0x0400 && ascii <= 0x04FF) {
+        uint8_t b1 = (uint8_t)(0xC0 | ((ascii >> 6) & 0x1F));
+        uint8_t b2 = (uint8_t)(0x80 | (ascii & 0x3F));
+        row_insert_char(g_cy, g_cx, (char)b1);
+        row_insert_char(g_cy, g_cx + 1, (char)b2);
+        g_cx += 2;
+        return;
     }
 }
 
@@ -625,6 +719,12 @@ void _start(void) {
                 }
             } else if (msg.type == MSG_CLICK) {
                 handle_click((int)msg.arg1, (int)msg.arg2);
+                needs_redraw = 1;
+            } else if (msg.type == MSG_MOUSE_MOVE) {
+                handle_mouse_move((int)msg.arg1, (int)msg.arg2);
+                needs_redraw = 1;
+            } else if (msg.type == MSG_MOUSE_UP) {
+                handle_mouse_up((int)msg.arg1, (int)msg.arg2);
                 needs_redraw = 1;
             } else if (msg.type == MSG_KEY_DOWN) {
                 handle_key((int)msg.arg1, (int)msg.arg2);

@@ -67,6 +67,8 @@ static int g_drag_win_w = 240;
 static int g_drag_win_h = 320;
 static int g_drag_win_off_x = 0;
 static int g_drag_win_off_y = 0;
+static int g_active_client_win_id = -1;
+static int g_active_client_tid = -1;
 
 // Cursor Coordinates & Dirty Rect Tracking
 static int g_cursor_x = 640;
@@ -850,9 +852,9 @@ static void render_screen(void) {
     woos_system_status_t status;
     woos_system_get_status(&status);
 
-    int tray_x = SCREEN_W - 320;
-    fill_rect(g_screen, SCREEN_W, SCREEN_H, tray_x, tb_y + 4, 316, 28, 0x181F28);
-    draw_rect(g_screen, SCREEN_W, SCREEN_H, tray_x, tb_y + 4, 316, 28, 0x2A3544);
+    int tray_x = SCREEN_W - 356;
+    fill_rect(g_screen, SCREEN_W, SCREEN_H, tray_x, tb_y + 4, 352, 28, 0x181F28);
+    draw_rect(g_screen, SCREEN_W, SCREEN_H, tray_x, tb_y + 4, 352, 28, 0x2A3544);
 
     // RAM Free MB
     uint32_t ram_mb = (status.free_pages * 4) / 1024;
@@ -872,7 +874,10 @@ static void render_screen(void) {
     woos_draw_text(g_screen, SCREEN_W, SCREEN_H, tray_x + 90, tb_y + 11, heap_str, 0x3498DB);
 
     // Net link
-    woos_draw_text(g_screen, SCREEN_W, SCREEN_H, tray_x + 170, tb_y + 11, status.net_link_up ? "NET:UP" : "NET:DN", status.net_link_up ? 0x2ECC71 : 0xE74C3C);
+    woos_draw_text(g_screen, SCREEN_W, SCREEN_H, tray_x + 168, tb_y + 11, status.net_link_up ? "NET:UP" : "NET:DN", status.net_link_up ? 0x2ECC71 : 0xE74C3C);
+
+    // Keyboard Layout badge [EN] / [RU]
+    woos_draw_text(g_screen, SCREEN_W, SCREEN_H, tray_x + 232, tb_y + 11, status.kbd_layout ? "RU" : "EN", status.kbd_layout ? 0x00E5FF : 0xCBD5E1);
 
     // Clock (HH:MM:SS from uptime)
     uint32_t total_sec = status.uptime_ms / 1000;
@@ -889,7 +894,7 @@ static void render_screen(void) {
     time_str[6] = (char)('0' + (sec / 10));
     time_str[7] = (char)('0' + (sec % 10));
     time_str[8] = '\0';
-    woos_draw_text(g_screen, SCREEN_W, SCREEN_H, tray_x + 236, tb_y + 11, time_str, COLOR_TEXT_WHITE);
+    woos_draw_text(g_screen, SCREEN_W, SCREEN_H, tray_x + 266, tb_y + 11, time_str, COLOR_TEXT_WHITE);
 
     // 6. Start Menu Popup
     if (g_start_menu_open) {
@@ -1121,6 +1126,17 @@ void _start(void) {
                     if (ny < 25) ny = 25;
                     woos_graphics_set_window_pos(g_drag_win_id, g_cursor_x - g_drag_win_off_x, ny);
                     need_redraw = 1;
+                } else if (g_active_client_win_id != -1 && (ev.buttons & 1)) {
+                    int win_count = woos_graphics_get_window_count();
+                    for (int i = 0; i < win_count; i++) {
+                        woos_window_info_t win;
+                        if (woos_graphics_get_window_info(i, &win) == 0 && (int)win.id == g_active_client_win_id) {
+                            int client_x = g_cursor_x - win.x;
+                            int client_y = g_cursor_y - win.y;
+                            woos_ipc_send(g_active_client_tid, MSG_MOUSE_MOVE, client_x, client_y, ev.buttons, 0, 0);
+                            break;
+                        }
+                    }
                 } else if (g_potential_drag_idx >= 0 && !g_is_dragging_icon) {
                     int dx = g_cursor_x - g_drag_start_x;
                     int dy = g_cursor_y - g_drag_start_y;
@@ -1399,6 +1415,8 @@ void _start(void) {
                             int client_x = g_cursor_x - win.x;
                             int client_y = g_cursor_y - win.y;
                             int mtype = is_right ? MSG_RIGHT_CLICK : MSG_CLICK;
+                            g_active_client_win_id = win.id;
+                            g_active_client_tid = win.thread_id;
                             woos_ipc_send(win.thread_id, mtype, client_x, client_y, ev.buttons, 0, 0);
                             hit_window = 1;
                             need_redraw = 1;
@@ -1458,6 +1476,21 @@ void _start(void) {
 
             // 3. Mouse Button Release
             else if (ev.type == 2) {
+                if (g_active_client_win_id != -1) {
+                    int win_count = woos_graphics_get_window_count();
+                    for (int i = 0; i < win_count; i++) {
+                        woos_window_info_t win;
+                        if (woos_graphics_get_window_info(i, &win) == 0 && (int)win.id == g_active_client_win_id) {
+                            int client_x = g_cursor_x - win.x;
+                            int client_y = g_cursor_y - win.y;
+                            woos_ipc_send(g_active_client_tid, MSG_MOUSE_UP, client_x, client_y, ev.buttons, 0, 0);
+                            break;
+                        }
+                    }
+                    g_active_client_win_id = -1;
+                    g_active_client_tid = -1;
+                }
+
                 if (g_drag_win_id != -1) {
                     g_drag_win_id = -1;
                     need_redraw = 1;
@@ -1524,11 +1557,12 @@ void _start(void) {
             else if (ev.type == 7) {
                 int8_t dz = (int8_t)ev.buttons;
                 int win_count = woos_graphics_get_window_count();
-                for (int i = 0; i < win_count; i++) {
+                for (int i = win_count - 1; i >= 0; i--) {
                     woos_window_info_t win;
                     if (woos_graphics_get_window_info(i, &win) == 0 && win.active) {
+                        if (win.flags & 1) continue; // skip minimized
                         if (g_cursor_x >= win.x && g_cursor_x <= win.x + (int)win.w &&
-                            g_cursor_y >= win.y && g_cursor_y <= win.y + (int)win.h) {
+                            g_cursor_y >= win.y - 22 && g_cursor_y <= win.y + (int)win.h) {
                             int client_x = g_cursor_x - win.x;
                             int client_y = g_cursor_y - win.y;
                             woos_ipc_send(win.thread_id, MSG_SCROLL, client_x, client_y, (uint32_t)(int32_t)dz, 0, 0);
@@ -1542,6 +1576,16 @@ void _start(void) {
             else if (ev.type == 4) {
                 int ascii = ev.x;
                 int scancode = ev.y;
+                int layout = (ev.buttons >> 4) & 1;
+                static int last_layout = 0;
+                if (layout != last_layout) {
+                    last_layout = layout;
+                    need_redraw = 1;
+                }
+
+                if (ascii == 0 && (scancode == 0x2A || scancode == 0x36 || scancode == 0x38 || scancode == 0xB8)) {
+                    continue; // layout switch or modifier key alone
+                }
 
                 if (g_desktop_dialog.active) {
                     int res = woos_dialog_handle_key(&g_desktop_dialog, ascii, scancode);

@@ -345,7 +345,7 @@ extern void mouse_handler(void);
 
 #include "input.h"
 
-static const char kbd_us_lower[128] = {
+static const uint16_t kbd_us_lower[128] = {
     0,  27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
   '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',
      0, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
@@ -353,7 +353,7 @@ static const char kbd_us_lower[128] = {
    '*',   0, ' ',   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
 };
 
-static const char kbd_us_upper[128] = {
+static const uint16_t kbd_us_upper[128] = {
     0,  27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\b',
   '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n',
      0, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',
@@ -361,10 +361,38 @@ static const char kbd_us_upper[128] = {
    '*',   0, ' ',   0,   0,   0,   0,   0,   0,   0,   0,   0,   0
 };
 
+static const uint16_t kbd_ru_lower[128] = {
+    0,      27,     '1',    '2',    '3',    '4',    '5',    '6',
+    '7',    '8',    '9',    '0',    '-',    '=',    '\b',   '\t',
+    0x0439, 0x0446, 0x0443, 0x043A, 0x0435, 0x043D, 0x0433, 0x0448, // й ц у к е н г ш
+    0x0449, 0x0437, 0x0445, 0x044A, '\n',   0,      0x0444, 0x044B, // щ з х ъ \n   ф ы
+    0x0432, 0x0430, 0x043F, 0x0440, 0x043E, 0x043B, 0x0434, 0x0436, // в а п р о л д ж
+    0x044D, 0x0451, 0,      '\\',   0x044F, 0x0447, 0x0441, 0x043C, // э ё   \  я ч с м
+    0x0438, 0x0442, 0x044C, 0x0431, 0x044E, '.',    0,      '*',    // и т ь б ю .
+    0,      ' ',    0,      0,      0,      0,      0,      0
+};
+
+static const uint16_t kbd_ru_upper[128] = {
+    0,      27,     '!',    '"',    0x2116, ';',    '%',    ':',    // ! " № ; % :
+    '?',    '*',    '(',    ')',    '_',    '+',    '\b',   '\t',
+    0x0419, 0x0426, 0x0423, 0x041A, 0x0415, 0x041D, 0x0413, 0x0428, // Й Ц У К Е Н Г Ш
+    0x0429, 0x0417, 0x0425, 0x042A, '\n',   0,      0x0424, 0x042B, // Щ З Х Ъ \n   Ф Ы
+    0x0412, 0x0410, 0x041F, 0x0420, 0x041E, 0x041B, 0x0414, 0x0416, // В А П Р О Л Д Ж
+    0x042D, 0x0401, 0,      '/',    0x042F, 0x0427, 0x0421, 0x041C, // Э Ё   /  Я Ч С М
+    0x0418, 0x0422, 0x042C, 0x0411, 0x042E, ',',    0,      '*',    // И Т Ь Б Ю ,
+    0,      ' ',    0,      0,      0,      0,      0,      0
+};
+
 static uint8_t g_kbd_shift = 0;
+static uint8_t g_kbd_alt = 0;
 static uint8_t g_kbd_ctrl = 0;
 static uint8_t g_kbd_caps_lock = 0;
 static uint8_t g_kbd_extended = 0;
+static uint8_t g_kbd_layout = 0; // 0 = EN, 1 = RU
+
+uint8_t idt_get_keyboard_layout(void) {
+    return g_kbd_layout;
+}
 
 void idt_handle_irq(uint32_t vector) {
     if (vector == IRQ_VECTOR_BASE_MASTER + 0u) {
@@ -375,10 +403,36 @@ void idt_handle_irq(uint32_t vector) {
             if (sc == 0xE0) {
                 g_kbd_extended = 1;
             } else if (sc == 0x2A || sc == 0x36) {
+                if (g_kbd_alt) {
+                    // Alt+Shift combination -> Toggle Layout
+                    g_kbd_layout ^= 1;
+                }
                 g_kbd_shift = 1;
                 g_kbd_extended = 0;
+                input_event_t ev;
+                ev.type = INPUT_EVENT_KEY_DOWN;
+                ev.x = 0;
+                ev.y = (uint16_t)sc;
+                ev.buttons = (uint8_t)(g_kbd_shift | (g_kbd_ctrl << 1) | (g_kbd_caps_lock << 2) | (g_kbd_alt << 3) | (g_kbd_layout << 4));
+                input_push(&ev);
             } else if (sc == 0xAA || sc == 0xB6) {
                 g_kbd_shift = 0;
+                g_kbd_extended = 0;
+            } else if (sc == 0x38) {
+                if (g_kbd_shift) {
+                    // Shift+Alt combination -> Toggle Layout
+                    g_kbd_layout ^= 1;
+                }
+                g_kbd_alt = 1;
+                g_kbd_extended = 0;
+                input_event_t ev;
+                ev.type = INPUT_EVENT_KEY_DOWN;
+                ev.x = 0;
+                ev.y = (uint16_t)sc;
+                ev.buttons = (uint8_t)(g_kbd_shift | (g_kbd_ctrl << 1) | (g_kbd_caps_lock << 2) | (g_kbd_alt << 3) | (g_kbd_layout << 4));
+                input_push(&ev);
+            } else if (sc == 0xB8) {
+                g_kbd_alt = 0;
                 g_kbd_extended = 0;
             } else if (sc == 0x1D) {
                 g_kbd_ctrl = 1;
@@ -391,25 +445,36 @@ void idt_handle_irq(uint32_t vector) {
                 g_kbd_caps_lock ^= 1;
                 g_kbd_extended = 0;
             } else if (!(sc & 0x80)) {
-                char ascii = 0;
+                uint16_t codepoint = 0;
                 if (!g_kbd_extended && sc < 128) {
-                    char lower = kbd_us_lower[sc];
-                    int is_letter = (lower >= 'a' && lower <= 'z');
-                    int use_upper = is_letter ? (g_kbd_shift ^ g_kbd_caps_lock) : g_kbd_shift;
-                    ascii = use_upper ? kbd_us_upper[sc] : lower;
-                    if (g_kbd_ctrl && ascii >= 'a' && ascii <= 'z') {
-                        ascii = (char)(ascii - 'a' + 1);
-                    } else if (g_kbd_ctrl && ascii >= 'A' && ascii <= 'Z') {
-                        ascii = (char)(ascii - 'A' + 1);
+                    if (g_kbd_ctrl) {
+                        uint16_t us_low = kbd_us_lower[sc];
+                        if (us_low >= 'a' && us_low <= 'z') {
+                            codepoint = (uint16_t)(us_low - 'a' + 1);
+                        } else if (us_low >= 'A' && us_low <= 'Z') {
+                            codepoint = (uint16_t)(us_low - 'A' + 1);
+                        }
+                    } else if (g_kbd_layout == 1) {
+                        uint16_t lower = kbd_ru_lower[sc];
+                        uint16_t upper = kbd_ru_upper[sc];
+                        int is_letter = ((lower >= 0x0430 && lower <= 0x044F) || (lower == 0x0451));
+                        int use_upper = is_letter ? (g_kbd_shift ^ g_kbd_caps_lock) : g_kbd_shift;
+                        codepoint = use_upper ? upper : lower;
+                    } else {
+                        uint16_t lower = kbd_us_lower[sc];
+                        uint16_t upper = kbd_us_upper[sc];
+                        int is_letter = (lower >= 'a' && lower <= 'z');
+                        int use_upper = is_letter ? (g_kbd_shift ^ g_kbd_caps_lock) : g_kbd_shift;
+                        codepoint = use_upper ? upper : lower;
                     }
                 }
-                if (ascii != 0 || sc == 0x48 || sc == 0x50 || sc == 0x4B || sc == 0x4D ||
+                if (codepoint != 0 || sc == 0x48 || sc == 0x50 || sc == 0x4B || sc == 0x4D ||
                     sc == 0x47 || sc == 0x4F || sc == 0x49 || sc == 0x51 || sc == 0x53 || sc == 0x52) {
                     input_event_t ev;
                     ev.type = INPUT_EVENT_KEY_DOWN;
-                    ev.x = (uint16_t)(uint8_t)ascii;
+                    ev.x = codepoint;
                     ev.y = (uint16_t)sc;
-                    ev.buttons = (uint16_t)(g_kbd_shift | (g_kbd_ctrl << 1) | (g_kbd_caps_lock << 2));
+                    ev.buttons = (uint8_t)(g_kbd_shift | (g_kbd_ctrl << 1) | (g_kbd_caps_lock << 2) | (g_kbd_alt << 3) | (g_kbd_layout << 4));
                     input_push(&ev);
                 }
                 g_kbd_extended = 0;

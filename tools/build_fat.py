@@ -206,24 +206,25 @@ def main():
     logo_png = create_logo_png()
     photo_jpg = create_sample_jpg()
 
-    welcome_htm = b"""<!DOCTYPE html>
+    welcome_htm = """<!DOCTYPE html>
 <html>
 <head><title>Welcome to WoOS NetSurf Navigator</title></head>
 <body>
 <h1>WoOS Web Browser</h1>
 <p><img src="/LOGO.PNG" width="160" height="48"></p>
 <p>Welcome to <b>WoOS Navigator</b> powered by NetSurf layout engine with native <b>HTTPS (TLS 1.2)</b>, inline images, and interactive web search!</p>
+<p>Быстрый веб-браузер с поддержкой протокола <b>HTTPS</b>, поиска Google, DuckDuckGo и переключения языка ввода (Shift+Alt / Alt+Shift).</p>
 <hr>
 <h3>Search the Web</h3>
-<form action="https://html.duckduckgo.com/html/" method="GET">
-<input type="text" name="q" placeholder="Search the web (Google, Wikipedia, DuckDuckGo)..." value="">
+<form action="https://lite.duckduckgo.com/lite/" method="GET">
+<input type="text" name="q" placeholder="Поиск в интернете (Google, Wikipedia, DuckDuckGo)..." value="">
 <input type="submit" value="Search">
 </form>
 <hr>
 <h3>Popular Web Portals:</h3>
 <p>
 <a href="https://www.google.com/?gbv=1">Google Search (Pure HTML)</a><br>
-<a href="https://html.duckduckgo.com/html/">DuckDuckGo Search (HTML5)</a><br>
+<a href="https://lite.duckduckgo.com/lite/">DuckDuckGo Lite Search</a><br>
 <a href="https://en.m.wikipedia.org">Wikipedia - The Free Encyclopedia (Mobile HTTPS)</a><br>
 <a href="https://wiby.me">Wiby Web Search</a><br>
 <a href="http://frogfind.com">FrogFind Lightweight Portal</a><br>
@@ -235,7 +236,7 @@ def main():
 <p>Click [Download] in the toolbar to save any remote file or package to your Desktop!</p>
 </body>
 </html>
-"""
+""".encode("utf-8")
 
     root_files = [
         ("HELLO.TXT", b"Hello from WoOS VFS (FAT32)!\n"),

@@ -154,6 +154,10 @@ static char g_history[MAX_HISTORY][160];
 static int g_history_count = 0;
 static int g_history_idx = -1;
 
+static int g_is_dragging_scrollbar = 0;
+static int g_scrollbar_drag_start_y = 0;
+static int g_scrollbar_drag_start_scroll = 0;
+
 static void redraw(void);
 static void navigate_to(const char* target_url, int add_history);
 static void parse_html_to_boxes(int fetch_images);
@@ -190,6 +194,21 @@ static int is_downloadable(const char* url) {
     return 0;
 }
 
+static inline int utf8_charlen(const char* s, int max_len) {
+    int count = 0;
+    int i = 0;
+    while (i < max_len && s[i] != '\0') {
+        unsigned char c = (unsigned char)s[i];
+        if (c < 0x80) i += 1;
+        else if ((c & 0xE0) == 0xC0) i += 2;
+        else if ((c & 0xF0) == 0xE0) i += 3;
+        else if ((c & 0xF8) == 0xF0) i += 4;
+        else i += 1;
+        count++;
+    }
+    return count;
+}
+
 static void resolve_url(const char* base_url, const char* href, char* out_url, int max_len) {
     if (!href || href[0] == '\0') {
         strncpy(out_url, base_url, max_len);
@@ -222,28 +241,36 @@ static void resolve_url(const char* base_url, const char* href, char* out_url, i
         strncpy(out_url, href, max_len);
         return;
     }
-    int last_slash = -1;
-    for (int i = 0; base_url[i] != '\0'; i++) {
-        if (base_url[i] == '/') last_slash = i;
-    }
-    if (last_slash >= 0) {
-        int copy_len = last_slash + 1 < max_len - 1 ? last_slash + 1 : max_len - 1;
-        strncpy(out_url, base_url, copy_len);
-        out_url[copy_len] = '\0';
+    // Relative URL (not starting with /)
+    int proto_len = 0;
+    if (strncmp(base_url, "http://", 7) == 0) proto_len = 7;
+    else if (strncmp(base_url, "https://", 8) == 0) proto_len = 8;
+
+    const char* path_start = base_url + proto_len;
+    const char* first_slash = strchr(path_start, '/');
+    if (!first_slash) {
+        // base_url has no path (e.g. https://wiby.me) -> append / and href!
+        strncpy(out_url, base_url, max_len - 1);
+        strncat(out_url, "/", max_len - (int)strlen(out_url) - 1);
         strncat(out_url, href, max_len - (int)strlen(out_url) - 1);
-    } else {
-        strncpy(out_url, href, max_len);
+        return;
     }
+    const char* last_slash = strrchr(first_slash, '/');
+    int dir_len = (int)(last_slash - base_url) + 1;
+    if (dir_len >= max_len) dir_len = max_len - 1;
+    strncpy(out_url, base_url, dir_len);
+    out_url[dir_len] = '\0';
+    strncat(out_url, href, max_len - (int)strlen(out_url) - 1);
 }
 
 static void url_encode(const char* src, char* dst, int max_len) {
     if (!src || !dst || max_len < 4) return;
     int di = 0;
     for (int si = 0; src[si] != '\0' && di + 4 < max_len; si++) {
-        char c = src[si];
+        unsigned char c = (unsigned char)src[si];
         if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
             c == '-' || c == '_' || c == '.' || c == '~') {
-            dst[di++] = c;
+            dst[di++] = (char)c;
         } else if (c == ' ') {
             dst[di++] = '+';
         } else {
@@ -267,8 +294,8 @@ static void submit_form(int input_idx) {
     target_url[0] = '\0';
 
     if (inp->form_action[0] == '\0') {
-        // Fallback: search on DuckDuckGo
-        strcpy(target_url, "https://html.duckduckgo.com/html/?q=");
+        // Fallback: search on DuckDuckGo Lite
+        strcpy(target_url, "https://lite.duckduckgo.com/lite/?q=");
         strncat(target_url, enc_val, sizeof(target_url) - (int)strlen(target_url) - 1);
     } else {
         resolve_url(g_url, inp->form_action, target_url, sizeof(target_url));
@@ -340,7 +367,7 @@ static void load_image_for_slot(int slot, const char* img_url) {
         if (strncmp(img_url, "file://", 7) == 0) fpath = img_url + 7;
         bimg->img = image_load_file(fpath);
     } else {
-        // Fast non-blocking strategy: only fetch primary logo (slot 0) over network, skip SVGs
+        // Fetch primary logo (slot 0) over network, skip SVGs
         int is_svg = (strstr(img_url, ".svg") != NULL || strstr(img_url, ".SVG") != NULL);
         if (slot == 0 && !is_svg) {
             int32_t bytes = woos_net_fetch(img_url, (char*)g_img_fetch_buf, sizeof(g_img_fetch_buf));
@@ -382,8 +409,8 @@ static void load_image_for_slot(int slot, const char* img_url) {
         bimg->disp_h = bimg->img->height;
     } else {
         bimg->loaded = -1;
-        bimg->disp_w = 140;
-        bimg->disp_h = 32;
+        bimg->disp_w = 0;
+        bimg->disp_h = 0;
     }
 }
 
@@ -468,7 +495,7 @@ static void parse_html_to_boxes(int fetch_images) {
         if (*p == '<') {
             if (word_len > 0) {
                 word_buf[word_len] = '\0';
-                int ww = word_len * CHAR_W;
+                int ww = utf8_charlen(word_buf, word_len) * CHAR_W;
                 if (cur_x + ww > g_win_w - 36) {
                     cur_y += line_h;
                     cur_x = in_list ? 36 : 20;
@@ -737,7 +764,7 @@ static void parse_html_to_boxes(int fetch_images) {
                             }
                         }
 
-                        if (slot >= 0 && g_num_boxes < MAX_BOXES) {
+                        if (slot >= 0 && g_images[slot].loaded == 1 && g_num_boxes < MAX_BOXES) {
                             if (cur_x > 20) { cur_y += line_h + 6; cur_x = 20; }
                             int img_w = g_images[slot].disp_w > 0 ? g_images[slot].disp_w : 140;
                             int img_h = g_images[slot].disp_h > 0 ? g_images[slot].disp_h : 32;
@@ -793,7 +820,7 @@ static void parse_html_to_boxes(int fetch_images) {
         if (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
             if (word_len > 0) {
                 word_buf[word_len] = '\0';
-                int ww = word_len * CHAR_W;
+                int ww = utf8_charlen(word_buf, word_len) * CHAR_W;
                 if (cur_x + ww > g_win_w - 36) {
                     cur_y += line_h;
                     cur_x = in_list ? 36 : 20;
@@ -829,7 +856,7 @@ static void parse_html_to_boxes(int fetch_images) {
 
     if (word_len > 0) {
         word_buf[word_len] = '\0';
-        int ww = word_len * CHAR_W;
+        int ww = utf8_charlen(word_buf, word_len) * CHAR_W;
         if (g_num_boxes < MAX_BOXES) {
             layout_box_t* b = &g_boxes[g_num_boxes++];
             b->type = in_header ? ITEM_HEADER : ITEM_TEXT;
@@ -879,6 +906,30 @@ static void navigate_to(const char* target_url, int add_history) {
         nlen--;
     }
     norm_url[nlen] = '\0';
+
+    // Auto-detect search query vs website address
+    if (norm_url[0] != '/' && strncmp(norm_url, "http://", 7) != 0 &&
+        strncmp(norm_url, "https://", 8) != 0 && strncmp(norm_url, "file://", 7) != 0) {
+        if (strchr(norm_url, ' ') != NULL || strchr(norm_url, '.') == NULL) {
+            char search_url[160] = "https://lite.duckduckgo.com/lite/?q=";
+            char enc[100];
+            url_encode(norm_url, enc, sizeof(enc));
+            strncat(search_url, enc, sizeof(search_url) - (int)strlen(search_url) - 1);
+            strncpy(norm_url, search_url, sizeof(norm_url) - 1);
+            norm_url[sizeof(norm_url) - 1] = '\0';
+        } else {
+            char full_url[160] = "https://";
+            strncat(full_url, norm_url, sizeof(full_url) - 9);
+            strncpy(norm_url, full_url, sizeof(norm_url) - 1);
+            norm_url[sizeof(norm_url) - 1] = '\0';
+        }
+    }
+
+    // Pure HTML mode for Google (gbv=1)
+    if (strstr(norm_url, "google.") != NULL && strstr(norm_url, "gbv=") == NULL) {
+        int has_q = (strchr(norm_url, '?') != NULL);
+        strncat(norm_url, has_q ? "&gbv=1" : "?gbv=1", sizeof(norm_url) - (int)strlen(norm_url) - 1);
+    }
 
     if (is_downloadable(norm_url)) {
         do_download(norm_url);
@@ -1030,12 +1081,6 @@ static void redraw(void) {
                         image_blit_alpha_clipped(g_fb, g_win_w, g_win_h, sx, sy,
                                                  bimg->img->pixels, bimg->img->width, bimg->img->height, bimg->img->width,
                                                  0, view_y, g_win_w, view_h);
-                    } else {
-                        if (sy >= view_y && sy + b->h <= view_bottom) {
-                            fill_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, 0xEDEDED);
-                            draw_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, 0xCBD5E1);
-                            woos_draw_text(g_fb, g_win_w, g_win_h, sx + 8, sy + (b->h - 10) / 2, "[Image]", 0x94A3B8);
-                        }
                     }
                 }
                 break;
@@ -1074,13 +1119,18 @@ static void redraw(void) {
 
     // Layer 3: Vertical Scrollbar
     if (g_doc_height > view_h) {
-        int sb_x = g_win_w - 14;
-        fill_rect(g_fb, g_win_w, g_win_h, sb_x, view_y, 14, view_h, COLOR_SCROLL_TRACK);
+        int sb_w = 16;
+        int sb_x = g_win_w - sb_w;
+        fill_rect(g_fb, g_win_w, g_win_h, sb_x, view_y, sb_w, view_h, COLOR_SCROLL_TRACK);
+        fill_rect(g_fb, g_win_w, g_win_h, sb_x, view_y, 1, view_h, 0xCBD5E1);
         int thumb_h = (view_h * view_h) / g_doc_height;
-        if (thumb_h < 20) thumb_h = 20;
+        if (thumb_h < 24) thumb_h = 24;
         int max_s = g_doc_height - view_h;
-        int thumb_y = view_y + (g_scroll_y * (view_h - thumb_h)) / (max_s > 0 ? max_s : 1);
-        fill_rect(g_fb, g_win_w, g_win_h, sb_x + 1, thumb_y, 12, thumb_h, COLOR_SCROLL_THUMB);
+        int track_avail = view_h - thumb_h;
+        int thumb_y = view_y + (g_scroll_y * track_avail) / (max_s > 0 ? max_s : 1);
+        uint32_t thumb_color = g_is_dragging_scrollbar ? 0x64748B : 0x94A3B8;
+        fill_rect(g_fb, g_win_w, g_win_h, sb_x + 2, thumb_y, sb_w - 4, thumb_h, thumb_color);
+        draw_rect(g_fb, g_win_w, g_win_h, sb_x + 2, thumb_y, sb_w - 4, thumb_h, 0x475569);
     }
 
     // Layer 4: BROWSER CHROME ON TOP: Navigation Topbar (y = 0..34)
@@ -1231,7 +1281,7 @@ static void handle_click(int x, int y) {
         g_url_focus = 0;
         if (g_focused_input >= 0) { g_inputs[g_focused_input].is_focused = 0; g_focused_input = -1; }
         if (x >= 8 && x <= 68) { navigate_to("https://www.google.com/?gbv=1", 1); return; }
-        if (x >= 72 && x <= 156) { navigate_to("https://html.duckduckgo.com/html/", 1); return; }
+        if (x >= 72 && x <= 156) { navigate_to("https://lite.duckduckgo.com/lite/", 1); return; }
         if (x >= 160 && x <= 236) { navigate_to("https://en.m.wikipedia.org", 1); return; }
         if (x >= 240 && x <= 308) { navigate_to("http://frogfind.com", 1); return; }
         if (x >= 312 && x <= 360) { navigate_to("https://wiby.me", 1); return; }
@@ -1244,17 +1294,27 @@ static void handle_click(int x, int y) {
         int view_y = HEADER_H;
         int view_h = g_win_h - HEADER_H - STATUSBAR_H;
 
-        // Vertical scrollbar click & jump
-        if (g_doc_height > view_h && x >= g_win_w - 16) {
+        // Vertical scrollbar click & drag initiation
+        if (g_doc_height > view_h && x >= g_win_w - 18) {
             int thumb_h = (view_h * view_h) / g_doc_height;
-            if (thumb_h < 20) thumb_h = 20;
+            if (thumb_h < 24) thumb_h = 24;
             int max_s = g_doc_height - view_h;
             int track_avail = view_h - thumb_h;
-            if (track_avail > 0) {
-                int click_offset = (y - view_y) - thumb_h / 2;
-                if (click_offset < 0) click_offset = 0;
-                if (click_offset > track_avail) click_offset = track_avail;
-                g_scroll_y = (click_offset * max_s) / track_avail;
+            int thumb_y = view_y + (g_scroll_y * track_avail) / (max_s > 0 ? max_s : 1);
+
+            if (y >= thumb_y && y <= thumb_y + thumb_h) {
+                // Click on thumb -> start dragging
+                g_is_dragging_scrollbar = 1;
+                g_scrollbar_drag_start_y = y;
+                g_scrollbar_drag_start_scroll = g_scroll_y;
+            } else if (y < thumb_y) {
+                // Page up
+                g_scroll_y -= (view_h - 40);
+                if (g_scroll_y < 0) g_scroll_y = 0;
+            } else {
+                // Page down
+                g_scroll_y += (view_h - 40);
+                if (g_scroll_y > max_s) g_scroll_y = max_s;
             }
             return;
         }
@@ -1295,6 +1355,23 @@ static void handle_click(int x, int y) {
 static void handle_mouse_move(int x, int y) {
     if (g_dialog.active) return;
 
+    if (g_is_dragging_scrollbar) {
+        int view_y = HEADER_H;
+        int view_h = g_win_h - HEADER_H - STATUSBAR_H;
+        int max_s = g_doc_height > view_h ? (g_doc_height - view_h) : 0;
+        int thumb_h = (view_h * view_h) / (g_doc_height > 0 ? g_doc_height : 1);
+        if (thumb_h < 24) thumb_h = 24;
+        int track_avail = view_h - thumb_h;
+        if (track_avail > 0 && max_s > 0) {
+            int dy = y - g_scrollbar_drag_start_y;
+            int new_scroll = g_scrollbar_drag_start_scroll + (dy * max_s) / track_avail;
+            if (new_scroll < 0) new_scroll = 0;
+            if (new_scroll > max_s) new_scroll = max_s;
+            g_scroll_y = new_scroll;
+        }
+        return;
+    }
+
     if (y >= HEADER_H && y < g_win_h - STATUSBAR_H) {
         int view_y = HEADER_H;
         int doc_y = y - view_y + g_scroll_y;
@@ -1313,6 +1390,11 @@ static void handle_mouse_move(int x, int y) {
     } else {
         g_hovered_link = -1;
     }
+}
+
+static void handle_mouse_up(int x, int y) {
+    (void)x; (void)y;
+    g_is_dragging_scrollbar = 0;
 }
 
 static void handle_key(int ascii, int scancode) {
@@ -1335,9 +1417,13 @@ static void handle_key(int ascii, int scancode) {
         // Backspace
         if (ascii == 8 || scancode == 0x0E) {
             if (g_cursor_pos > 0) {
-                for (int i = g_cursor_pos - 1; i < g_url_len; i++) g_url[i] = g_url[i + 1];
-                g_url_len--;
-                g_cursor_pos--;
+                int del = 1;
+                if (g_cursor_pos >= 2 && ((unsigned char)g_url[g_cursor_pos - 1] & 0xC0) == 0x80) {
+                    del = 2;
+                }
+                for (int i = g_cursor_pos - del; i + del <= g_url_len; i++) g_url[i] = g_url[i + del];
+                g_url_len -= del;
+                g_cursor_pos -= del;
             }
             return;
         }
@@ -1345,21 +1431,35 @@ static void handle_key(int ascii, int scancode) {
         // Delete
         if (scancode == 0x53) {
             if (g_cursor_pos < g_url_len) {
-                for (int i = g_cursor_pos; i < g_url_len; i++) g_url[i] = g_url[i + 1];
-                g_url_len--;
+                int del = 1;
+                if (g_cursor_pos + 1 < g_url_len && ((unsigned char)g_url[g_cursor_pos] & 0xE0) == 0xC0) {
+                    del = 2;
+                }
+                for (int i = g_cursor_pos; i + del <= g_url_len; i++) g_url[i] = g_url[i + del];
+                g_url_len -= del;
             }
             return;
         }
 
         // Left Arrow
         if (scancode == 0x4B) {
-            if (g_cursor_pos > 0) g_cursor_pos--;
+            if (g_cursor_pos > 0) {
+                g_cursor_pos--;
+                if (g_cursor_pos > 0 && ((unsigned char)g_url[g_cursor_pos] & 0xC0) == 0x80) {
+                    g_cursor_pos--;
+                }
+            }
             return;
         }
 
         // Right Arrow
         if (scancode == 0x4D) {
-            if (g_cursor_pos < g_url_len) g_cursor_pos++;
+            if (g_cursor_pos < g_url_len) {
+                g_cursor_pos++;
+                if (g_cursor_pos < g_url_len && ((unsigned char)g_url[g_cursor_pos] & 0xC0) == 0x80) {
+                    g_cursor_pos++;
+                }
+            }
             return;
         }
 
@@ -1375,12 +1475,21 @@ static void handle_key(int ascii, int scancode) {
             return;
         }
 
-        // Printable char
-        if (ascii >= 32 && ascii <= 126 && g_url_len < 158) {
+        // Printable char (ASCII or Cyrillic)
+        if (ascii >= 32 && ascii <= 126 && g_url_len + 1 < 158) {
             for (int i = g_url_len; i >= g_cursor_pos; i--) g_url[i + 1] = g_url[i];
             g_url[g_cursor_pos] = (char)ascii;
             g_url_len++;
             g_cursor_pos++;
+            return;
+        } else if (ascii >= 0x0400 && ascii <= 0x04FF && g_url_len + 2 < 158) {
+            uint8_t b1 = (uint8_t)(0xC0 | ((ascii >> 6) & 0x1F));
+            uint8_t b2 = (uint8_t)(0x80 | (ascii & 0x3F));
+            for (int i = g_url_len; i >= g_cursor_pos; i--) g_url[i + 2] = g_url[i];
+            g_url[g_cursor_pos] = (char)b1;
+            g_url[g_cursor_pos + 1] = (char)b2;
+            g_url_len += 2;
+            g_cursor_pos += 2;
             return;
         }
     } else if (g_focused_input >= 0 && g_focused_input < g_num_inputs) {
@@ -1396,8 +1505,12 @@ static void handle_key(int ascii, int scancode) {
         // Backspace
         if (ascii == 8 || scancode == 0x0E) {
             if (inp->cursor_pos > 0) {
-                for (int i = inp->cursor_pos - 1; i < vlen; i++) inp->value[i] = inp->value[i + 1];
-                inp->cursor_pos--;
+                int del = 1;
+                if (inp->cursor_pos >= 2 && ((unsigned char)inp->value[inp->cursor_pos - 1] & 0xC0) == 0x80) {
+                    del = 2;
+                }
+                for (int i = inp->cursor_pos - del; i + del <= vlen; i++) inp->value[i] = inp->value[i + del];
+                inp->cursor_pos -= del;
             }
             return;
         }
@@ -1405,20 +1518,44 @@ static void handle_key(int ascii, int scancode) {
         // Delete
         if (scancode == 0x53) {
             if (inp->cursor_pos < vlen) {
-                for (int i = inp->cursor_pos; i < vlen; i++) inp->value[i] = inp->value[i + 1];
+                int del = 1;
+                if (inp->cursor_pos + 1 < vlen && ((unsigned char)inp->value[inp->cursor_pos] & 0xE0) == 0xC0) {
+                    del = 2;
+                }
+                for (int i = inp->cursor_pos; i + del <= vlen; i++) inp->value[i] = inp->value[i + del];
             }
             return;
         }
 
         // Left / Right
-        if (scancode == 0x4B && inp->cursor_pos > 0) { inp->cursor_pos--; return; }
-        if (scancode == 0x4D && inp->cursor_pos < vlen) { inp->cursor_pos++; return; }
+        if (scancode == 0x4B && inp->cursor_pos > 0) {
+            inp->cursor_pos--;
+            if (inp->cursor_pos > 0 && ((unsigned char)inp->value[inp->cursor_pos] & 0xC0) == 0x80) {
+                inp->cursor_pos--;
+            }
+            return;
+        }
+        if (scancode == 0x4D && inp->cursor_pos < vlen) {
+            inp->cursor_pos++;
+            if (inp->cursor_pos < vlen && ((unsigned char)inp->value[inp->cursor_pos] & 0xC0) == 0x80) {
+                inp->cursor_pos++;
+            }
+            return;
+        }
 
-        // Printable char
-        if (ascii >= 32 && ascii <= 126 && vlen < 126) {
+        // Printable char (ASCII or Cyrillic)
+        if (ascii >= 32 && ascii <= 126 && vlen + 1 < 126) {
             for (int i = vlen; i >= inp->cursor_pos; i--) inp->value[i + 1] = inp->value[i];
             inp->value[inp->cursor_pos] = (char)ascii;
             inp->cursor_pos++;
+            return;
+        } else if (ascii >= 0x0400 && ascii <= 0x04FF && vlen + 2 < 126) {
+            uint8_t b1 = (uint8_t)(0xC0 | ((ascii >> 6) & 0x1F));
+            uint8_t b2 = (uint8_t)(0x80 | (ascii & 0x3F));
+            for (int i = vlen; i >= inp->cursor_pos; i--) inp->value[i + 2] = inp->value[i];
+            inp->value[inp->cursor_pos] = (char)b1;
+            inp->value[inp->cursor_pos + 1] = (char)b2;
+            inp->cursor_pos += 2;
             return;
         }
     } else {
@@ -1509,6 +1646,12 @@ void _start(void) {
             } else if (msg.type == MSG_CLICK) {
                 handle_click((int)msg.arg1, (int)msg.arg2);
                 need_redraw = 1;
+            } else if (msg.type == MSG_MOUSE_MOVE) {
+                handle_mouse_move((int)msg.arg1, (int)msg.arg2);
+                need_redraw = 1;
+            } else if (msg.type == MSG_MOUSE_UP) {
+                handle_mouse_up((int)msg.arg1, (int)msg.arg2);
+                need_redraw = 1;
             } else if (msg.type == MSG_KEY_DOWN) {
                 handle_key((int)msg.arg1, (int)msg.arg2);
                 need_redraw = 1;
@@ -1516,7 +1659,7 @@ void _start(void) {
                 int8_t dz = (int8_t)(int32_t)msg.arg3;
                 int view_h = g_win_h - HEADER_H - STATUSBAR_H;
                 int max_s = g_doc_height > view_h ? (g_doc_height - view_h) : 0;
-                g_scroll_y -= (int)dz * 36;
+                g_scroll_y -= (int)dz * 48;
                 if (g_scroll_y < 0) g_scroll_y = 0;
                 if (g_scroll_y > max_s) g_scroll_y = max_s;
                 need_redraw = 1;
