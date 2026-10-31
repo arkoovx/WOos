@@ -131,31 +131,6 @@ uint64_t schedule_interrupt(uint64_t current_rsp) {
     if (ticks_count >= 20) {
         ticks_count = 0;
         extern woos_perf_t g_perf_stats;
-        extern uint64_t g_tsc_per_ms;
-        extern uint32_t idt_mouse_irq_count(void);
-        extern uint32_t idt_keyboard_irq_count(void);
-        static uint32_t prev_mouse_irqs = 0;
-        static uint32_t prev_kb_irqs = 0;
-        uint32_t curr_mouse = idt_mouse_irq_count();
-        uint32_t curr_kb = idt_keyboard_irq_count();
-        uint32_t mouse_delta = curr_mouse - prev_mouse_irqs;
-        uint32_t kb_delta = curr_kb - prev_kb_irqs;
-        prev_mouse_irqs = curr_mouse;
-        prev_kb_irqs = curr_kb;
-        
-        if (g_tsc_per_ms > 0) {
-            uint64_t pres_ms = g_perf_stats.present_cycles / g_tsc_per_ms;
-            uint64_t blit_ms = g_perf_stats.blit_cycles / g_tsc_per_ms;
-            uint64_t draw_ms = g_perf_stats.draw_win_cycles / g_tsc_per_ms;
-            
-            serial_printf("[Perf Stats] FPS (presents): %d (Total time: %d ms), Blits: %d (Total time: %d ms), Window Draws: %d (Total time: %d ms), Mouse IRQs: %d, KB IRQs: %d, M_Recv: %d, M_DropA: %d, M_DropO: %d, M_Push: %d\n",
-                          (int)g_perf_stats.present_count, (int)pres_ms,
-                          (int)g_perf_stats.blit_count, (int)blit_ms,
-                          (int)g_perf_stats.draw_win_count, (int)draw_ms,
-                          (int)mouse_delta, (int)kb_delta,
-                          (int)g_perf_stats.mouse_recv, (int)g_perf_stats.mouse_drop_align,
-                          (int)g_perf_stats.mouse_drop_overflow, (int)g_perf_stats.mouse_push);
-        }
         g_perf_stats.present_count = 0;
         g_perf_stats.present_cycles = 0;
         g_perf_stats.blit_count = 0;
