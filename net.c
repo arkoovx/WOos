@@ -611,6 +611,100 @@ static const char* find_case_header(const char* buf, const char* name) {
     return NULL;
 }
 
+static int check_http_response_complete(const char* buf, uint32_t total_rx) {
+    if (total_rx < 4) return 0;
+    uint32_t scan_limit = (total_rx < 8192) ? total_rx : 8192;
+    uint32_t header_len = 0;
+    for (uint32_t i = 0; i + 3 < scan_limit; i++) {
+        if (buf[i] == '\r' && buf[i+1] == '\n' && buf[i+2] == '\r' && buf[i+3] == '\n') {
+            header_len = i + 4;
+            break;
+        }
+    }
+    if (header_len == 0) return 0;
+
+    int cl_found = 0;
+    uint32_t cl_val = 0;
+    for (uint32_t i = 0; i + 15 < header_len; i++) {
+        if (i == 0 || buf[i-1] == '\n') {
+            static const char cl_str[] = "content-length:";
+            int match = 1;
+            for (int k = 0; k < 15; k++) {
+                char c1 = buf[i + k];
+                char c2 = cl_str[k];
+                if (c1 >= 'A' && c1 <= 'Z') c1 += 32;
+                if (c1 != c2) { match = 0; break; }
+            }
+            if (match) {
+                uint32_t p = i + 15;
+                while (p < header_len && (buf[p] == ' ' || buf[p] == '\t')) p++;
+                while (p < header_len && (buf[p] >= '0' && buf[p] <= '9')) {
+                    cl_val = cl_val * 10 + (uint32_t)(buf[p] - '0');
+                    cl_found = 1;
+                    p++;
+                }
+                break;
+            }
+        }
+    }
+
+    if (cl_found) {
+        if (total_rx >= header_len + cl_val) {
+            return 1;
+        }
+        return 0;
+    }
+
+    int is_chunked = 0;
+    for (uint32_t i = 0; i + 18 < header_len; i++) {
+        if (i == 0 || buf[i-1] == '\n') {
+            static const char te_str[] = "transfer-encoding:";
+            int match = 1;
+            for (int k = 0; k < 18; k++) {
+                char c1 = buf[i + k];
+                char c2 = te_str[k];
+                if (c1 >= 'A' && c1 <= 'Z') c1 += 32;
+                if (c1 != c2) { match = 0; break; }
+            }
+            if (match) {
+                uint32_t p = i + 18;
+                while (p + 7 <= header_len && buf[p] != '\r' && buf[p] != '\n') {
+                    if ((buf[p] == 'c' || buf[p] == 'C') &&
+                        (buf[p+1] == 'h' || buf[p+1] == 'H') &&
+                        (buf[p+2] == 'u' || buf[p+2] == 'U') &&
+                        (buf[p+3] == 'n' || buf[p+3] == 'N') &&
+                        (buf[p+4] == 'k' || buf[p+4] == 'K') &&
+                        (buf[p+5] == 'e' || buf[p+5] == 'E') &&
+                        (buf[p+6] == 'd' || buf[p+6] == 'D')) {
+                        is_chunked = 1;
+                        break;
+                    }
+                    p++;
+                }
+                break;
+            }
+        }
+    }
+
+    if (is_chunked) {
+        if (total_rx >= header_len + 5) {
+            const char* end = buf + total_rx;
+            if (end[-1] == '\n' && end[-2] == '\r' && end[-3] == '\n' && end[-4] == '\r' && end[-5] == '0') {
+                return 1;
+            }
+            if (total_rx >= header_len + 7) {
+                if (end[-1] == '\n' && end[-2] == '\r' && end[-3] == '\n' && end[-4] == '\r' &&
+                    end[-5] == '0' && end[-6] == '\n' && end[-7] == '\r') {
+                    return 1;
+                }
+            }
+        }
+        return 0;
+    }
+
+    return 0;
+}
+
 static uint32_t http_unchunk(char* body, uint32_t body_len) {
     if (!body || body_len == 0) return 0;
     char* src = body;
@@ -807,7 +901,7 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
         return -1;
     }
 
-    char req[512];
+    char req[2048];
     req[0] = '\0';
     str_cat(req, "GET ", sizeof(req));
     str_cat(req, path, sizeof(req));
@@ -860,6 +954,9 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
             int r = br_sslio_read(&tls->sctx, out_buf + total_rx, max_len - 1 - total_rx);
             if (r > 0) {
                 total_rx += (uint32_t)r;
+                if (check_http_response_complete(out_buf, total_rx)) {
+                    break;
+                }
             } else {
                 break;
             }
@@ -892,6 +989,9 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
             if (r > 0) {
                 total_rx += (uint32_t)r;
                 t_last_rx = rdtsc();
+                if (check_http_response_complete(out_buf, total_rx)) {
+                    break;
+                }
             } else if (r == 0) {
                 break;
             } else {
@@ -989,7 +1089,7 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
 
 int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
     if (!url || !out_buf || max_len < 64) return -1;
-    char current_url[256];
+    char current_url[512];
     uint32_t u_idx = 0;
     while (url[u_idx] != '\0' && u_idx + 1 < sizeof(current_url)) {
         current_url[u_idx] = url[u_idx];
@@ -999,7 +1099,7 @@ int32_t net_http_fetch(const char* url, char* out_buf, uint32_t max_len) {
 
     int redirects = 0;
     while (redirects < 4) {
-        char next_url[256] = "";
+        char next_url[512] = "";
         int32_t res = net_http_fetch_single(current_url, out_buf, max_len, next_url, sizeof(next_url));
         if (res > 0) {
             return res; // Webpage successfully fetched!
@@ -1065,7 +1165,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
         return -1;
     }
 
-    char req[512];
+    char req[2048];
     req[0] = '\0';
     str_cat(req, "GET ", sizeof(req));
     str_cat(req, path, sizeof(req));
@@ -1172,6 +1272,18 @@ int32_t net_http_download(const char* url, const char* dest_path) {
     }
 
     // Считываем тело ответа потоком прямо в файл
+    int cl_found = 0;
+    uint32_t cl_val = 0;
+    const char* cl_pos = find_case_header(hdr_buf, "content-length:");
+    if (cl_pos) {
+        while (*cl_pos == ' ' || *cl_pos == '\t') cl_pos++;
+        while (*cl_pos >= '0' && *cl_pos <= '9') {
+            cl_val = cl_val * 10 + (uint32_t)(*cl_pos - '0');
+            cl_found = 1;
+            cl_pos++;
+        }
+    }
+
     uint8_t chunk[2048];
     uint32_t total_written = 0;
 
@@ -1193,6 +1305,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
 
         vfs_write(fd, chunk, (uint32_t)r);
         total_written += (uint32_t)r;
+        if (cl_found && total_written >= cl_val) break;
     }
 
     vfs_close(fd);

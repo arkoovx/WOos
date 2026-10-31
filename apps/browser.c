@@ -70,6 +70,7 @@ static fbtk_widget_t *g_fbtk = NULL;
 #define MAX_IMAGES 16
 #define MAX_INPUTS 16
 #define MAX_HISTORY 32
+#define MAX_URL_LEN 512
 
 typedef enum {
     ITEM_TEXT,
@@ -95,11 +96,11 @@ typedef struct {
 } layout_box_t;
 
 typedef struct {
-    char url[160];
+    char url[MAX_URL_LEN];
 } browser_link_t;
 
 typedef struct {
-    char url[160];
+    char url[MAX_URL_LEN];
     woos_image_t* img;
     int disp_w, disp_h;
     int loaded; // 0=none, 1=loaded, -1=failed
@@ -112,7 +113,7 @@ typedef struct {
     int cursor_pos;
     int scroll_x;
     int is_focused;
-    char form_action[160];
+    char form_action[MAX_URL_LEN];
     char form_method[8];
 } browser_input_t;
 
@@ -121,7 +122,7 @@ static int g_win_w = DEFAULT_WIN_W;
 static int g_win_h = DEFAULT_WIN_H;
 static uint32_t g_fb[MAX_WIN_W * MAX_WIN_H];
 
-static char g_url[160] = "/WELCOME.HTM";
+static char g_url[MAX_URL_LEN] = "/WELCOME.HTM";
 static int g_url_len = 12;
 static int g_cursor_pos = 12;
 static int g_scroll_x = 0;
@@ -151,7 +152,7 @@ static char g_status_msg[128] = "Ready. NetSurf layout engine (HTML5, CSS, Forms
 
 static woos_file_dialog_t g_dialog;
 
-static char g_history[MAX_HISTORY][160];
+static char g_history[MAX_HISTORY][MAX_URL_LEN];
 static int g_history_count = 0;
 static int g_history_idx = -1;
 
@@ -242,6 +243,38 @@ static int has_utf8_cyrillic(const char* s) {
     return 0;
 }
 
+static void html_unescape_url(const char* src, char* dst, int max_len) {
+    if (!src || !dst || max_len <= 0) return;
+    int di = 0;
+    for (int si = 0; src[si] != '\0' && di + 1 < max_len; ) {
+        if (src[si] == '&') {
+            if (strncmp(src + si, "&amp;", 5) == 0) {
+                dst[di++] = '&';
+                si += 5;
+                continue;
+            } else if (strncmp(src + si, "&#38;", 5) == 0) {
+                dst[di++] = '&';
+                si += 5;
+                continue;
+            } else if (strncmp(src + si, "&quot;", 6) == 0) {
+                dst[di++] = '"';
+                si += 6;
+                continue;
+            } else if (strncmp(src + si, "&lt;", 4) == 0) {
+                dst[di++] = '<';
+                si += 4;
+                continue;
+            } else if (strncmp(src + si, "&gt;", 4) == 0) {
+                dst[di++] = '>';
+                si += 4;
+                continue;
+            }
+        }
+        dst[di++] = src[si++];
+    }
+    dst[di] = '\0';
+}
+
 static void resolve_url(const char* base_url, const char* href, char* out_url, int max_len) {
     if (!href || href[0] == '\0') {
         strncpy(out_url, base_url, max_len);
@@ -323,7 +356,7 @@ static void submit_form(int input_idx) {
     char enc_val[256];
     url_encode(inp->value, enc_val, sizeof(enc_val));
 
-    char target_url[256];
+    char target_url[MAX_URL_LEN];
     target_url[0] = '\0';
 
     if (inp->form_action[0] == '\0') {
@@ -344,7 +377,7 @@ static void submit_form(int input_idx) {
             strncat(target_url, enc_val, sizeof(target_url) - (int)strlen(target_url) - 1);
 
             // If searching Google, request pure HTML basic view (&gbv=1)
-            if (strstr(target_url, "google.com") && !strstr(target_url, "gbv=")) {
+            if (strstr(target_url, "google.") && !strstr(target_url, "gbv=")) {
                 strncat(target_url, "&gbv=1", sizeof(target_url) - (int)strlen(target_url) - 1);
             }
         }
@@ -492,7 +525,7 @@ static duk_ret_t js_location_assign(duk_context *ctx) {
     if (duk_get_top(ctx) > 0) {
         const char *target = duk_to_string(ctx, 0);
         if (target && target[0]) {
-            char abs_url[160];
+            char abs_url[MAX_URL_LEN];
             resolve_url(g_url, target, abs_url, sizeof(abs_url));
             navigate_to(abs_url, 1);
         }
@@ -620,18 +653,69 @@ static void js_init_environment(void) {
     duk_push_object(g_js_ctx);
     duk_push_string(g_js_ctx, g_url);
     duk_put_prop_string(g_js_ctx, -2, "href");
-    int is_https = (strncmp(g_url, "https://", 8) == 0);
-    duk_push_string(g_js_ctx, is_https ? "https:" : "http:");
+
+    const char* cur = g_url;
+    int is_https = (strncmp(cur, "https://", 8) == 0);
+    int proto_len = 0;
+    if (strncmp(cur, "http://", 7) == 0) proto_len = 7;
+    else if (strncmp(cur, "https://", 8) == 0) proto_len = 8;
+    else if (strncmp(cur, "file://", 7) == 0) proto_len = 7;
+
+    char proto_str[16] = "http:";
+    if (is_https) strcpy(proto_str, "https:");
+    else if (proto_len == 7 && strncmp(cur, "file://", 7) == 0) strcpy(proto_str, "file:");
+
+    char host_str[128] = "";
+    char path_str[256] = "/";
+    char search_str[256] = "";
+    char hash_str[64] = "";
+
+    if (proto_len > 0) {
+        const char* h_start = cur + proto_len;
+        const char* p_start = strchr(h_start, '/');
+        if (p_start) {
+            int hlen = (int)(p_start - h_start);
+            if (hlen >= (int)sizeof(host_str)) hlen = sizeof(host_str) - 1;
+            strncpy(host_str, h_start, hlen);
+            host_str[hlen] = '\0';
+
+            const char* q_start = strchr(p_start, '?');
+            const char* hash_start = strchr(p_start, '#');
+
+            const char* path_end = q_start ? q_start : (hash_start ? hash_start : (p_start + strlen(p_start)));
+            int plen = (int)(path_end - p_start);
+            if (plen >= (int)sizeof(path_str)) plen = sizeof(path_str) - 1;
+            strncpy(path_str, p_start, plen);
+            path_str[plen] = '\0';
+
+            if (q_start) {
+                const char* q_end = hash_start ? hash_start : (q_start + strlen(q_start));
+                int qlen = (int)(q_end - q_start);
+                if (qlen >= (int)sizeof(search_str)) qlen = sizeof(search_str) - 1;
+                strncpy(search_str, q_start, qlen);
+                search_str[qlen] = '\0';
+            }
+            if (hash_start) {
+                strncpy(hash_str, hash_start, sizeof(hash_str) - 1);
+                hash_str[sizeof(hash_str) - 1] = '\0';
+            }
+        } else {
+            strncpy(host_str, h_start, sizeof(host_str) - 1);
+            host_str[sizeof(host_str) - 1] = '\0';
+        }
+    }
+
+    duk_push_string(g_js_ctx, proto_str);
     duk_put_prop_string(g_js_ctx, -2, "protocol");
-    duk_push_string(g_js_ctx, "");
+    duk_push_string(g_js_ctx, search_str);
     duk_put_prop_string(g_js_ctx, -2, "search");
-    duk_push_string(g_js_ctx, "");
+    duk_push_string(g_js_ctx, hash_str);
     duk_put_prop_string(g_js_ctx, -2, "hash");
-    duk_push_string(g_js_ctx, "/");
+    duk_push_string(g_js_ctx, path_str);
     duk_put_prop_string(g_js_ctx, -2, "pathname");
-    duk_push_string(g_js_ctx, "www.google.com");
+    duk_push_string(g_js_ctx, host_str);
     duk_put_prop_string(g_js_ctx, -2, "hostname");
-    duk_push_string(g_js_ctx, "www.google.com");
+    duk_push_string(g_js_ctx, host_str);
     duk_put_prop_string(g_js_ctx, -2, "host");
     duk_push_c_function(g_js_ctx, js_location_assign, 1);
     duk_put_prop_string(g_js_ctx, -2, "assign");
@@ -805,6 +889,7 @@ static void parse_html_to_boxes(int fetch_images) {
     int in_script = 0;
     int in_style = 0;
     int in_noscript = 0;
+    int in_hidden = 0;
     int in_title = 0;
     int in_link = 0;
     int cur_link_idx = -1;
@@ -816,7 +901,7 @@ static void parse_html_to_boxes(int fetch_images) {
     static char script_buf[65536];
     int script_len = 0;
 
-    char cur_form_action[160] = "";
+    char cur_form_action[MAX_URL_LEN] = "";
     char cur_form_method[8] = "GET";
 
     char tag_buf[256];
@@ -901,11 +986,11 @@ static void parse_html_to_boxes(int fetch_images) {
             if (word_len > 0) {
                 word_buf[word_len] = '\0';
                 int ww = utf8_charlen(word_buf, word_len) * CHAR_W;
-                if (cur_x + ww > g_win_w - 36) {
+                if (!in_hidden && cur_x + ww > g_win_w - 36) {
                     cur_y += line_h;
                     cur_x = in_list ? 36 : 20;
                 }
-                if (g_num_boxes < MAX_BOXES) {
+                if (!in_hidden && g_num_boxes < MAX_BOXES) {
                     layout_box_t* b = &g_boxes[g_num_boxes++];
                     b->type = in_header ? ITEM_HEADER : ITEM_TEXT;
                     b->x = cur_x;
@@ -945,6 +1030,13 @@ static void parse_html_to_boxes(int fetch_images) {
                 tag_buf[tag_len] = '\0';
 
                 int self_closing = (tag_len > 0 && tag_buf[tag_len - 1] == '/');
+                if (!self_closing && (strstr(tag_buf, "display:none") != NULL ||
+                                      strstr(tag_buf, "display: none") != NULL ||
+                                      strstr(tag_buf, "visibility:hidden") != NULL ||
+                                      strstr(tag_buf, "visibility: hidden") != NULL)) {
+                    in_hidden++;
+                }
+
                 if (!self_closing && tag_match(tag_buf, "script")) {
                     if (strstr(tag_buf, "json") != NULL || strstr(tag_buf, "template") != NULL) {
                         in_script = 0;
@@ -980,7 +1072,10 @@ static void parse_html_to_boxes(int fetch_images) {
                 }
                 else if (tag_match(tag_buf, "p") || tag_match(tag_buf, "div") ||
                          tag_match(tag_buf, "section") || tag_match(tag_buf, "article") ||
-                         tag_match(tag_buf, "/p") || tag_match(tag_buf, "/div")) {
+                         tag_match(tag_buf, "/p") || tag_match(tag_buf, "/div") ||
+                         tag_match(tag_buf, "/section") || tag_match(tag_buf, "/article") ||
+                         tag_match(tag_buf, "/span")) {
+                    if (tag_buf[0] == '/' && in_hidden > 0) in_hidden--;
                     if (cur_x > 20) { cur_y += line_h + 4; cur_x = in_list ? 36 : 20; }
                     else { cur_y += 4; }
                 }
@@ -1047,14 +1142,16 @@ static void parse_html_to_boxes(int fetch_images) {
                         hpos += 5;
                         char quote = 0;
                         if (*hpos == '"' || *hpos == '\'') quote = *hpos++;
-                        char raw_href[160];
+                        char raw_href[MAX_URL_LEN];
                         int uidx = 0;
-                        while (*hpos != '\0' && ((quote && *hpos != quote) || (!quote && *hpos != ' ' && *hpos != '>')) && uidx < 159) {
+                        while (*hpos != '\0' && ((quote && *hpos != quote) || (!quote && *hpos != ' ' && *hpos != '>')) && uidx < MAX_URL_LEN - 1) {
                             raw_href[uidx++] = *hpos++;
                         }
                         raw_href[uidx] = '\0';
+                        char unesc_href[MAX_URL_LEN];
+                        html_unescape_url(raw_href, unesc_href, sizeof(unesc_href));
                         browser_link_t* bl = &g_links[g_num_links++];
-                        resolve_url(g_url, raw_href, bl->url, sizeof(bl->url));
+                        resolve_url(g_url, unesc_href, bl->url, sizeof(bl->url));
                         in_link = 1;
                         cur_link_idx = g_num_links - 1;
                     }
@@ -1071,11 +1168,13 @@ static void parse_html_to_boxes(int fetch_images) {
                         apos += 7;
                         char quote = 0;
                         if (*apos == '"' || *apos == '\'') quote = *apos++;
+                        char raw_act[MAX_URL_LEN];
                         int fidx = 0;
-                        while (*apos != '\0' && ((quote && *apos != quote) || (!quote && *apos != ' ')) && fidx < 159) {
-                            cur_form_action[fidx++] = *apos++;
+                        while (*apos != '\0' && ((quote && *apos != quote) || (!quote && *apos != ' ' && *apos != '>')) && fidx < MAX_URL_LEN - 1) {
+                            raw_act[fidx++] = *apos++;
                         }
-                        cur_form_action[fidx] = '\0';
+                        raw_act[fidx] = '\0';
+                        html_unescape_url(raw_act, cur_form_action, sizeof(cur_form_action));
                     }
                 }
                 else if (tag_match(tag_buf, "/form")) {
@@ -1159,15 +1258,17 @@ static void parse_html_to_boxes(int fetch_images) {
                 }
                 else if (tag_match(tag_buf, "img")) {
                     const char* spos = strstr(tag_buf, "src=");
-                    if (spos) {
+                    if (spos && !in_hidden) {
                         spos += 4; char q = 0; if (*spos == '"' || *spos == '\'') q = *spos++;
-                        char raw_src[160];
+                        char raw_src[MAX_URL_LEN];
                         int sidx = 0;
-                        while (*spos != '\0' && ((q && *spos != q) || (!q && *spos != ' ')) && sidx < 159) raw_src[sidx++] = *spos++;
+                        while (*spos != '\0' && ((q && *spos != q) || (!q && *spos != ' ' && *spos != '>')) && sidx < MAX_URL_LEN - 1) raw_src[sidx++] = *spos++;
                         raw_src[sidx] = '\0';
+                        char unesc_src[MAX_URL_LEN];
+                        html_unescape_url(raw_src, unesc_src, sizeof(unesc_src));
 
-                        char abs_img_url[160];
-                        resolve_url(g_url, raw_src, abs_img_url, sizeof(abs_img_url));
+                        char abs_img_url[MAX_URL_LEN];
+                        resolve_url(g_url, unesc_src, abs_img_url, sizeof(abs_img_url));
 
                         int slot = -1;
                         for (int k = 0; k < g_num_images; k++) {
@@ -1293,11 +1394,11 @@ static void parse_html_to_boxes(int fetch_images) {
             if (word_len > 0) {
                 word_buf[word_len] = '\0';
                 int ww = utf8_charlen(word_buf, word_len) * CHAR_W;
-                if (cur_x + ww > g_win_w - 36) {
+                if (!in_hidden && cur_x + ww > g_win_w - 36) {
                     cur_y += line_h;
                     cur_x = in_list ? 36 : 20;
                 }
-                if (g_num_boxes < MAX_BOXES) {
+                if (!in_hidden && g_num_boxes < MAX_BOXES) {
                     layout_box_t* b = &g_boxes[g_num_boxes++];
                     b->type = in_header ? ITEM_HEADER : ITEM_TEXT;
                     b->x = cur_x;
@@ -1337,7 +1438,7 @@ static void parse_html_to_boxes(int fetch_images) {
     if (word_len > 0) {
         word_buf[word_len] = '\0';
         int ww = utf8_charlen(word_buf, word_len) * CHAR_W;
-        if (g_num_boxes < MAX_BOXES) {
+        if (!in_hidden && g_num_boxes < MAX_BOXES) {
             layout_box_t* b = &g_boxes[g_num_boxes++];
             b->type = in_header ? ITEM_HEADER : ITEM_TEXT;
             b->x = cur_x;
@@ -1374,11 +1475,11 @@ static void navigate_to(const char* target_url, int add_history) {
     if (!target_url || target_url[0] == '\0') return;
 
     // Normalize URL
-    char norm_url[160];
+    char norm_url[MAX_URL_LEN];
     const char* p = target_url;
     while (*p == ' ' || *p == '\t') p++;
     int nlen = 0;
-    while (p[nlen] != '\0' && nlen < 159) {
+    while (p[nlen] != '\0' && nlen < MAX_URL_LEN - 1) {
         norm_url[nlen] = p[nlen];
         nlen++;
     }
@@ -1391,8 +1492,8 @@ static void navigate_to(const char* target_url, int add_history) {
     if (norm_url[0] != '/' && strncmp(norm_url, "http://", 7) != 0 &&
         strncmp(norm_url, "https://", 8) != 0 && strncmp(norm_url, "file://", 7) != 0) {
         if (strchr(norm_url, ' ') != NULL || strchr(norm_url, '.') == NULL) {
-            char search_url[160];
-            char enc[100];
+            char search_url[MAX_URL_LEN];
+            char enc[256];
             url_encode(norm_url, enc, sizeof(enc));
             strncpy(search_url, "https://html.duckduckgo.com/html/?q=", sizeof(search_url) - 1);
             search_url[sizeof(search_url) - 1] = '\0';
@@ -1400,7 +1501,7 @@ static void navigate_to(const char* target_url, int add_history) {
             strncpy(norm_url, search_url, sizeof(norm_url) - 1);
             norm_url[sizeof(norm_url) - 1] = '\0';
         } else {
-            char full_url[160] = "https://";
+            char full_url[MAX_URL_LEN] = "https://";
             strncat(full_url, norm_url, sizeof(full_url) - 9);
             strncpy(norm_url, full_url, sizeof(norm_url) - 1);
             norm_url[sizeof(norm_url) - 1] = '\0';
@@ -1428,7 +1529,8 @@ static void navigate_to(const char* target_url, int add_history) {
     if (add_history) {
         if (g_history_idx < MAX_HISTORY - 1) {
             g_history_idx++;
-            strncpy(g_history[g_history_idx], g_url, 159);
+            strncpy(g_history[g_history_idx], g_url, sizeof(g_history[g_history_idx]) - 1);
+            g_history[g_history_idx][sizeof(g_history[g_history_idx]) - 1] = '\0';
             g_history_count = g_history_idx + 1;
         }
     }
@@ -2017,13 +2119,13 @@ static void handle_key(int ascii, int scancode) {
         }
 
         // Printable char (ASCII or Cyrillic)
-        if (ascii >= 32 && ascii <= 126 && g_url_len + 1 < 158) {
+        if (ascii >= 32 && ascii <= 126 && g_url_len + 1 < MAX_URL_LEN - 2) {
             for (int i = g_url_len; i >= g_cursor_pos; i--) g_url[i + 1] = g_url[i];
             g_url[g_cursor_pos] = (char)ascii;
             g_url_len++;
             g_cursor_pos++;
             return;
-        } else if (ascii >= 0x0400 && ascii <= 0x04FF && g_url_len + 2 < 158) {
+        } else if (ascii >= 0x0400 && ascii <= 0x04FF && g_url_len + 2 < MAX_URL_LEN - 2) {
             uint8_t b1 = (uint8_t)(0xC0 | ((ascii >> 6) & 0x1F));
             uint8_t b2 = (uint8_t)(0x80 | (ascii & 0x3F));
             for (int i = g_url_len; i >= g_cursor_pos; i--) g_url[i + 2] = g_url[i];

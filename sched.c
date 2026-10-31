@@ -268,6 +268,7 @@ void thread_exit(int status) {
     extern int32_t woos_graphics_destroy_thread_windows(uint32_t thread_id);
     woos_graphics_destroy_thread_windows(g_threads[g_current_thread_idx].id);
     g_threads[g_current_thread_idx].state = THREAD_TERMINATED;
+    g_threads[g_current_thread_idx].app_path[0] = '\0';
     sched_unblock_all();
     thread_yield();
     while (1) {
@@ -472,8 +473,15 @@ int32_t woos_system_spawn(const char* path) {
         if (g_threads[i].state != THREAD_TERMINATED && app_paths_match(g_threads[i].app_path, path)) {
             __asm__ __volatile__("sti");
             extern int32_t woos_graphics_bring_thread_to_front(uint32_t thread_id);
-            woos_graphics_bring_thread_to_front(g_threads[i].id);
-            return 0; // Successfully focused existing instance
+            if (woos_graphics_bring_thread_to_front(g_threads[i].id) == 0) {
+                return 0; // Successfully focused existing instance
+            }
+            // Window no longer exists: thread was closed or orphaned, clean it up!
+            __asm__ __volatile__("cli");
+            g_threads[i].state = THREAD_TERMINATED;
+            g_threads[i].app_path[0] = '\0';
+            __asm__ __volatile__("sti");
+            break;
         }
     }
 
