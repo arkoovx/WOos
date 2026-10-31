@@ -164,13 +164,18 @@ int setjmp(jmp_buf env) {
     return 0;
 }
 
+__attribute__((import_module("env"), import_name("woos_debug_print")))
+extern int woos_debug_print(int a, int b, int c, int d, int e);
+
 void longjmp(jmp_buf env, int val) {
     (void)env;
     (void)val;
+    woos_debug_print(0xDEAD, 0x1049, 0, 0, 0);
     __builtin_trap();
 }
 
 void abort(void) {
+    woos_debug_print(0xDEAD, 0xAB04, 0, 0, 0);
     __builtin_trap();
 }
 

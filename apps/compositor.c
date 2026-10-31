@@ -1555,8 +1555,11 @@ void _start(void) {
 
             // 6. Mouse Wheel Scroll
             else if (ev.type == 7) {
+                g_cursor_x = ev.x;
+                g_cursor_y = ev.y;
                 int8_t dz = (int8_t)ev.buttons;
                 int win_count = woos_graphics_get_window_count();
+                int handled = 0;
                 for (int i = win_count - 1; i >= 0; i--) {
                     woos_window_info_t win;
                     if (woos_graphics_get_window_info(i, &win) == 0 && win.active) {
@@ -1566,8 +1569,15 @@ void _start(void) {
                             int client_x = g_cursor_x - win.x;
                             int client_y = g_cursor_y - win.y;
                             woos_ipc_send(win.thread_id, MSG_SCROLL, client_x, client_y, (uint32_t)(int32_t)dz, 0, 0);
+                            handled = 1;
                             break;
                         }
+                    }
+                }
+                if (!handled) {
+                    int foc_tid = woos_graphics_get_focused_tid();
+                    if (foc_tid > 0) {
+                        woos_ipc_send(foc_tid, MSG_SCROLL, 0, 0, (uint32_t)(int32_t)dz, 0, 0);
                     }
                 }
             }

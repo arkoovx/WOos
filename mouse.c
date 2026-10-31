@@ -267,12 +267,12 @@ static void handle_mouse_packet(const uint8_t packet[MOUSE_MAX_PACKET_SIZE], uin
 
     // Обработка колеса прокрутки (4-й байт пакета Intellimouse)
     if (packet_size >= 4u) {
-        int8_t raw_z = (int8_t)packet[3];
+        uint8_t low_z = (uint8_t)(packet[3] & 0x0Fu);
         int8_t dz = 0;
-        if ((raw_z & 0x08) != 0) {
-            dz = (int8_t)(raw_z | 0xF0); // Отрицательное смещение (скролл вниз)
+        if ((low_z & 0x08u) != 0) {
+            dz = (int8_t)(low_z | 0xF0u); // Отрицательное смещение (скролл вниз)
         } else {
-            dz = (int8_t)(raw_z & 0x0F); // Положительное смещение (скролл вверх)
+            dz = (int8_t)low_z; // Положительное смещение (скролл вверх)
         }
         if (dz != 0) {
             input_event_t wheel_event = {INPUT_EVENT_MOUSE_WHEEL, g_mouse.x, g_mouse.y, (uint8_t)dz};

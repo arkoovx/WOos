@@ -164,21 +164,23 @@ def main():
         idat = zlib.compress(bytes(raw_lines))
         return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat) + chunk(b'IEND', b'')
 
-    def create_logo_png(width=128, height=128):
+    def create_logo_png(width=160, height=48):
         rgb = bytearray(width * height * 3)
         for y in range(height):
             for x in range(width):
-                cx = (x - width // 2)
-                cy = (y - height // 2)
-                d = (cx*cx + cy*cy) ** 0.5
                 off = (y * width + x) * 3
-                if d < width * 0.45:
-                    light = max(0.0, min(1.0, 1.0 - (cx*0.7 + cy*0.7 + d) / (width * 0.8)))
-                    r = int(20 + 100 * light)
-                    g = int(120 + 130 * light)
-                    b = int(200 + 55 * light)
-                else:
-                    r, g, b = 30, 39, 46
+                factor = x / float(width)
+                r = int(30 * (1 - factor) + 44 * factor)
+                g = int(39 * (1 - factor) + 58 * factor)
+                b = int(46 * (1 - factor) + 71 * factor)
+                cx = x - 24
+                cy = y - 24
+                d = (cx*cx + cy*cy) ** 0.5
+                if d < 14:
+                    light = max(0.0, min(1.0, 1.0 - (cx*0.6 + cy*0.6 + d) / 18.0))
+                    r = int(0 + 100 * light)
+                    g = int(168 + 87 * light)
+                    b = int(255 * (0.6 + 0.4 * light))
                 rgb[off] = r
                 rgb[off + 1] = g
                 rgb[off + 2] = b
@@ -215,9 +217,9 @@ def main():
 <p>Welcome to <b>WoOS Navigator</b> powered by NetSurf layout engine with native <b>HTTPS (TLS 1.2)</b>, inline images, and interactive web search!</p>
 <p>Быстрый веб-браузер с поддержкой протокола <b>HTTPS</b>, русской раскладки клавиатуры (Shift+Alt / Alt+Shift) и декодирования HTML-сущностей.</p>
 <hr>
-<h3>Search the Web (Wiby)</h3>
-<form action="https://wiby.me/" method="GET">
-<input type="text" name="q" placeholder="Search the web (Wiby)..." value="">
+<h3>Search the Web (DuckDuckGo HTML)</h3>
+<form action="https://html.duckduckgo.com/html/" method="GET">
+<input type="text" name="q" placeholder="Search the web (DuckDuckGo)..." value="">
 <input type="submit" value="Search">
 </form>
 <br>
@@ -229,11 +231,12 @@ def main():
 <hr>
 <h3>Popular Web Portals:</h3>
 <p>
+<a href="https://html.duckduckgo.com/html/">DuckDuckGo Search (HTML Version)</a><br>
 <a href="https://ru.m.wikipedia.org">Википедия (Русская версия)</a><br>
 <a href="https://en.m.wikipedia.org">Wikipedia - The Free Encyclopedia (Mobile HTTPS)</a><br>
 <a href="https://wiby.me">Wiby Web Search (Lightweight Engine)</a><br>
+<a href="https://www.google.com/?gbv=1">Google Search (HTML gbv=1)</a><br>
 <a href="https://example.com">Example Domain (Cloudflare HTTPS)</a><br>
-<a href="https://www.google.com/?gbv=1">Google Search (Warning: Google requires JS on modern searches)</a><br>
 </p>
 <hr>
 <h3>Local Images &amp; Downloads:</h3>

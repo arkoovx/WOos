@@ -327,8 +327,8 @@ static void submit_form(int input_idx) {
     target_url[0] = '\0';
 
     if (inp->form_action[0] == '\0') {
-        // Fallback: search on DuckDuckGo Lite
-        strcpy(target_url, "https://lite.duckduckgo.com/lite/?q=");
+        // Fallback: search on DuckDuckGo HTML
+        strcpy(target_url, "https://html.duckduckgo.com/html/?q=");
         strncat(target_url, enc_val, sizeof(target_url) - (int)strlen(target_url) - 1);
     } else {
         resolve_url(g_url, inp->form_action, target_url, sizeof(target_url));
@@ -400,9 +400,9 @@ static void load_image_for_slot(int slot, const char* img_url) {
         if (strncmp(img_url, "file://", 7) == 0) fpath = img_url + 7;
         bimg->img = image_load_file(fpath);
     } else {
-        // Fetch primary logo (slot 0) over network, skip SVGs
+        // Fetch up to 8 images over network, skip SVGs
         int is_svg = (strstr(img_url, ".svg") != NULL || strstr(img_url, ".SVG") != NULL);
-        if (slot == 0 && !is_svg) {
+        if (slot < 8 && !is_svg) {
             int32_t bytes = woos_net_fetch(img_url, (char*)g_img_fetch_buf, sizeof(g_img_fetch_buf));
             if (bytes > 0) {
                 bimg->img = image_load_from_memory(g_img_fetch_buf, (size_t)bytes);
@@ -684,8 +684,34 @@ static void js_init_environment(void) {
     duk_pop(g_js_ctx);
 }
 
+static int is_safe_script(const char* code) {
+    if (!code || code[0] == '\0') return 0;
+    size_t len = strlen(code);
+    if (len > 2048) return 0; // Skip large scripts/bundles (>2KB)
+
+    // Check for ES6+ / unsupported features that trigger longjmp/trap in Duktape
+    static const char* es6_words[] = {
+        "let ", "\nlet ", ";let ", "let\t", "{let ", "(let ",
+        "const ", "\nconst ", ";const ", "const\t", "{const ", "(const ",
+        "class ", "\nclass ", ";class ", "class{",
+        "=>",
+        "async ", "\nasync ",
+        "await ",
+        "import ", "\nimport ",
+        "export ", "\nexport ",
+        "..."
+    };
+    for (size_t i = 0; i < sizeof(es6_words) / sizeof(es6_words[0]); i++) {
+        if (strstr(code, es6_words[i]) != NULL) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static void js_eval_script(const char* code) {
     if (!g_js_ctx || !code || code[0] == '\0') return;
+    if (!is_safe_script(code)) return;
     duk_push_string(g_js_ctx, code);
     if (duk_peval(g_js_ctx) != 0) {
         // Safe evaluation
@@ -811,39 +837,27 @@ static void parse_html_to_boxes(int fetch_images) {
                 in_tag = 0;
                 tag_buf[tag_len] = '\0';
 
-                // Tag handling
+                // Tag handling inside <noscript>: ignore everything until </noscript>
+                if (in_noscript) {
+                    if (tag_match(tag_buf, "/noscript")) {
+                        in_noscript = 0;
+                    }
+                    p++;
+                    continue;
+                }
+
                 if (tag_match(tag_buf, "script")) {
                     in_script = 1;
                     script_len = 0;
-                    const char* spos = strstr(tag_buf, "src=");
-                    if (spos) {
-                        spos += 4;
-                        char q = 0;
-                        if (*spos == '"' || *spos == '\'') q = *spos++;
-                        char raw_src[160];
-                        int sidx = 0;
-                        while (*spos != '\0' && ((q && *spos != q) || (!q && *spos != ' ' && *spos != '>')) && sidx < 159) {
-                            raw_src[sidx++] = *spos++;
-                        }
-                        raw_src[sidx] = '\0';
-                        char abs_src[160];
-                        resolve_url(g_url, raw_src, abs_src, sizeof(abs_src));
-                        char* ext_code = (char*)malloc(32768);
-                        if (ext_code) {
-                            int32_t bytes = woos_net_fetch(abs_src, ext_code, 32767);
-                            if (bytes > 0) {
-                                ext_code[bytes] = '\0';
-                                js_eval_script(ext_code);
-                            }
-                            free(ext_code);
-                        }
-                    }
+                    // Do not fetch remote external scripts to prevent network stalls and crashes
                 }
                 else if (tag_match(tag_buf, "/script")) {
                     in_script = 0;
                     if (script_len > 0) {
                         script_buf[script_len] = '\0';
-                        js_eval_script(script_buf);
+                        if (is_safe_script(script_buf)) {
+                            js_eval_script(script_buf);
+                        }
                         script_len = 0;
                     }
                 }
@@ -864,6 +878,7 @@ static void parse_html_to_boxes(int fetch_images) {
                 }
                 else if (tag_buf[0] == 'h' && tag_buf[1] >= '1' && tag_buf[1] <= '6') {
                     if (cur_x > 20) { cur_y += line_h + 8; cur_x = 20; }
+                    else { cur_y += 8; }
                     in_header = 1;
                     line_h = 24;
                 }
@@ -877,6 +892,7 @@ static void parse_html_to_boxes(int fetch_images) {
                          tag_match(tag_buf, "section") || tag_match(tag_buf, "article") ||
                          tag_match(tag_buf, "/p") || tag_match(tag_buf, "/div")) {
                     if (cur_x > 20) { cur_y += line_h + 4; cur_x = in_list ? 36 : 20; }
+                    else { cur_y += 4; }
                 }
                 else if (tag_match(tag_buf, "br")) {
                     cur_y += line_h;
@@ -959,6 +975,7 @@ static void parse_html_to_boxes(int fetch_images) {
                 }
                 else if (tag_match(tag_buf, "form")) {
                     if (cur_x > 20) { cur_y += line_h + 6; cur_x = 20; }
+                    else { cur_y += 6; }
                     const char* apos = strstr(tag_buf, "action=");
                     if (apos) {
                         apos += 7;
@@ -972,7 +989,8 @@ static void parse_html_to_boxes(int fetch_images) {
                     }
                 }
                 else if (tag_match(tag_buf, "/form")) {
-                    if (cur_x > 20) { cur_y += line_h + 6; cur_x = 20; }
+                    if (cur_x > 20) { cur_y += line_h + 8; cur_x = 20; }
+                    else { cur_y += 8; }
                 }
                 else if (tag_match(tag_buf, "input")) {
                     char type_str[24] = "text";
@@ -1005,7 +1023,7 @@ static void parse_html_to_boxes(int fetch_images) {
                         ph_str[pi] = '\0';
                     }
 
-                    if (strcmp(type_str, "submit") == 0 || strcmp(type_str, "button") == 0) {
+                    if (strcmp(type_str, "submit") == 0 || strcmp(type_str, "button") == 0 || strcmp(type_str, "image") == 0) {
                         int bw = 80;
                         if (cur_x + bw > g_win_w - 36) { cur_y += 32; cur_x = 20; }
                         if (g_num_boxes < MAX_BOXES) {
@@ -1015,11 +1033,11 @@ static void parse_html_to_boxes(int fetch_images) {
                             b->y = cur_y;
                             b->w = bw;
                             b->h = 24;
-                            strncpy(b->text, val_str[0] ? val_str : "Search", sizeof(b->text) - 1);
+                            strncpy(b->text, val_str[0] ? val_str : (strcmp(type_str, "image") == 0 ? "Search" : "Submit"), sizeof(b->text) - 1);
                             b->elem_idx = g_num_inputs > 0 ? (g_num_inputs - 1) : -1;
                             b->link_idx = -1;
                             cur_x += bw + 10;
-                            if (cur_y + 26 > g_doc_height) g_doc_height = cur_y + 26;
+                            if (cur_y + 28 > g_doc_height) g_doc_height = cur_y + 28;
                         }
                     } else if (strcmp(type_str, "hidden") != 0) {
                         int iw = 220;
@@ -1045,7 +1063,7 @@ static void parse_html_to_boxes(int fetch_images) {
                             b->elem_idx = inp_idx;
                             b->link_idx = -1;
                             cur_x += iw + 10;
-                            if (cur_y + 26 > g_doc_height) g_doc_height = cur_y + 26;
+                            if (cur_y + 28 > g_doc_height) g_doc_height = cur_y + 28;
                         }
                     }
                 }
@@ -1229,8 +1247,16 @@ static void parse_html_to_boxes(int fetch_images) {
                 word_len = 0;
             }
         } else {
-            if (word_len + 1 < 127) {
-                word_buf[word_len++] = *p;
+            int clen = 1;
+            unsigned char uc = (unsigned char)*p;
+            if (uc >= 0xC0 && uc <= 0xDF) clen = 2;
+            else if (uc >= 0xE0 && uc <= 0xEF) clen = 3;
+            else if (uc >= 0xF0 && uc <= 0xF7) clen = 4;
+            if (word_len + clen < 127) {
+                for (int k = 0; k < clen && *p; k++) {
+                    word_buf[word_len++] = *p;
+                    if (k + 1 < clen) p++;
+                }
             }
         }
         p++;
@@ -1296,11 +1322,7 @@ static void navigate_to(const char* target_url, int add_history) {
             char search_url[160];
             char enc[100];
             url_encode(norm_url, enc, sizeof(enc));
-            if (has_utf8_cyrillic(norm_url)) {
-                strncpy(search_url, "https://ru.m.wikipedia.org/w/index.php?search=", sizeof(search_url) - 1);
-            } else {
-                strncpy(search_url, "https://wiby.me/?q=", sizeof(search_url) - 1);
-            }
+            strncpy(search_url, "https://html.duckduckgo.com/html/?q=", sizeof(search_url) - 1);
             search_url[sizeof(search_url) - 1] = '\0';
             strncat(search_url, enc, sizeof(search_url) - (int)strlen(search_url) - 1);
             strncpy(norm_url, search_url, sizeof(norm_url) - 1);
@@ -1486,7 +1508,7 @@ static void redraw(void) {
                         woos_draw_text(g_fb, g_win_w, g_win_h, sx + 6, sy + 5, show_txt, txt_col);
 
                         if (inp->is_focused) {
-                            int cx = sx + 6 + inp->cursor_pos * CHAR_W;
+                            int cx = sx + 6 + utf8_charlen(inp->value, inp->cursor_pos) * CHAR_W;
                             if (cx >= sx + 4 && cx < sx + b->w - 4) {
                                 fill_rect(g_fb, g_win_w, g_win_h, cx, sy + 4, 2, b->h - 8, 0x111111);
                             }
@@ -1539,21 +1561,47 @@ static void redraw(void) {
 
     // Text in Address Bar
     int text_avail = (addr_w - 12) / CHAR_W;
-    if (g_cursor_pos < g_scroll_x) g_scroll_x = g_cursor_pos;
-    if (g_cursor_pos > g_scroll_x + text_avail) g_scroll_x = g_cursor_pos - text_avail;
+    int cursor_char = utf8_charlen(g_url, g_cursor_pos);
+    if (cursor_char < g_scroll_x) g_scroll_x = cursor_char;
+    if (cursor_char > g_scroll_x + text_avail) g_scroll_x = cursor_char - text_avail;
     if (g_scroll_x < 0) g_scroll_x = 0;
 
+    // Skip g_scroll_x UTF-8 characters in g_url
+    int byte_start = 0;
+    int c_count = 0;
+    while (byte_start < g_url_len && c_count < g_scroll_x) {
+        unsigned char c = (unsigned char)g_url[byte_start];
+        if (c < 0x80) byte_start += 1;
+        else if ((c & 0xE0) == 0xC0) byte_start += 2;
+        else if ((c & 0xF0) == 0xE0) byte_start += 3;
+        else if ((c & 0xF8) == 0xF0) byte_start += 4;
+        else byte_start += 1;
+        c_count++;
+    }
+
+    // Copy up to text_avail UTF-8 characters
     char disp_url[160];
     int di = 0;
-    for (int i = g_scroll_x; i < g_url_len && di < text_avail && di < 159; i++) {
-        disp_url[di++] = g_url[i];
+    int byte_curr = byte_start;
+    c_count = 0;
+    while (byte_curr < g_url_len && c_count < text_avail && di + 4 < 159) {
+        unsigned char c = (unsigned char)g_url[byte_curr];
+        int clen = 1;
+        if (c < 0x80) clen = 1;
+        else if ((c & 0xE0) == 0xC0) clen = 2;
+        else if ((c & 0xF0) == 0xE0) clen = 3;
+        else if ((c & 0xF8) == 0xF0) clen = 4;
+        for (int k = 0; k < clen && byte_curr < g_url_len; k++) {
+            disp_url[di++] = g_url[byte_curr++];
+        }
+        c_count++;
     }
     disp_url[di] = '\0';
     woos_draw_text(g_fb, g_win_w, g_win_h, addr_x + 6, 10, disp_url, COLOR_ADDR_TEXT);
 
     // Cursor in Address Bar
     if (g_url_focus) {
-        int cx = addr_x + 6 + (g_cursor_pos - g_scroll_x) * CHAR_W;
+        int cx = addr_x + 6 + (cursor_char - g_scroll_x) * CHAR_W;
         if (cx >= addr_x + 4 && cx < addr_x + addr_w - 4) {
             fill_rect(g_fb, g_win_w, g_win_h, cx, 8, 2, 18, 0x111111);
         }
@@ -1569,11 +1617,12 @@ static void redraw(void) {
     fill_rect(g_fb, g_win_w, g_win_h, 0, TOPBAR_H, g_win_w, BOOKMARKS_H, COLOR_BOOKMARK_BG);
     draw_rect(g_fb, g_win_w, g_win_h, 0, TOPBAR_H + BOOKMARKS_H - 1, g_win_w, 1, 0x353B48);
 
-    draw_btn(8, TOPBAR_H + 3, 60, 20, "Google", 0, 0x2F3542);
-    draw_btn(72, TOPBAR_H + 3, 104, 20, "Wikipedia RU", 0, 0x2F3542);
-    draw_btn(180, TOPBAR_H + 3, 104, 20, "Wikipedia EN", 0, 0x2F3542);
-    draw_btn(288, TOPBAR_H + 3, 96, 20, "Wiby Search", 0, 0x2F3542);
-    draw_btn(388, TOPBAR_H + 3, 64, 20, "Welcome", 0, 0x2F3542);
+    draw_btn(8, TOPBAR_H + 3, 56, 20, "Google", 0, 0x2F3542);
+    draw_btn(68, TOPBAR_H + 3, 86, 20, "DuckDuckGo", 0, 0x2F3542);
+    draw_btn(158, TOPBAR_H + 3, 100, 20, "Wikipedia RU", 0, 0x2F3542);
+    draw_btn(262, TOPBAR_H + 3, 100, 20, "Wikipedia EN", 0, 0x2F3542);
+    draw_btn(366, TOPBAR_H + 3, 76, 20, "Wiby Search", 0, 0x2F3542);
+    draw_btn(446, TOPBAR_H + 3, 64, 20, "Welcome", 0, 0x2F3542);
 
     // Layer 6: BROWSER CHROME ON TOP: Status Bar (y = win_h - STATUSBAR_H .. win_h)
     int sb_y = g_win_h - STATUSBAR_H;
@@ -1639,10 +1688,21 @@ static void handle_click(int x, int y) {
         if (x >= addr_x && x <= addr_x + addr_w && y >= 5 && y <= 29) {
             g_url_focus = 1;
             if (g_focused_input >= 0) { g_inputs[g_focused_input].is_focused = 0; g_focused_input = -1; }
-            int col = (x - (addr_x + 6) + CHAR_W / 2) / CHAR_W;
-            g_cursor_pos = g_scroll_x + col;
-            if (g_cursor_pos < 0) g_cursor_pos = 0;
-            if (g_cursor_pos > g_url_len) g_cursor_pos = g_url_len;
+            int clicked_col = (x - (addr_x + 6) + CHAR_W / 2) / CHAR_W;
+            int target_char = g_scroll_x + clicked_col;
+            if (target_char < 0) target_char = 0;
+            int bi = 0;
+            int ci = 0;
+            while (g_url[bi] && ci < target_char) {
+                unsigned char c = (unsigned char)g_url[bi];
+                if (c < 0x80) bi += 1;
+                else if ((c & 0xE0) == 0xC0) bi += 2;
+                else if ((c & 0xF0) == 0xE0) bi += 3;
+                else if ((c & 0xF8) == 0xF0) bi += 4;
+                else bi += 1;
+                ci++;
+            }
+            g_cursor_pos = bi;
             return;
         }
 
@@ -1667,11 +1727,12 @@ static void handle_click(int x, int y) {
     if (y >= TOPBAR_H && y < HEADER_H) {
         g_url_focus = 0;
         if (g_focused_input >= 0) { g_inputs[g_focused_input].is_focused = 0; g_focused_input = -1; }
-        if (x >= 8 && x <= 68) { navigate_to("https://www.google.com/?gbv=1", 1); return; }
-        if (x >= 72 && x <= 176) { navigate_to("https://ru.m.wikipedia.org", 1); return; }
-        if (x >= 180 && x <= 284) { navigate_to("https://en.m.wikipedia.org", 1); return; }
-        if (x >= 288 && x <= 384) { navigate_to("https://wiby.me", 1); return; }
-        if (x >= 388 && x <= 452) { navigate_to("/WELCOME.HTM", 1); return; }
+        if (x >= 8 && x <= 64) { navigate_to("https://www.google.com/?gbv=1", 1); return; }
+        if (x >= 68 && x <= 154) { navigate_to("https://html.duckduckgo.com/html/", 1); return; }
+        if (x >= 158 && x <= 258) { navigate_to("https://ru.m.wikipedia.org", 1); return; }
+        if (x >= 262 && x <= 362) { navigate_to("https://en.m.wikipedia.org", 1); return; }
+        if (x >= 366 && x <= 442) { navigate_to("https://wiby.me", 1); return; }
+        if (x >= 446 && x <= 510) { navigate_to("/WELCOME.HTM", 1); return; }
     }
 
     // 3. Content Viewport
@@ -1681,7 +1742,7 @@ static void handle_click(int x, int y) {
         int view_h = g_win_h - HEADER_H - STATUSBAR_H;
 
         // Vertical scrollbar click & drag initiation
-        if (g_doc_height > view_h && x >= g_win_w - 18) {
+        if (g_doc_height > view_h && x >= g_win_w - 20) {
             int thumb_h = (view_h * view_h) / g_doc_height;
             if (thumb_h < 24) thumb_h = 24;
             int max_s = g_doc_height - view_h;
@@ -1693,14 +1754,17 @@ static void handle_click(int x, int y) {
                 g_is_dragging_scrollbar = 1;
                 g_scrollbar_drag_start_y = y;
                 g_scrollbar_drag_start_scroll = g_scroll_y;
-            } else if (y < thumb_y) {
-                // Page up
-                g_scroll_y -= (view_h - 40);
-                if (g_scroll_y < 0) g_scroll_y = 0;
             } else {
-                // Page down
-                g_scroll_y += (view_h - 40);
-                if (g_scroll_y > max_s) g_scroll_y = max_s;
+                // Click on track -> jump immediately to click position and start dragging
+                if (track_avail > 0) {
+                    int click_off = y - view_y - thumb_h / 2;
+                    if (click_off < 0) click_off = 0;
+                    if (click_off > track_avail) click_off = track_avail;
+                    g_scroll_y = (click_off * max_s) / track_avail;
+                }
+                g_is_dragging_scrollbar = 1;
+                g_scrollbar_drag_start_y = y;
+                g_scrollbar_drag_start_scroll = g_scroll_y;
             }
             return;
         }
@@ -1710,11 +1774,13 @@ static void handle_click(int x, int y) {
 
         // Check if clicked an input box
         int hit_input = -1;
+        int hit_box_x = 0;
         for (int i = 0; i < g_num_boxes; i++) {
             layout_box_t* b = &g_boxes[i];
             if (doc_x >= b->x && doc_x <= b->x + b->w && doc_y >= b->y && doc_y <= b->y + b->h) {
                 if (b->type == ITEM_INPUT && b->elem_idx >= 0) {
                     hit_input = b->elem_idx;
+                    hit_box_x = b->x;
                     break;
                 } else if (b->type == ITEM_BUTTON && b->elem_idx >= 0) {
                     submit_form(b->elem_idx);
@@ -1733,7 +1799,24 @@ static void handle_click(int x, int y) {
         if (g_focused_input >= 0) {
             browser_input_t* inp = &g_inputs[g_focused_input];
             inp->is_focused = 1;
-            inp->cursor_pos = (int)strlen(inp->value);
+            int rel_x = doc_x - (hit_box_x + 6);
+            if (rel_x <= 0) {
+                inp->cursor_pos = 0;
+            } else {
+                int target_char = (rel_x + CHAR_W / 2) / CHAR_W;
+                int bi = 0;
+                int ci = 0;
+                while (inp->value[bi] && ci < target_char) {
+                    unsigned char c = (unsigned char)inp->value[bi];
+                    if (c < 0x80) bi += 1;
+                    else if ((c & 0xE0) == 0xC0) bi += 2;
+                    else if ((c & 0xF0) == 0xE0) bi += 3;
+                    else if ((c & 0xF8) == 0xF0) bi += 4;
+                    else bi += 1;
+                    ci++;
+                }
+                inp->cursor_pos = bi;
+            }
         }
     }
 }
@@ -1892,8 +1975,8 @@ static void handle_key(int ascii, int scancode) {
         if (ascii == 8 || scancode == 0x0E) {
             if (inp->cursor_pos > 0) {
                 int del = 1;
-                if (inp->cursor_pos >= 2 && ((unsigned char)inp->value[inp->cursor_pos - 1] & 0xC0) == 0x80) {
-                    del = 2;
+                while (inp->cursor_pos - del > 0 && ((unsigned char)inp->value[inp->cursor_pos - del] & 0xC0) == 0x80) {
+                    del++;
                 }
                 for (int i = inp->cursor_pos - del; i + del <= vlen; i++) inp->value[i] = inp->value[i + del];
                 inp->cursor_pos -= del;
@@ -1905,8 +1988,8 @@ static void handle_key(int ascii, int scancode) {
         if (scancode == 0x53) {
             if (inp->cursor_pos < vlen) {
                 int del = 1;
-                if (inp->cursor_pos + 1 < vlen && ((unsigned char)inp->value[inp->cursor_pos] & 0xE0) == 0xC0) {
-                    del = 2;
+                while (inp->cursor_pos + del < vlen && ((unsigned char)inp->value[inp->cursor_pos + del] & 0xC0) == 0x80) {
+                    del++;
                 }
                 for (int i = inp->cursor_pos; i + del <= vlen; i++) inp->value[i] = inp->value[i + del];
             }
@@ -1916,16 +1999,28 @@ static void handle_key(int ascii, int scancode) {
         // Left / Right
         if (scancode == 0x4B && inp->cursor_pos > 0) {
             inp->cursor_pos--;
-            if (inp->cursor_pos > 0 && ((unsigned char)inp->value[inp->cursor_pos] & 0xC0) == 0x80) {
+            while (inp->cursor_pos > 0 && ((unsigned char)inp->value[inp->cursor_pos] & 0xC0) == 0x80) {
                 inp->cursor_pos--;
             }
             return;
         }
         if (scancode == 0x4D && inp->cursor_pos < vlen) {
             inp->cursor_pos++;
-            if (inp->cursor_pos < vlen && ((unsigned char)inp->value[inp->cursor_pos] & 0xC0) == 0x80) {
+            while (inp->cursor_pos < vlen && ((unsigned char)inp->value[inp->cursor_pos] & 0xC0) == 0x80) {
                 inp->cursor_pos++;
             }
+            return;
+        }
+
+        // Home
+        if (scancode == 0x47) {
+            inp->cursor_pos = 0;
+            return;
+        }
+
+        // End
+        if (scancode == 0x4F) {
+            inp->cursor_pos = vlen;
             return;
         }
 
