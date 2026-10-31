@@ -458,6 +458,7 @@ static void parse_html_to_boxes(int fetch_images) {
                             nb->length = word_len;
                             nb->width = ww;
                             nb->height = line_h;
+                            nb->colour = in_link ? COLOR_LINK : (in_header ? COLOR_TEXT_HEADER : COLOR_TEXT_NORMAL);
                             nb->background_colour = in_code ? COLOR_CODE_BG : NS_TRANSPARENT;
                             box_add_child(g_doc_root, nb);
                         }
@@ -777,6 +778,7 @@ static void parse_html_to_boxes(int fetch_images) {
                             nb->length = word_len;
                             nb->width = ww;
                             nb->height = line_h;
+                            nb->colour = in_link ? COLOR_LINK : (in_header ? COLOR_TEXT_HEADER : COLOR_TEXT_NORMAL);
                             nb->background_colour = in_code ? COLOR_CODE_BG : NS_TRANSPARENT;
                             box_add_child(g_doc_root, nb);
                         }
@@ -1019,15 +1021,18 @@ static void redraw(void) {
         switch (b->type) {
             case ITEM_TEXT:
             case ITEM_HEADER: {
-                if (b->bg_color != 0) {
-                    fill_rect(g_fb, g_win_w, g_win_h, sx - 2, sy - 1, b->w + 4, b->h + 2, b->bg_color);
+                if (!g_doc_root) {
+                    if (b->bg_color != 0) {
+                        fill_rect(g_fb, g_win_w, g_win_h, sx - 2, sy - 1, b->w + 4, b->h + 2, b->bg_color);
+                    }
+                    uint32_t col = b->color;
+                    if (b->link_idx >= 0) {
+                        col = (b->link_idx == g_hovered_link) ? COLOR_LINK_HOVER : COLOR_LINK;
+                    }
+                    woos_draw_text(g_fb, g_win_w, g_win_h, sx, sy + 2, b->text, col);
                 }
-                uint32_t col = b->color;
                 if (b->link_idx >= 0) {
-                    col = (b->link_idx == g_hovered_link) ? COLOR_LINK_HOVER : COLOR_LINK;
-                }
-                woos_draw_text(g_fb, g_win_w, g_win_h, sx, sy + 2, b->text, col);
-                if (b->link_idx >= 0) {
+                    uint32_t col = (b->link_idx == g_hovered_link) ? COLOR_LINK_HOVER : COLOR_LINK;
                     fill_rect(g_fb, g_win_w, g_win_h, sx, sy + b->h - 3, b->w, 1, col);
                 }
                 if (b->type == ITEM_HEADER && b->is_header && b->h >= 24) {

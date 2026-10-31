@@ -63,7 +63,7 @@ void redraw_box_tree(struct box *b, int parent_x, int parent_y, int scroll_y, in
             fstyle.foreground = b->colour ? b->colour : 0x222222;
             fstyle.background = NS_TRANSPARENT;
 
-            ctx->plot->text(ctx, &fstyle, abs_x, abs_y, b->text, b->length);
+            ctx->plot->text(ctx, &fstyle, abs_x, abs_y + 2, b->text, b->length);
         }
 
         // Draw bitmap / image if attached

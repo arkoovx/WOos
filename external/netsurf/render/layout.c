@@ -66,7 +66,7 @@ static void layout_block(struct box *b, int available_width, int *cur_y) {
             c->width = text_w;
             c->height = c->height > 0 ? c->height : line_h;
 
-            cur_line_x += text_w;
+            cur_line_x += text_w + CHAR_WIDTH;
             if (c->height > line_h) line_h = c->height;
         }
     }

@@ -398,14 +398,14 @@ void virtio_net_init(void) {
 
     // Init lwIP netif
     ip4_addr_t ipaddr, netmask, gw;
-    IP4_ADDR(&ipaddr, 0, 0, 0, 0);
-    IP4_ADDR(&netmask, 0, 0, 0, 0);
-    IP4_ADDR(&gw, 0, 0, 0, 0);
+    IP4_ADDR(&ipaddr, 10, 0, 2, 15);
+    IP4_ADDR(&netmask, 255, 255, 255, 0);
+    IP4_ADDR(&gw, 10, 0, 2, 2);
 
     netif_add(&g_virtio_netif, &ipaddr, &netmask, &gw, NULL, virtio_net_netif_init, ethernet_input);
     netif_set_default(&g_virtio_netif);
     netif_set_up(&g_virtio_netif);
     netif_set_link_up(&g_virtio_netif);
-    serial_printf("[Virtio-Net] lwIP netif added, DHCP client started.\n");
+    serial_printf("[Virtio-Net] lwIP netif initialized with 10.0.2.15/24 (GW: 10.0.2.2), starting DHCP client.\n");
     dhcp_start(&g_virtio_netif);
 }

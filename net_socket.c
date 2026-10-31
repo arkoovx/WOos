@@ -244,6 +244,7 @@ int32_t net_socket_connect(int32_t sock, const char* remote_ip, uint16_t remote_
         return 0;
     }
 
+    serial_printf("[Socket] tcp_connect to %s:%u failed with error: %d\n", remote_ip, (uint32_t)remote_port, (int)err);
     s->state = 4; // ERROR
     return -1;
 }

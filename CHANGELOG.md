@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.58.1
+- Исправление сетевой маршрутизации lwIP, устранение «connect call failed» и наслоения текста в NetSurf:
+  - Исправление TCP-маршрутизации VirtIO-Net (`drivers/virtio_net.c`, `net_socket.c`):
+    - Начальная конфигурация интерфейса lwIP переведена с `0.0.0.0` на `10.0.2.15/24` со шлюзом `10.0.2.2` (стандартная подсеть SLIRP QEMU).
+    - Ранее при IP `0.0.0.0` функция lwIP `ip4_route()` отвергала интерфейс из-за проверки `ip4_addr_isany_val`, в результате чего `tcp_connect()` завершался с ошибкой `ERR_RTE` (-4) до отправки SYN-пакета, вызывая ошибку «fetch: connect call failed».
+    - В `net_socket_connect()` добавлен подробный вывод кода ошибки `tcp_connect` при сбоях.
+  - Устранение наложения и склеивания текста NetSurf (`external/netsurf/render/layout.c`, `redraw.c`, `apps/browser.c`):
+    - В модуле компоновки NetSurf (`layout.c`) добавлен межсловный интервал `CHAR_WIDTH` (`cur_line_x += text_w + CHAR_WIDTH`), предотвращающий склеивание слов в сплошную строку.
+    - В `apps/browser.c` устранена двойная отрисовка текста: при активном дереве `g_doc_root` весь текст и разметка отображаются исключительно движком NetSurf (`redraw_box_tree`), исключая повторный вывод поверх тех же пикселей.
+    - В `parse_html_to_boxes()` настроена передача цветов элементов (`nb->colour`) для ссылок и заголовков.
+
+
 ## 1.58.0
 - Прямой перенос оригинального исходного кода NetSurf в WebAssembly среду WoOS (Upstream NetSurf Freestanding WebAssembly Port):
   - Клонирование и интеграция оригинальных подсистем upstream NetSurf в `external/netsurf/`:
