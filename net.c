@@ -573,6 +573,22 @@ typedef struct {
     unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];
 } tls_session_t;
 
+static const uint16_t g_rsa_suites[] = {
+    BR_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    BR_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+    BR_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+    BR_TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+    BR_TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384,
+    BR_TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+    BR_TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+    BR_TLS_RSA_WITH_AES_128_GCM_SHA256,
+    BR_TLS_RSA_WITH_AES_256_GCM_SHA384,
+    BR_TLS_RSA_WITH_AES_128_CBC_SHA256,
+    BR_TLS_RSA_WITH_AES_256_CBC_SHA256,
+    BR_TLS_RSA_WITH_AES_128_CBC_SHA,
+    BR_TLS_RSA_WITH_AES_256_CBC_SHA
+};
+
 static char* find_substr(char* haystack, const char* needle) {
     if (!haystack || !needle) return NULL;
     if (*needle == '\0') return haystack;
@@ -901,13 +917,18 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
         return -1;
     }
 
-    char req[2048];
+    char *req = (char *)kheap_alloc(2048);
+    if (!req) {
+        if (sock >= 0) net_socket_close(sock);
+        str_cat(out_buf, "fetch: out of memory for request\n", max_len);
+        return -1;
+    }
     req[0] = '\0';
-    str_cat(req, "GET ", sizeof(req));
-    str_cat(req, path, sizeof(req));
-    str_cat(req, " HTTP/1.1\r\nHost: ", sizeof(req));
-    str_cat(req, host_buf, sizeof(req));
-    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0\r\nAccept: text/html,application/xhtml+xml,*/*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", sizeof(req));
+    str_cat(req, "GET ", 2048);
+    str_cat(req, path, 2048);
+    str_cat(req, " HTTP/1.1\r\nHost: ", 2048);
+    str_cat(req, host_buf, 2048);
+    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0\r\nAccept: text/html,application/xhtml+xml,*/*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", 2048);
 
     uint32_t req_len = 0;
     while (req[req_len] != '\0') req_len++;
@@ -917,12 +938,15 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
     if (is_https) {
         tls_session_t *tls = (tls_session_t *)kheap_alloc(sizeof(tls_session_t));
         if (!tls) {
+            kheap_free(req);
             net_socket_close(sock);
             str_cat(out_buf, "fetch: out of memory for TLS session\n", max_len);
             return -1;
         }
 
         br_ssl_client_init_full(&tls->cc, &tls->xc_dummy, NULL, 0);
+        br_ssl_engine_set_suites(&tls->cc.eng, g_rsa_suites, sizeof(g_rsa_suites) / sizeof(g_rsa_suites[0]));
+        br_ssl_engine_set_ecdsa(&tls->cc.eng, NULL);
         tls->xc_insecure.vtable = &g_insecure_x509_vtable;
         br_ssl_engine_set_x509(&tls->cc.eng, &tls->xc_insecure.vtable);
         br_ssl_engine_set_buffer(&tls->cc.eng, tls->iobuf, sizeof(tls->iobuf), 1);
@@ -935,6 +959,7 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
         br_ssl_engine_inject_entropy(&tls->cc.eng, entropy, sizeof(entropy));
 
         if (!br_ssl_client_reset(&tls->cc, host_buf, 0)) {
+            kheap_free(req);
             kheap_free(tls);
             net_socket_close(sock);
             str_cat(out_buf, "fetch: TLS reset failed\n", max_len);
@@ -944,11 +969,14 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
         br_sslio_init(&tls->sctx, &tls->cc.eng, tls_sock_read, (void*)(intptr_t)sock, tls_sock_write, (void*)(intptr_t)sock);
 
         if (br_sslio_write_all(&tls->sctx, req, req_len) != 0 || br_sslio_flush(&tls->sctx) != 0) {
+            kheap_free(req);
             kheap_free(tls);
             net_socket_close(sock);
             str_cat(out_buf, "fetch: TLS request write failed\n", max_len);
             return -1;
         }
+        kheap_free(req);
+        req = NULL;
 
         while (total_rx + 1 < max_len) {
             int r = br_sslio_read(&tls->sctx, out_buf + total_rx, max_len - 1 - total_rx);
@@ -982,6 +1010,8 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
                 thread_yield();
             }
         }
+        kheap_free(req);
+        req = NULL;
 
         uint64_t t_last_rx = rdtsc();
         while (total_rx + 1 < max_len) {
@@ -1165,13 +1195,17 @@ int32_t net_http_download(const char* url, const char* dest_path) {
         return -1;
     }
 
-    char req[2048];
+    char *req = (char *)kheap_alloc(2048);
+    if (!req) {
+        net_socket_close(sock);
+        return -1;
+    }
     req[0] = '\0';
-    str_cat(req, "GET ", sizeof(req));
-    str_cat(req, path, sizeof(req));
-    str_cat(req, " HTTP/1.1\r\nHost: ", sizeof(req));
-    str_cat(req, host_buf, sizeof(req));
-    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0\r\nAccept: */*\r\nConnection: close\r\n\r\n", sizeof(req));
+    str_cat(req, "GET ", 2048);
+    str_cat(req, path, 2048);
+    str_cat(req, " HTTP/1.1\r\nHost: ", 2048);
+    str_cat(req, host_buf, 2048);
+    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0\r\nAccept: */*\r\nConnection: close\r\n\r\n", 2048);
 
     uint32_t req_len = 0;
     while (req[req_len] != '\0') req_len++;
@@ -1180,11 +1214,14 @@ int32_t net_http_download(const char* url, const char* dest_path) {
     if (is_https) {
         tls = (tls_session_t *)kheap_alloc(sizeof(tls_session_t));
         if (!tls) {
+            kheap_free(req);
             net_socket_close(sock);
             return -1;
         }
 
         br_ssl_client_init_full(&tls->cc, &tls->xc_dummy, NULL, 0);
+        br_ssl_engine_set_suites(&tls->cc.eng, g_rsa_suites, sizeof(g_rsa_suites) / sizeof(g_rsa_suites[0]));
+        br_ssl_engine_set_ecdsa(&tls->cc.eng, NULL);
         tls->xc_insecure.vtable = &g_insecure_x509_vtable;
         br_ssl_engine_set_x509(&tls->cc.eng, &tls->xc_insecure.vtable);
         br_ssl_engine_set_buffer(&tls->cc.eng, tls->iobuf, sizeof(tls->iobuf), 1);
@@ -1197,6 +1234,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
         br_ssl_engine_inject_entropy(&tls->cc.eng, entropy, sizeof(entropy));
 
         if (!br_ssl_client_reset(&tls->cc, host_buf, 0)) {
+            kheap_free(req);
             kheap_free(tls);
             net_socket_close(sock);
             return -1;
@@ -1205,6 +1243,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
         br_sslio_init(&tls->sctx, &tls->cc.eng, tls_sock_read, (void*)(intptr_t)sock, tls_sock_write, (void*)(intptr_t)sock);
 
         if (br_sslio_write_all(&tls->sctx, req, req_len) != 0 || br_sslio_flush(&tls->sctx) != 0) {
+            kheap_free(req);
             kheap_free(tls);
             net_socket_close(sock);
             return -1;
@@ -1224,13 +1263,20 @@ int32_t net_http_download(const char* url, const char* dest_path) {
             }
         }
     }
+    kheap_free(req);
+    req = NULL;
 
     // Считываем HTTP-заголовки до \r\n\r\n
-    char hdr_buf[2048];
+    char *hdr_buf = (char *)kheap_alloc(2048);
+    if (!hdr_buf) {
+        if (tls) { br_ssl_engine_close(&tls->cc.eng); kheap_free(tls); }
+        net_socket_close(sock);
+        return -1;
+    }
     uint32_t hdr_len = 0;
     int body_start_idx = -1;
 
-    while (hdr_len + 1 < sizeof(hdr_buf)) {
+    while (hdr_len + 1 < 2048) {
         char ch;
         int r = 0;
         if (is_https) {
@@ -1258,6 +1304,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
     }
 
     if (body_start_idx < 0) {
+        kheap_free(hdr_buf);
         if (tls) { br_ssl_engine_close(&tls->cc.eng); kheap_free(tls); }
         net_socket_close(sock);
         return -1;
@@ -1266,6 +1313,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
     // Открываем целевой файл для записи
     int32_t fd = vfs_open(dest_path, VFS_MODE_WRITE | VFS_MODE_CREATE | VFS_MODE_TRUNC);
     if (fd < 0) {
+        kheap_free(hdr_buf);
         if (tls) { br_ssl_engine_close(&tls->cc.eng); kheap_free(tls); }
         net_socket_close(sock);
         return -1;
@@ -1283,6 +1331,8 @@ int32_t net_http_download(const char* url, const char* dest_path) {
             cl_pos++;
         }
     }
+    kheap_free(hdr_buf);
+    hdr_buf = NULL;
 
     uint8_t chunk[2048];
     uint32_t total_written = 0;

@@ -293,6 +293,34 @@ void idt_handle_exception(registers_t* regs) {
     serial_write_string("   R14: "); print_hex64(regs->r14);
     serial_write_string("   R15: "); print_hex64(regs->r15);
     serial_write_string("\n");
+
+    serial_write_string("\nStack words at RSP:\n");
+    uint64_t* stk = (uint64_t*)regs->rsp;
+    for (int i = 0; i < 16; i++) {
+        if ((uint64_t)(stk + i) < 0x1000 || (uint64_t)(stk + i) > 0x00007FFFFFFFFFFF) break;
+        serial_write_string("  [");
+        print_hex64((uint64_t)(stk + i));
+        serial_write_string("] = ");
+        print_hex64(stk[i]);
+        serial_write_string("\n");
+    }
+
+    serial_write_string("\nCall trace (RBP walk):\n");
+    uint64_t* rbp = (uint64_t*)regs->rbp;
+    for (int frame = 0; frame < 12 && rbp != 0; frame++) {
+        if ((uint64_t)rbp < 0x1000 || (uint64_t)rbp > 0x00007FFFFFFFFFFF || ((uint64_t)rbp & 7) != 0) break;
+        uint64_t next_rbp = rbp[0];
+        uint64_t ret_rip = rbp[1];
+        serial_write_string("  frame #");
+        serial_printf("%d", frame);
+        serial_write_string(" [RBP: ");
+        print_hex64((uint64_t)rbp);
+        serial_write_string("] -> RIP: ");
+        print_hex64(ret_rip);
+        serial_write_string("\n");
+        if (next_rbp <= (uint64_t)rbp) break;
+        rbp = (uint64_t*)next_rbp;
+    }
     
     serial_write_string("==================================================\n");
     serial_write_string("System halted. Please reboot the virtual machine.\n");
