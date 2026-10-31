@@ -440,6 +440,14 @@ void _start(void) {
             } else if (msg.type == MSG_KEY_DOWN) {
                 handle_key((int)msg.arg1, (int)msg.arg2);
                 needs_redraw = 1;
+            } else if (msg.type == MSG_SCROLL) {
+                int8_t dz = (int8_t)(int32_t)msg.arg3;
+                g_scroll_y -= (int)dz * 3;
+                if (g_scroll_y < 0) g_scroll_y = 0;
+                int vis = (g_win_h - 110) / 16;
+                int max_s = g_num_rows > vis ? (g_num_rows - vis) : 0;
+                if (g_scroll_y > max_s) g_scroll_y = max_s;
+                needs_redraw = 1;
             }
         }
 

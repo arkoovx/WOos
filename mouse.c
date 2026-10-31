@@ -1,5 +1,5 @@
 #include "mouse.h"
-
+#include "serial.h"
 #include "input.h"
 
 #define PS2_DATA_PORT 0x60u
@@ -10,8 +10,10 @@
 #define PS2_STATUS_INPUT_FULL  0x02u
 #define PS2_STATUS_AUX_DATA    0x20u
 
-#define MOUSE_PACKET_SIZE 3u
+#define MOUSE_MAX_PACKET_SIZE 4u
 #define MOUSE_POLL_MAX_BYTES 64u
+
+static uint8_t g_mouse_packet_size = 3u;
 
 typedef struct mouse_state {
     uint16_t x;
@@ -19,10 +21,10 @@ typedef struct mouse_state {
     uint8_t buttons;
     uint8_t ready;
     uint8_t packet_index;
-    uint8_t packet[MOUSE_PACKET_SIZE];
+    uint8_t packet[MOUSE_MAX_PACKET_SIZE];
 } mouse_state_t;
 
-static mouse_state_t g_mouse = {0u, 0u, 0u, 0u, 0u, {0u, 0u, 0u}};
+static mouse_state_t g_mouse = {0u, 0u, 0u, 0u, 0u, {0u, 0u, 0u, 0u}};
 
 static inline void io_wait(void) {
     __asm__ __volatile__("outb %%al, $0x80" : : "a"(0u));
@@ -151,6 +153,28 @@ void mouse_init(uint16_t start_x, uint16_t start_y) {
         return;
     }
 
+    // Enable Intellimouse scroll wheel sequence: sample rates 200, 100, 80
+    mouse_write(0xF3u);
+    mouse_write(200u);
+    mouse_write(0xF3u);
+    mouse_write(100u);
+    mouse_write(0xF3u);
+    mouse_write(80u);
+
+    // Read device ID
+    uint8_t mouse_id = 0u;
+    if (mouse_write(0xF2u) && ps2_read_data(&mouse_id)) {
+        if (mouse_id == 3u || mouse_id == 4u) {
+            g_mouse_packet_size = 4u;
+            serial_printf("[Mouse] PS/2 Intellimouse detected with wheel support (ID: %u)\n", (uint32_t)mouse_id);
+        } else {
+            g_mouse_packet_size = 3u;
+            serial_printf("[Mouse] Standard PS/2 mouse active (ID: %u)\n", (uint32_t)mouse_id);
+        }
+    } else {
+        g_mouse_packet_size = 3u;
+    }
+
     // Set sample rate to 200 Hz
     if (!mouse_write(0xF3u)) {
         return;
@@ -178,8 +202,8 @@ uint8_t mouse_is_ready(void) {
     return g_mouse.ready;
 }
 
-// Разбор стандартного 3-байтового PS/2 пакета и публикация нормализованных input-событий.
-static void handle_mouse_packet(const uint8_t packet[MOUSE_PACKET_SIZE]) {
+// Разбор PS/2 пакета (3 или 4 байта) и публикация нормализованных input-событий.
+static void handle_mouse_packet(const uint8_t packet[MOUSE_MAX_PACKET_SIZE], uint8_t packet_size) {
     extern woos_perf_t g_perf_stats;
     g_perf_stats.mouse_recv++;
 
@@ -240,6 +264,22 @@ static void handle_mouse_packet(const uint8_t packet[MOUSE_PACKET_SIZE]) {
             g_perf_stats.mouse_push++;
         }
     }
+
+    // Обработка колеса прокрутки (4-й байт пакета Intellimouse)
+    if (packet_size >= 4u) {
+        int8_t raw_z = (int8_t)packet[3];
+        int8_t dz = 0;
+        if ((raw_z & 0x08) != 0) {
+            dz = (int8_t)(raw_z | 0xF0); // Отрицательное смещение (скролл вниз)
+        } else {
+            dz = (int8_t)(raw_z & 0x0F); // Положительное смещение (скролл вверх)
+        }
+        if (dz != 0) {
+            input_event_t wheel_event = {INPUT_EVENT_MOUSE_WHEEL, g_mouse.x, g_mouse.y, (uint8_t)dz};
+            input_push(&wheel_event);
+            g_perf_stats.mouse_push++;
+        }
+    }
 }
 
 // Polling-путь: вычитываем доступные байты из 8042 и собираем полные пакеты мыши.
@@ -268,8 +308,8 @@ void mouse_poll(void) {
 
         g_mouse.packet[g_mouse.packet_index++] = data;
 
-        if (g_mouse.packet_index == MOUSE_PACKET_SIZE) {
-            handle_mouse_packet(g_mouse.packet);
+        if (g_mouse.packet_index >= g_mouse_packet_size) {
+            handle_mouse_packet(g_mouse.packet, g_mouse_packet_size);
             g_mouse.packet_index = 0u;
             return; // Return immediately to yield and allow compositor to render this frame!
         }
@@ -299,8 +339,8 @@ void mouse_handler(void) {
 
         g_mouse.packet[g_mouse.packet_index++] = data;
 
-        if (g_mouse.packet_index == MOUSE_PACKET_SIZE) {
-            handle_mouse_packet(g_mouse.packet);
+        if (g_mouse.packet_index >= g_mouse_packet_size) {
+            handle_mouse_packet(g_mouse.packet, g_mouse_packet_size);
             g_mouse.packet_index = 0u;
         }
     }

@@ -2,7 +2,9 @@
 #define WOOS_APP_H
 
 typedef unsigned char  uint8_t;
+typedef signed char    int8_t;
 typedef unsigned short uint16_t;
+typedef signed short   int16_t;
 typedef unsigned int   uint32_t;
 typedef signed int     int32_t;
 typedef unsigned long  size_t;
@@ -36,6 +38,7 @@ static inline void int_to_str(int val, char* dst) {
 #define MSG_CLOSE        3
 #define MSG_KEY_DOWN     4
 #define MSG_RESIZE       5
+#define MSG_SCROLL       6
 #define MSG_OPEN_FILE    10
 
 // VFS Modes

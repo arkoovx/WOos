@@ -63,8 +63,8 @@ static fbtk_widget_t *g_fbtk = NULL;
 #define COLOR_SCROLL_TRACK  0xDFE6E9
 #define COLOR_SCROLL_THUMB  0xB2BEC3
 
-#define MAX_HTML_SIZE 65536
-#define MAX_BOXES 2048
+#define MAX_HTML_SIZE 262144
+#define MAX_BOXES 4096
 #define MAX_LINKS 160
 #define MAX_IMAGES 16
 #define MAX_INPUTS 8
@@ -197,6 +197,13 @@ static void resolve_url(const char* base_url, const char* href, char* out_url, i
     }
     if (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0 || strncmp(href, "file://", 7) == 0) {
         strncpy(out_url, href, max_len);
+        return;
+    }
+    if (href[0] == '/' && href[1] == '/') {
+        // Protocol-relative URL (e.g. //upload.wikimedia.org/...)
+        int is_http = (strncmp(base_url, "http://", 7) == 0);
+        strncpy(out_url, is_http ? "http:" : "https:", max_len - 1);
+        strncat(out_url, href, max_len - (int)strlen(out_url) - 1);
         return;
     }
     if (href[0] == '/') {
@@ -333,9 +340,13 @@ static void load_image_for_slot(int slot, const char* img_url) {
         if (strncmp(img_url, "file://", 7) == 0) fpath = img_url + 7;
         bimg->img = image_load_file(fpath);
     } else {
-        int32_t bytes = woos_net_fetch(img_url, (char*)g_img_fetch_buf, sizeof(g_img_fetch_buf));
-        if (bytes > 0) {
-            bimg->img = image_load_from_memory(g_img_fetch_buf, (size_t)bytes);
+        // Fast non-blocking strategy: only fetch primary logo (slot 0) over network, skip SVGs
+        int is_svg = (strstr(img_url, ".svg") != NULL || strstr(img_url, ".SVG") != NULL);
+        if (slot == 0 && !is_svg) {
+            int32_t bytes = woos_net_fetch(img_url, (char*)g_img_fetch_buf, sizeof(g_img_fetch_buf));
+            if (bytes > 0) {
+                bimg->img = image_load_from_memory(g_img_fetch_buf, (size_t)bytes);
+            }
         }
     }
 
@@ -376,12 +387,30 @@ static void load_image_for_slot(int slot, const char* img_url) {
     }
 }
 
+static inline int strncasecmp_custom(const char* s1, const char* s2, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        char c1 = s1[i];
+        char c2 = s2[i];
+        if (c1 >= 'A' && c1 <= 'Z') c1 += ('a' - 'A');
+        if (c2 >= 'A' && c2 <= 'Z') c2 += ('a' - 'A');
+        if (c1 != c2 || c1 == '\0') return (int)((unsigned char)c1 - (unsigned char)c2);
+    }
+    return 0;
+}
+
+static inline int tag_match(const char* tag, const char* name) {
+    if (!tag || !name) return 0;
+    size_t nl = strlen(name);
+    if (strncasecmp_custom(tag, name, nl) != 0) return 0;
+    char c = tag[nl];
+    return (c == '\0' || c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '>' || c == '/');
+}
+
 static void parse_html_to_boxes(int fetch_images) {
     if (g_doc_root) {
         box_free_tree(g_doc_root);
         g_doc_root = NULL;
     }
-    g_doc_root = box_create(BOX_BLOCK);
 
     g_num_boxes = 0;
     g_num_links = 0;
@@ -399,6 +428,7 @@ static void parse_html_to_boxes(int fetch_images) {
     int line_h = LINE_H;
 
     int in_tag = 0;
+    char tag_quote = 0;
     int in_script = 0;
     int in_style = 0;
     int in_title = 0;
@@ -424,6 +454,17 @@ static void parse_html_to_boxes(int fetch_images) {
     const char* p = g_html;
 
     while (*p != '\0') {
+        // 1. Skip HTML comments: <!-- ... -->
+        if (p[0] == '<' && p[1] == '!' && p[2] == '-' && p[3] == '-') {
+            const char* end_c = strstr(p + 4, "-->");
+            if (end_c) {
+                p = end_c + 3;
+                continue;
+            } else {
+                break;
+            }
+        }
+
         if (*p == '<') {
             if (word_len > 0) {
                 word_buf[word_len] = '\0';
@@ -450,40 +491,34 @@ static void parse_html_to_boxes(int fetch_images) {
                     b->elem_idx = -1;
                     cur_x += ww + CHAR_W;
                     if (cur_y + line_h > g_doc_height) g_doc_height = cur_y + line_h;
-
-                    if (g_doc_root) {
-                        struct box* nb = box_create(in_header ? BOX_BLOCK : BOX_TEXT);
-                        if (nb) {
-                            nb->text = strdup(word_buf);
-                            nb->length = word_len;
-                            nb->width = ww;
-                            nb->height = line_h;
-                            nb->colour = in_link ? COLOR_LINK : (in_header ? COLOR_TEXT_HEADER : COLOR_TEXT_NORMAL);
-                            nb->background_colour = in_code ? COLOR_CODE_BG : NS_TRANSPARENT;
-                            box_add_child(g_doc_root, nb);
-                        }
-                    }
                 }
                 word_len = 0;
             }
             in_tag = 1;
+            tag_quote = 0;
             tag_len = 0;
             p++;
             continue;
         }
 
         if (in_tag) {
-            if (*p == '>') {
+            if (!tag_quote && (*p == '"' || *p == '\'')) {
+                tag_quote = *p;
+            } else if (tag_quote && *p == tag_quote) {
+                tag_quote = 0;
+            }
+
+            if (*p == '>' && !tag_quote) {
                 in_tag = 0;
                 tag_buf[tag_len] = '\0';
 
                 // Tag handling
-                if (strncmp(tag_buf, "script", 6) == 0 || strncmp(tag_buf, "SCRIPT", 6) == 0) in_script = 1;
-                else if (strncmp(tag_buf, "/script", 7) == 0 || strncmp(tag_buf, "/SCRIPT", 7) == 0) in_script = 0;
-                else if (strncmp(tag_buf, "style", 5) == 0 || strncmp(tag_buf, "STYLE", 5) == 0) in_style = 1;
-                else if (strncmp(tag_buf, "/style", 6) == 0 || strncmp(tag_buf, "/STYLE", 6) == 0) in_style = 0;
-                else if (strncmp(tag_buf, "title", 5) == 0 || strncmp(tag_buf, "TITLE", 5) == 0) { in_title = 1; title_len = 0; }
-                else if (strncmp(tag_buf, "/title", 6) == 0 || strncmp(tag_buf, "/TITLE", 6) == 0) {
+                if (tag_match(tag_buf, "script")) in_script = 1;
+                else if (tag_match(tag_buf, "/script")) in_script = 0;
+                else if (tag_match(tag_buf, "style")) in_style = 1;
+                else if (tag_match(tag_buf, "/style")) in_style = 0;
+                else if (tag_match(tag_buf, "title")) { in_title = 1; title_len = 0; }
+                else if (tag_match(tag_buf, "/title")) {
                     in_title = 0;
                     title_buf[title_len] = '\0';
                     strncpy(g_page_title, title_buf, sizeof(g_page_title) - 1);
@@ -500,15 +535,16 @@ static void parse_html_to_boxes(int fetch_images) {
                     in_header = 0;
                     line_h = LINE_H;
                 }
-                else if (strncmp(tag_buf, "p", 1) == 0 || strncmp(tag_buf, "div", 3) == 0 ||
-                         strncmp(tag_buf, "section", 7) == 0 || strncmp(tag_buf, "article", 7) == 0) {
-                    if (cur_x > 20) { cur_y += line_h + 6; cur_x = 20; }
+                else if (tag_match(tag_buf, "p") || tag_match(tag_buf, "div") ||
+                         tag_match(tag_buf, "section") || tag_match(tag_buf, "article") ||
+                         tag_match(tag_buf, "/p") || tag_match(tag_buf, "/div")) {
+                    if (cur_x > 20) { cur_y += line_h + 4; cur_x = in_list ? 36 : 20; }
                 }
-                else if (strncmp(tag_buf, "br", 2) == 0 || strncmp(tag_buf, "BR", 2) == 0) {
+                else if (tag_match(tag_buf, "br")) {
                     cur_y += line_h;
                     cur_x = in_list ? 36 : 20;
                 }
-                else if (strncmp(tag_buf, "hr", 2) == 0 || strncmp(tag_buf, "HR", 2) == 0) {
+                else if (tag_match(tag_buf, "hr")) {
                     if (cur_x > 20) { cur_y += line_h + 6; cur_x = 20; }
                     if (g_num_boxes < MAX_BOXES) {
                         layout_box_t* b = &g_boxes[g_num_boxes++];
@@ -523,15 +559,15 @@ static void parse_html_to_boxes(int fetch_images) {
                         if (cur_y > g_doc_height) g_doc_height = cur_y;
                     }
                 }
-                else if (strncmp(tag_buf, "ul", 2) == 0 || strncmp(tag_buf, "ol", 2) == 0) {
+                else if (tag_match(tag_buf, "ul") || tag_match(tag_buf, "ol")) {
                     in_list = 1;
                     if (cur_x > 20) { cur_y += line_h + 4; cur_x = 36; }
                 }
-                else if (strncmp(tag_buf, "/ul", 3) == 0 || strncmp(tag_buf, "/ol", 3) == 0) {
+                else if (tag_match(tag_buf, "/ul") || tag_match(tag_buf, "/ol")) {
                     in_list = 0;
                     if (cur_x > 20) { cur_y += line_h + 4; cur_x = 20; }
                 }
-                else if (strncmp(tag_buf, "li", 2) == 0) {
+                else if (tag_match(tag_buf, "li")) {
                     cur_y += line_h + 2;
                     cur_x = 20;
                     if (g_num_boxes < MAX_BOXES) {
@@ -549,19 +585,19 @@ static void parse_html_to_boxes(int fetch_images) {
                     }
                     cur_x = 36;
                 }
-                else if (strncmp(tag_buf, "b", 1) == 0 || strncmp(tag_buf, "strong", 6) == 0) {
+                else if (tag_match(tag_buf, "b") || tag_match(tag_buf, "strong")) {
                     in_bold = 1;
                 }
-                else if (strncmp(tag_buf, "/b", 2) == 0 || strncmp(tag_buf, "/strong", 7) == 0) {
+                else if (tag_match(tag_buf, "/b") || tag_match(tag_buf, "/strong")) {
                     in_bold = 0;
                 }
-                else if (strncmp(tag_buf, "code", 4) == 0 || strncmp(tag_buf, "pre", 3) == 0) {
+                else if (tag_match(tag_buf, "code") || tag_match(tag_buf, "pre")) {
                     in_code = 1;
                 }
-                else if (strncmp(tag_buf, "/code", 5) == 0 || strncmp(tag_buf, "/pre", 4) == 0) {
+                else if (tag_match(tag_buf, "/code") || tag_match(tag_buf, "/pre")) {
                     in_code = 0;
                 }
-                else if (tag_buf[0] == 'a' && (tag_buf[1] == ' ' || tag_buf[1] == '\t')) {
+                else if (tag_match(tag_buf, "a")) {
                     const char* hpos = strstr(tag_buf, "href=");
                     if (hpos && g_num_links < MAX_LINKS) {
                         hpos += 5;
@@ -579,11 +615,12 @@ static void parse_html_to_boxes(int fetch_images) {
                         cur_link_idx = g_num_links - 1;
                     }
                 }
-                else if (strncmp(tag_buf, "/a", 2) == 0) {
+                else if (tag_match(tag_buf, "/a")) {
                     in_link = 0;
                     cur_link_idx = -1;
                 }
-                else if (strncmp(tag_buf, "form", 4) == 0) {
+                else if (tag_match(tag_buf, "form")) {
+                    if (cur_x > 20) { cur_y += line_h + 6; cur_x = 20; }
                     const char* apos = strstr(tag_buf, "action=");
                     if (apos) {
                         apos += 7;
@@ -596,7 +633,10 @@ static void parse_html_to_boxes(int fetch_images) {
                         cur_form_action[fidx] = '\0';
                     }
                 }
-                else if (strncmp(tag_buf, "input", 5) == 0) {
+                else if (tag_match(tag_buf, "/form")) {
+                    if (cur_x > 20) { cur_y += line_h + 6; cur_x = 20; }
+                }
+                else if (tag_match(tag_buf, "input")) {
                     char type_str[24] = "text";
                     char name_str[32] = "q";
                     char val_str[128] = "";
@@ -671,7 +711,7 @@ static void parse_html_to_boxes(int fetch_images) {
                         }
                     }
                 }
-                else if (strncmp(tag_buf, "img", 3) == 0) {
+                else if (tag_match(tag_buf, "img")) {
                     const char* spos = strstr(tag_buf, "src=");
                     if (spos) {
                         spos += 4; char q = 0; if (*spos == '"' || *spos == '\'') q = *spos++;
@@ -741,7 +781,13 @@ static void parse_html_to_boxes(int fetch_images) {
             if (strncmp(p, "&lt;", 4) == 0) { p += 4; if (word_len + 1 < 127) word_buf[word_len++] = '<'; continue; }
             if (strncmp(p, "&gt;", 4) == 0) { p += 4; if (word_len + 1 < 127) word_buf[word_len++] = '>'; continue; }
             if (strncmp(p, "&quot;", 6) == 0) { p += 6; if (word_len + 1 < 127) word_buf[word_len++] = '"'; continue; }
+            if (strncmp(p, "&apos;", 6) == 0) { p += 6; if (word_len + 1 < 127) word_buf[word_len++] = '\''; continue; }
             if (strncmp(p, "&#39;", 5) == 0) { p += 5; if (word_len + 1 < 127) word_buf[word_len++] = '\''; continue; }
+            if (strncmp(p, "&ndash;", 7) == 0) { p += 7; if (word_len + 1 < 127) word_buf[word_len++] = '-'; continue; }
+            if (strncmp(p, "&mdash;", 7) == 0) { p += 7; if (word_len + 1 < 127) word_buf[word_len++] = '-'; continue; }
+            if (strncmp(p, "&bull;", 6) == 0) { p += 6; if (word_len + 1 < 127) word_buf[word_len++] = '*'; continue; }
+            if (strncmp(p, "&hellip;", 8) == 0) { p += 8; if (word_len + 1 < 127) word_buf[word_len++] = '.'; continue; }
+            if (strncmp(p, "&copy;", 6) == 0) { p += 6; if (word_len + 1 < 127) word_buf[word_len++] = 'c'; continue; }
         }
 
         if (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
@@ -770,19 +816,6 @@ static void parse_html_to_boxes(int fetch_images) {
                     b->elem_idx = -1;
                     cur_x += ww + CHAR_W;
                     if (cur_y + line_h > g_doc_height) g_doc_height = cur_y + line_h;
-
-                    if (g_doc_root) {
-                        struct box* nb = box_create(in_header ? BOX_BLOCK : BOX_TEXT);
-                        if (nb) {
-                            nb->text = strdup(word_buf);
-                            nb->length = word_len;
-                            nb->width = ww;
-                            nb->height = line_h;
-                            nb->colour = in_link ? COLOR_LINK : (in_header ? COLOR_TEXT_HEADER : COLOR_TEXT_NORMAL);
-                            nb->background_colour = in_code ? COLOR_CODE_BG : NS_TRANSPARENT;
-                            box_add_child(g_doc_root, nb);
-                        }
-                    }
                 }
                 word_len = 0;
             }
@@ -827,11 +860,6 @@ static void parse_html_to_boxes(int fetch_images) {
         b->link_idx = -1;
         b->elem_idx = -1;
         g_doc_height = 40;
-    }
-
-    if (g_doc_root) {
-        int netsurf_h = layout_document_tree(g_doc_root, g_win_w - 40);
-        if (netsurf_h > g_doc_height) g_doc_height = netsurf_h;
     }
 }
 
@@ -941,9 +969,121 @@ static void draw_btn(int x, int y, int w, int h, const char* label, int hover, u
 }
 
 static void redraw(void) {
-    fill_rect(g_fb, g_win_w, g_win_h, 0, 0, g_win_w, g_win_h, COLOR_CONTENT_BG);
+    int view_y = HEADER_H;
+    int view_h = g_win_h - HEADER_H - STATUSBAR_H;
+    int view_bottom = view_y + view_h;
 
-    // 1. Navigation Topbar (y = 0..34)
+    // Layer 1: Viewport Background
+    fill_rect(g_fb, g_win_w, g_win_h, 0, view_y, g_win_w, view_h, COLOR_CONTENT_BG);
+
+    // Layer 2: Viewport Content Elements (strictly clipped to [view_y .. view_bottom])
+    for (int i = 0; i < g_num_boxes; i++) {
+        layout_box_t* b = &g_boxes[i];
+        int sy = view_y + b->y - g_scroll_y;
+        int sx = b->x;
+
+        if (sy + b->h <= view_y || sy >= view_bottom) continue;
+
+        switch (b->type) {
+            case ITEM_TEXT:
+            case ITEM_HEADER: {
+                if (b->bg_color != 0) {
+                    int ry = sy < view_y ? view_y : sy;
+                    int rh = (sy + b->h > view_bottom) ? (view_bottom - ry) : (sy + b->h - ry);
+                    if (rh > 0) {
+                        fill_rect(g_fb, g_win_w, g_win_h, sx - 2, ry - 1, b->w + 4, rh + 2, b->bg_color);
+                    }
+                }
+                uint32_t col = b->color;
+                if (b->link_idx >= 0) {
+                    col = (b->link_idx == g_hovered_link) ? COLOR_LINK_HOVER : COLOR_LINK;
+                }
+                if (sy >= view_y && sy + 14 <= view_bottom) {
+                    woos_draw_text(g_fb, g_win_w, g_win_h, sx, sy + 2, b->text, col);
+                }
+                if (b->link_idx >= 0) {
+                    int uy = sy + b->h - 3;
+                    if (uy >= view_y && uy < view_bottom) {
+                        fill_rect(g_fb, g_win_w, g_win_h, sx, uy, b->w, 1, col);
+                    }
+                }
+                if (b->type == ITEM_HEADER && b->is_header && b->h >= 24) {
+                    int hy = sy + b->h - 2;
+                    if (hy >= view_y && hy < view_bottom) {
+                        fill_rect(g_fb, g_win_w, g_win_h, sx, hy, b->w > 120 ? b->w : 120, 2, 0x3867D6);
+                    }
+                }
+                break;
+            }
+
+            case ITEM_HR: {
+                if (sy >= view_y && sy < view_bottom) {
+                    fill_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, 1, b->color);
+                }
+                break;
+            }
+
+            case ITEM_IMAGE: {
+                if (b->elem_idx >= 0 && b->elem_idx < g_num_images) {
+                    browser_image_t* bimg = &g_images[b->elem_idx];
+                    if (bimg->loaded == 1 && bimg->img && bimg->img->pixels) {
+                        image_blit_alpha_clipped(g_fb, g_win_w, g_win_h, sx, sy,
+                                                 bimg->img->pixels, bimg->img->width, bimg->img->height, bimg->img->width,
+                                                 0, view_y, g_win_w, view_h);
+                    } else {
+                        if (sy >= view_y && sy + b->h <= view_bottom) {
+                            fill_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, 0xEDEDED);
+                            draw_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, 0xCBD5E1);
+                            woos_draw_text(g_fb, g_win_w, g_win_h, sx + 8, sy + (b->h - 10) / 2, "[Image]", 0x94A3B8);
+                        }
+                    }
+                }
+                break;
+            }
+
+            case ITEM_INPUT: {
+                if (b->elem_idx >= 0 && b->elem_idx < g_num_inputs) {
+                    browser_input_t* inp = &g_inputs[b->elem_idx];
+                    if (sy >= view_y && sy + b->h <= view_bottom) {
+                        fill_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, COLOR_INPUT_BG);
+                        draw_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, inp->is_focused ? COLOR_INPUT_FOCUS : COLOR_INPUT_BORDER);
+
+                        const char* show_txt = inp->value[0] ? inp->value : inp->placeholder;
+                        uint32_t txt_col = inp->value[0] ? COLOR_ADDR_TEXT : COLOR_TEXT_MUTED;
+                        woos_draw_text(g_fb, g_win_w, g_win_h, sx + 6, sy + 5, show_txt, txt_col);
+
+                        if (inp->is_focused) {
+                            int cx = sx + 6 + inp->cursor_pos * CHAR_W;
+                            if (cx >= sx + 4 && cx < sx + b->w - 4) {
+                                fill_rect(g_fb, g_win_w, g_win_h, cx, sy + 4, 2, b->h - 8, 0x111111);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+
+            case ITEM_BUTTON: {
+                if (sy >= view_y && sy + b->h <= view_bottom) {
+                    draw_btn(sx, sy, b->w, b->h, b->text, 0, 0x3B4A5A);
+                }
+                break;
+            }
+        }
+    }
+
+    // Layer 3: Vertical Scrollbar
+    if (g_doc_height > view_h) {
+        int sb_x = g_win_w - 14;
+        fill_rect(g_fb, g_win_w, g_win_h, sb_x, view_y, 14, view_h, COLOR_SCROLL_TRACK);
+        int thumb_h = (view_h * view_h) / g_doc_height;
+        if (thumb_h < 20) thumb_h = 20;
+        int max_s = g_doc_height - view_h;
+        int thumb_y = view_y + (g_scroll_y * (view_h - thumb_h)) / (max_s > 0 ? max_s : 1);
+        fill_rect(g_fb, g_win_w, g_win_h, sb_x + 1, thumb_y, 12, thumb_h, COLOR_SCROLL_THUMB);
+    }
+
+    // Layer 4: BROWSER CHROME ON TOP: Navigation Topbar (y = 0..34)
     fill_rect(g_fb, g_win_w, g_win_h, 0, 0, g_win_w, TOPBAR_H, COLOR_TOOLBAR_BG);
 
     // Navigation buttons: Back, Forward, Reload, Home
@@ -987,7 +1127,7 @@ static void redraw(void) {
     int btn_dl_x = btn_go_x + 44;
     draw_btn(btn_dl_x, 5, 80, 24, "Download", 0, 0x0984E3);
 
-    // 2. Bookmarks Bar (y = 34..60)
+    // Layer 5: BROWSER CHROME ON TOP: Bookmarks Bar (y = 34..60)
     fill_rect(g_fb, g_win_w, g_win_h, 0, TOPBAR_H, g_win_w, BOOKMARKS_H, COLOR_BOOKMARK_BG);
     draw_rect(g_fb, g_win_w, g_win_h, 0, TOPBAR_H + BOOKMARKS_H - 1, g_win_w, 1, 0x353B48);
 
@@ -998,109 +1138,7 @@ static void redraw(void) {
     draw_btn(312, TOPBAR_H + 3, 48, 20, "Wiby", 0, 0x2F3542);
     draw_btn(364, TOPBAR_H + 3, 64, 20, "Welcome", 0, 0x2F3542);
 
-    // 3. Render NetSurf Layout Boxes Viewport (y = HEADER_H .. win_h - STATUSBAR_H)
-    int view_y = HEADER_H;
-    int view_h = g_win_h - HEADER_H - STATUSBAR_H;
-
-    if (g_doc_root && g_nsfb) {
-        struct redraw_context ctx;
-        ctx.interactive = true;
-        ctx.background_images = true;
-        ctx.plot = &fb_plotters;
-        ctx.priv = g_nsfb;
-        redraw_box_tree(g_doc_root, 20, HEADER_H, g_scroll_y, view_h, &ctx);
-    }
-
-    for (int i = 0; i < g_num_boxes; i++) {
-        layout_box_t* b = &g_boxes[i];
-        int sy = view_y + b->y - g_scroll_y;
-        int sx = b->x;
-
-        if (sy + b->h < view_y || sy > view_y + view_h) continue;
-
-        switch (b->type) {
-            case ITEM_TEXT:
-            case ITEM_HEADER: {
-                if (!g_doc_root) {
-                    if (b->bg_color != 0) {
-                        fill_rect(g_fb, g_win_w, g_win_h, sx - 2, sy - 1, b->w + 4, b->h + 2, b->bg_color);
-                    }
-                    uint32_t col = b->color;
-                    if (b->link_idx >= 0) {
-                        col = (b->link_idx == g_hovered_link) ? COLOR_LINK_HOVER : COLOR_LINK;
-                    }
-                    woos_draw_text(g_fb, g_win_w, g_win_h, sx, sy + 2, b->text, col);
-                }
-                if (b->link_idx >= 0) {
-                    uint32_t col = (b->link_idx == g_hovered_link) ? COLOR_LINK_HOVER : COLOR_LINK;
-                    fill_rect(g_fb, g_win_w, g_win_h, sx, sy + b->h - 3, b->w, 1, col);
-                }
-                if (b->type == ITEM_HEADER && b->is_header && b->h >= 24) {
-                    fill_rect(g_fb, g_win_w, g_win_h, sx, sy + b->h - 2, b->w > 120 ? b->w : 120, 2, 0x3867D6);
-                }
-                break;
-            }
-
-            case ITEM_HR: {
-                fill_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, 1, b->color);
-                break;
-            }
-
-            case ITEM_IMAGE: {
-                if (b->elem_idx >= 0 && b->elem_idx < g_num_images) {
-                    browser_image_t* bimg = &g_images[b->elem_idx];
-                    if (bimg->loaded == 1 && bimg->img && bimg->img->pixels) {
-                        image_blit_alpha_clipped(g_fb, g_win_w, g_win_h, sx, sy,
-                                                 bimg->img->pixels, bimg->img->width, bimg->img->height, bimg->img->width,
-                                                 0, view_y, g_win_w, view_h);
-                    } else {
-                        fill_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, 0xEDEDED);
-                        draw_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, 0xCBD5E1);
-                        woos_draw_text(g_fb, g_win_w, g_win_h, sx + 8, sy + (b->h - 10) / 2, "[Image]", 0x94A3B8);
-                    }
-                }
-                break;
-            }
-
-            case ITEM_INPUT: {
-                if (b->elem_idx >= 0 && b->elem_idx < g_num_inputs) {
-                    browser_input_t* inp = &g_inputs[b->elem_idx];
-                    fill_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, COLOR_INPUT_BG);
-                    draw_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, inp->is_focused ? COLOR_INPUT_FOCUS : COLOR_INPUT_BORDER);
-
-                    const char* show_txt = inp->value[0] ? inp->value : inp->placeholder;
-                    uint32_t txt_col = inp->value[0] ? COLOR_ADDR_TEXT : COLOR_TEXT_MUTED;
-                    woos_draw_text(g_fb, g_win_w, g_win_h, sx + 6, sy + 5, show_txt, txt_col);
-
-                    if (inp->is_focused) {
-                        int cx = sx + 6 + inp->cursor_pos * CHAR_W;
-                        if (cx >= sx + 4 && cx < sx + b->w - 4) {
-                            fill_rect(g_fb, g_win_w, g_win_h, cx, sy + 4, 2, b->h - 8, 0x111111);
-                        }
-                    }
-                }
-                break;
-            }
-
-            case ITEM_BUTTON: {
-                draw_btn(sx, sy, b->w, b->h, b->text, 0, 0x3B4A5A);
-                break;
-            }
-        }
-    }
-
-    // Vertical Scrollbar
-    if (g_doc_height > view_h) {
-        int sb_x = g_win_w - 14;
-        fill_rect(g_fb, g_win_w, g_win_h, sb_x, view_y, 14, view_h, COLOR_SCROLL_TRACK);
-        int thumb_h = (view_h * view_h) / g_doc_height;
-        if (thumb_h < 20) thumb_h = 20;
-        int max_s = g_doc_height - view_h;
-        int thumb_y = view_y + (g_scroll_y * (view_h - thumb_h)) / (max_s > 0 ? max_s : 1);
-        fill_rect(g_fb, g_win_w, g_win_h, sb_x + 1, thumb_y, 12, thumb_h, COLOR_SCROLL_THUMB);
-    }
-
-    // 4. Status Bar (y = win_h - STATUSBAR_H .. win_h)
+    // Layer 6: BROWSER CHROME ON TOP: Status Bar (y = win_h - STATUSBAR_H .. win_h)
     int sb_y = g_win_h - STATUSBAR_H;
     fill_rect(g_fb, g_win_w, g_win_h, 0, sb_y, g_win_w, STATUSBAR_H, COLOR_STATUS_BG);
     draw_rect(g_fb, g_win_w, g_win_h, 0, sb_y, g_win_w, 1, 0x353B48);
@@ -1113,7 +1151,7 @@ static void redraw(void) {
         woos_draw_text(g_fb, g_win_w, g_win_h, 10, sb_y + 4, g_status_msg, COLOR_TEXT_MUTED);
     }
 
-    // 5. Universal Dialog Overlay
+    // Layer 7: Universal Dialog Overlay (topmost)
     if (g_dialog.active) {
         woos_dialog_draw(g_fb, g_win_w, g_win_h, &g_dialog);
     }
@@ -1204,6 +1242,23 @@ static void handle_click(int x, int y) {
     if (y >= HEADER_H && y < g_win_h - STATUSBAR_H) {
         g_url_focus = 0;
         int view_y = HEADER_H;
+        int view_h = g_win_h - HEADER_H - STATUSBAR_H;
+
+        // Vertical scrollbar click & jump
+        if (g_doc_height > view_h && x >= g_win_w - 16) {
+            int thumb_h = (view_h * view_h) / g_doc_height;
+            if (thumb_h < 20) thumb_h = 20;
+            int max_s = g_doc_height - view_h;
+            int track_avail = view_h - thumb_h;
+            if (track_avail > 0) {
+                int click_offset = (y - view_y) - thumb_h / 2;
+                if (click_offset < 0) click_offset = 0;
+                if (click_offset > track_avail) click_offset = track_avail;
+                g_scroll_y = (click_offset * max_s) / track_avail;
+            }
+            return;
+        }
+
         int doc_y = y - view_y + g_scroll_y;
         int doc_x = x;
 
@@ -1456,6 +1511,14 @@ void _start(void) {
                 need_redraw = 1;
             } else if (msg.type == MSG_KEY_DOWN) {
                 handle_key((int)msg.arg1, (int)msg.arg2);
+                need_redraw = 1;
+            } else if (msg.type == MSG_SCROLL) {
+                int8_t dz = (int8_t)(int32_t)msg.arg3;
+                int view_h = g_win_h - HEADER_H - STATUSBAR_H;
+                int max_s = g_doc_height > view_h ? (g_doc_height - view_h) : 0;
+                g_scroll_y -= (int)dz * 36;
+                if (g_scroll_y < 0) g_scroll_y = 0;
+                if (g_scroll_y > max_s) g_scroll_y = max_s;
                 need_redraw = 1;
             } else if (msg.type == MSG_OPEN_FILE) {
                 char path[64];

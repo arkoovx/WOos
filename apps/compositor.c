@@ -1520,6 +1520,24 @@ void _start(void) {
                 need_redraw = 1;
             }
 
+            // 6. Mouse Wheel Scroll
+            else if (ev.type == 7) {
+                int8_t dz = (int8_t)ev.buttons;
+                int win_count = woos_graphics_get_window_count();
+                for (int i = 0; i < win_count; i++) {
+                    woos_window_info_t win;
+                    if (woos_graphics_get_window_info(i, &win) == 0 && win.active) {
+                        if (g_cursor_x >= win.x && g_cursor_x <= win.x + (int)win.w &&
+                            g_cursor_y >= win.y && g_cursor_y <= win.y + (int)win.h) {
+                            int client_x = g_cursor_x - win.x;
+                            int client_y = g_cursor_y - win.y;
+                            woos_ipc_send(win.thread_id, MSG_SCROLL, client_x, client_y, (uint32_t)(int32_t)dz, 0, 0);
+                            break;
+                        }
+                    }
+                }
+            }
+
             // 4. Keyboard Input
             else if (ev.type == 4) {
                 int ascii = ev.x;

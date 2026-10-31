@@ -20,41 +20,50 @@ void redraw_box_tree(struct box *b, int parent_x, int parent_y, int scroll_y, in
     int abs_x = parent_x + b->x;
     int abs_y = parent_y + b->y - scroll_y;
 
-    // Viewport culling
-    if (abs_y + b->height >= 0 && abs_y <= viewport_h) {
+    int clip_top = parent_y;
+    int clip_bottom = parent_y + viewport_h;
+
+    // Strict viewport culling to avoid drawing over toolbar or status bar
+    if (abs_y + b->height > clip_top && abs_y < clip_bottom) {
         // Draw background if present
         if (b->background_colour != 0 && b->background_colour != NS_TRANSPARENT) {
-            plot_style_t bg_style;
-            bg_style.fill_type = PLOT_OP_TYPE_SOLID;
-            bg_style.stroke_type = PLOT_OP_TYPE_NONE;
-            bg_style.fill_colour = b->background_colour;
+            int ry0 = abs_y < clip_top ? clip_top : abs_y;
+            int ry1 = (abs_y + b->height > clip_bottom) ? clip_bottom : (abs_y + b->height);
+            if (ry1 > ry0) {
+                plot_style_t bg_style;
+                bg_style.fill_type = PLOT_OP_TYPE_SOLID;
+                bg_style.stroke_type = PLOT_OP_TYPE_NONE;
+                bg_style.fill_colour = b->background_colour;
 
-            struct rect r;
-            r.x0 = abs_x;
-            r.y0 = abs_y;
-            r.x1 = abs_x + b->width;
-            r.y1 = abs_y + b->height;
-            ctx->plot->rectangle(ctx, &bg_style, &r);
+                struct rect r;
+                r.x0 = abs_x;
+                r.y0 = ry0;
+                r.x1 = abs_x + b->width;
+                r.y1 = ry1;
+                ctx->plot->rectangle(ctx, &bg_style, &r);
+            }
         }
 
         // Draw borders if present
         if (b->border[TOP].width > 0 || b->border[LEFT].width > 0) {
-            plot_style_t border_style;
-            border_style.fill_type = PLOT_OP_TYPE_NONE;
-            border_style.stroke_type = PLOT_OP_TYPE_SOLID;
-            border_style.stroke_colour = b->border[TOP].c ? b->border[TOP].c : 0xCCCCCC;
-            border_style.stroke_width = plot_style_int_to_fixed(1);
+            if (abs_y >= clip_top && abs_y + b->height <= clip_bottom) {
+                plot_style_t border_style;
+                border_style.fill_type = PLOT_OP_TYPE_NONE;
+                border_style.stroke_type = PLOT_OP_TYPE_SOLID;
+                border_style.stroke_colour = b->border[TOP].c ? b->border[TOP].c : 0xCCCCCC;
+                border_style.stroke_width = plot_style_int_to_fixed(1);
 
-            struct rect r;
-            r.x0 = abs_x;
-            r.y0 = abs_y;
-            r.x1 = abs_x + b->width;
-            r.y1 = abs_y + b->height;
-            ctx->plot->rectangle(ctx, &border_style, &r);
+                struct rect r;
+                r.x0 = abs_x;
+                r.y0 = abs_y;
+                r.x1 = abs_x + b->width;
+                r.y1 = abs_y + b->height;
+                ctx->plot->rectangle(ctx, &border_style, &r);
+            }
         }
 
-        // Draw text
-        if (b->text && b->length > 0) {
+        // Draw text strictly inside viewport
+        if (b->text && b->length > 0 && abs_y >= clip_top && (abs_y + 14) <= clip_bottom) {
             struct plot_font_style fstyle;
             fstyle.family = PLOT_FONT_FAMILY_SANS_SERIF;
             fstyle.size = 14 * PLOT_STYLE_SCALE;
@@ -68,7 +77,9 @@ void redraw_box_tree(struct box *b, int parent_x, int parent_y, int scroll_y, in
 
         // Draw bitmap / image if attached
         if (b->type == BOX_INLINE_BLOCK && b->image_data && b->width > 0 && b->height > 0) {
-            ctx->plot->bitmap(ctx, (struct bitmap*)b->image_data, abs_x, abs_y, b->width, b->height, 0, 0);
+            if (abs_y >= clip_top && abs_y + b->height <= clip_bottom) {
+                ctx->plot->bitmap(ctx, (struct bitmap*)b->image_data, abs_x, abs_y, b->width, b->height, 0, 0);
+            }
         }
     }
 

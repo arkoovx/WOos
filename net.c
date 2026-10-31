@@ -813,7 +813,7 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
     str_cat(req, path, sizeof(req));
     str_cat(req, " HTTP/1.1\r\nHost: ", sizeof(req));
     str_cat(req, host_buf, sizeof(req));
-    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (compatible; WoOS/1.55; +http://woos.org)\r\nAccept: text/html,application/xhtml+xml,*/*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", sizeof(req));
+    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0\r\nAccept: text/html,application/xhtml+xml,*/*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", sizeof(req));
 
     uint32_t req_len = 0;
     while (req[req_len] != '\0') req_len++;
@@ -976,6 +976,7 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
         if (is_chunked) {
             serial_printf("[HTTP] Decoding chunked transfer body...\n");
             body_len = http_unchunk(body, body_len);
+            serial_printf("[HTTP] Chunked decoding finished: %u unchunked bytes\n", body_len);
         }
 
         memmove(out_buf, body, body_len);
@@ -1070,7 +1071,7 @@ int32_t net_http_download(const char* url, const char* dest_path) {
     str_cat(req, path, sizeof(req));
     str_cat(req, " HTTP/1.1\r\nHost: ", sizeof(req));
     str_cat(req, host_buf, sizeof(req));
-    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (compatible; WoOS/1.55; +http://woos.org)\r\nAccept: */*\r\nConnection: close\r\n\r\n", sizeof(req));
+    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0\r\nAccept: */*\r\nConnection: close\r\n\r\n", sizeof(req));
 
     uint32_t req_len = 0;
     while (req[req_len] != '\0') req_len++;

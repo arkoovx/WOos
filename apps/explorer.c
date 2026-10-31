@@ -1141,6 +1141,14 @@ void _start(void) {
             } else if (msg.type == MSG_KEY_DOWN) {
                 handle_key((int)msg.arg1, (int)msg.arg2);
                 needs_redraw = 1;
+            } else if (msg.type == MSG_SCROLL) {
+                int8_t dz = (int8_t)(int32_t)msg.arg3;
+                g_scroll_offset -= (int)dz * 3;
+                if (g_scroll_offset < 0) g_scroll_offset = 0;
+                int visible_rows = (g_win_h - 100) / 22;
+                int max_off = (g_item_count > visible_rows) ? (g_item_count - visible_rows) : 0;
+                if (g_scroll_offset > max_off) g_scroll_offset = max_off;
+                needs_redraw = 1;
             }
         }
 
