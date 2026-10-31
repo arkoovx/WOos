@@ -87,6 +87,7 @@ void wasm_runtime_run_file(const char* filepath) {
     IM3Function start_func = 0;
     res = m3_FindFunction(&start_func, runtime, "_start");
     if (res) {
+        serial_printf("[WASM] _start lookup error: %s\n", res);
         res = m3_FindFunction(&start_func, runtime, "main");
     }
 

@@ -41,4 +41,11 @@ SECTIONS
     }
 
     __kernel_end = .;
+
+    /DISCARD/ : {
+        *(.eh_frame)
+        *(.eh_frame_hdr)
+        *(.note*)
+        *(.comment)
+    }
 }

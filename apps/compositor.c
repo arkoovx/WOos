@@ -214,21 +214,26 @@ static void load_wallpaper(void) {
     int32_t fd = woos_vfs_open("/WALLPAP.BMP", VFS_MODE_READ);
     if (fd < 0) return;
 
-    uint8_t header[54];
-    uint32_t r = woos_vfs_read(fd, header, 54);
-    if (r < 54 || header[0] != 'B' || header[1] != 'M') {
+    uint32_t fsize = woos_vfs_size(fd);
+    static uint8_t s_bmp_data[512 * 1024];
+    if (fsize < 54 || fsize > sizeof(s_bmp_data)) {
         woos_vfs_close(fd);
         return;
     }
 
-    uint32_t offset = *(const uint32_t*)&header[10];
-    int32_t w = *(const int32_t*)&header[18];
-    int32_t h = *(const int32_t*)&header[22];
-    uint16_t bpp = *(const uint16_t*)&header[28];
-    uint32_t comp = *(const uint32_t*)&header[30];
+    uint32_t r = woos_vfs_read(fd, s_bmp_data, fsize);
+    woos_vfs_close(fd);
+    if (r < 54 || s_bmp_data[0] != 'B' || s_bmp_data[1] != 'M') {
+        return;
+    }
 
-    if ((comp != 0 && comp != 3) || (bpp != 24 && bpp != 32) || w <= 0 || h == 0) {
-        woos_vfs_close(fd);
+    uint32_t offset = *(const uint32_t*)&s_bmp_data[10];
+    int32_t w = *(const int32_t*)&s_bmp_data[18];
+    int32_t h = *(const int32_t*)&s_bmp_data[22];
+    uint16_t bpp = *(const uint16_t*)&s_bmp_data[28];
+    uint32_t comp = *(const uint32_t*)&s_bmp_data[30];
+
+    if ((comp != 0 && comp != 3) || (bpp != 24 && bpp != 32) || w <= 0 || h == 0 || offset >= fsize) {
         return;
     }
 
@@ -238,18 +243,14 @@ static void load_wallpaper(void) {
     int target_h = SCREEN_H - TASKBAR_H;
 
     int row_bytes = ((w * (bpp / 8) + 3) & ~3);
-    static uint8_t row_buf[4096 * 4];
-    int last_src_y = -1;
 
     for (int y = 0; y < target_h; y++) {
         int src_y = (y * abs_h) / target_h;
         if (!is_top_down) src_y = abs_h - 1 - src_y;
 
-        if (src_y != last_src_y) {
-            woos_vfs_seek(fd, offset + (uint32_t)src_y * row_bytes);
-            if (woos_vfs_read(fd, row_buf, (uint32_t)row_bytes) <= 0) break;
-            last_src_y = src_y;
-        }
+        uint32_t row_off = offset + (uint32_t)src_y * row_bytes;
+        if (row_off + (uint32_t)row_bytes > fsize) continue;
+        const uint8_t* row_buf = s_bmp_data + row_off;
 
         uint32_t* dst_row = g_wallpaper + y * target_w;
         for (int x = 0; x < target_w; x++) {
@@ -267,7 +268,6 @@ static void load_wallpaper(void) {
             }
         }
     }
-    woos_vfs_close(fd);
     g_has_wallpaper = 1;
 }
 
