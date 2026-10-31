@@ -231,6 +231,7 @@ run:
 		-accel kvm -accel tcg \
 		-drive file=os.img,format=raw,index=0,media=disk \
 		-m 256M \
+		-rtc base=localtime \
 		-serial stdio \
 		-vga virtio \
 		-device virtio-net-pci,netdev=net0 \
@@ -243,6 +244,7 @@ run-bg: os.img
 		-accel kvm -accel tcg \
 		-drive file=os.img,format=raw,index=0,media=disk \
 		-m 256M \
+		-rtc base=localtime \
 		-serial file:serial.log \
 		-vga virtio \
 		-device virtio-net-pci,netdev=net0 \
@@ -259,7 +261,8 @@ run-ahci: os.img
 		-device ich9-ahci,id=ahci \
 		-drive id=disk,file=os.img,format=raw,if=none \
 		-device ide-hd,drive=disk,bus=ahci.0 \
-		-m 128M \
+		-m 256M \
+		-rtc base=localtime \
 		-serial stdio \
 		-vga virtio \
 		-device virtio-net-pci,netdev=net0 \
