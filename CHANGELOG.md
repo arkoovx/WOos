@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.58.0
+- Прямой перенос оригинального исходного кода NetSurf в WebAssembly среду WoOS (Upstream NetSurf Freestanding WebAssembly Port):
+  - Клонирование и интеграция оригинальных подсистем upstream NetSurf в `external/netsurf/`:
+    - `libnsfb`: нативная библиотека поверхностей и растровой графики NetSurf (`libnsfb.c`, `surface.c`, `cursor.c`, `palette.c`, `generic.c`, `util.c`, `ram.c`, `32bpp-xrgb8888.c`, `32bpp-xbgr8888.c`, `16bpp.c`, `8bpp.c`, `api.c`).
+    - `frontends/framebuffer`: драйвер фреймбуфера NetSurf (`framebuffer.c`) и Framebuffer Toolkit (`fbtk/fbtk.c`, `window.c`, `user.c`, `text.c`, `scroll.c`, `bitmap.c`, `fill.c`, `event.c`).
+    - `libsvgtiny`: оригинальный векторный SVG-парсер NetSurf (`svgtiny_list.c`, `svgtiny_path.c`, `svgtiny_gradient.c`).
+    - `render`: оригинальная блочная модель NetSurf Box Tree, Layout и Redraw (`box.c`, `layout.c`, `redraw.c`).
+  - Freestanding WebAssembly среда компиляции:
+    - Разработан набор заголовочных файлов без libc (`external/netsurf/include/`) для `clang --target=wasm32 -nostdlib -O2 -fno-builtin`: `<stddef.h>`, `<stdbool.h>`, `<stdint.h>`, `<limits.h>`, `<assert.h>`, `<ctype.h>`, `<string.h>`, `<stdlib.h>`, `<stdio.h>`, `<math.h>`, `<inttypes.h>`, `<unistd.h>`, `<sys/types.h>`.
+    - Экспорт универсального распределителя памяти кучи `woos_malloc`, `woos_free`, `woos_realloc`, `woos_calloc` с внешней компоновкой из `apps/woos_mem.h` для всех скомпонованных модулей NetSurf.
+    - Устранение коллизий линковщика WebAssembly (`memcmp`, `memset`, `memcpy`, `memmove`) и обеспечение надежной динамической регистрации поверхностей `libnsfb` (`_nsfb_register_surface` и `NSFB_SURFACE_RAM`).
+  - Полная сборка `apps/browser.wasm` и включение в образ FAT32 `woosfs.bin` и `os.img`.
+
+
 ## 1.57.0
 - Восстановление и оптимизация загрузки системы, сжатие ядра и ускорение композитора (Kernel Footprint Optimization, ELF Section Cleanup & Compositor Instant Boot):
   - Устранение зависания при загрузке ядра и коллизии памяти реального режима (`Makefile`, `linker.ld`):

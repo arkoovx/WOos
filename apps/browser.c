@@ -1,7 +1,31 @@
 #include "woos.h"
+#include "woos_mem.h"
 #include "image.h"
 #include "icons.h"
 #include "woos_dialog.h"
+
+// NetSurf subsystems
+#include "netsurf/plotters.h"
+#include "netsurf/plot_style.h"
+#include "netsurf/types.h"
+#include "libnsfb.h"
+#include "libnsfb_plot.h"
+#include "libnsfb_event.h"
+#include "nsfb.h"
+typedef struct nsfb_bbox_s bbox_t;
+struct fbtk_bitmap;
+#include "framebuffer.h"
+#include "fbtk.h"
+#include "render/box.h"
+#include "svgtiny.h"
+
+// NetSurf Layout and Redraw declarations
+int layout_document_tree(struct box *root, int viewport_width);
+void redraw_box_tree(struct box *b, int parent_x, int parent_y, int scroll_y, int viewport_h, const struct redraw_context *ctx);
+
+static struct box *g_doc_root = NULL;
+static nsfb_t *g_nsfb = NULL;
+static fbtk_widget_t *g_fbtk = NULL;
 
 #define DEFAULT_WIN_W 760
 #define DEFAULT_WIN_H 520
@@ -47,16 +71,16 @@
 #define MAX_HISTORY 32
 
 typedef enum {
-    BOX_TEXT,
-    BOX_HEADER,
-    BOX_HR,
-    BOX_IMAGE,
-    BOX_INPUT,
-    BOX_BUTTON
-} box_type_t;
+    ITEM_TEXT,
+    ITEM_HEADER,
+    ITEM_HR,
+    ITEM_IMAGE,
+    ITEM_INPUT,
+    ITEM_BUTTON
+} layout_item_type_t;
 
 typedef struct {
-    box_type_t type;
+    layout_item_type_t type;
     int x, y, w, h;
     char text[160];
     int text_len;
@@ -353,6 +377,12 @@ static void load_image_for_slot(int slot, const char* img_url) {
 }
 
 static void parse_html_to_boxes(int fetch_images) {
+    if (g_doc_root) {
+        box_free_tree(g_doc_root);
+        g_doc_root = NULL;
+    }
+    g_doc_root = box_create(BOX_BLOCK);
+
     g_num_boxes = 0;
     g_num_links = 0;
     g_num_inputs = 0;
@@ -404,7 +434,7 @@ static void parse_html_to_boxes(int fetch_images) {
                 }
                 if (g_num_boxes < MAX_BOXES) {
                     layout_box_t* b = &g_boxes[g_num_boxes++];
-                    b->type = in_header ? BOX_HEADER : BOX_TEXT;
+                    b->type = in_header ? ITEM_HEADER : ITEM_TEXT;
                     b->x = cur_x;
                     b->y = cur_y;
                     b->w = ww;
@@ -420,6 +450,18 @@ static void parse_html_to_boxes(int fetch_images) {
                     b->elem_idx = -1;
                     cur_x += ww + CHAR_W;
                     if (cur_y + line_h > g_doc_height) g_doc_height = cur_y + line_h;
+
+                    if (g_doc_root) {
+                        struct box* nb = box_create(in_header ? BOX_BLOCK : BOX_TEXT);
+                        if (nb) {
+                            nb->text = strdup(word_buf);
+                            nb->length = word_len;
+                            nb->width = ww;
+                            nb->height = line_h;
+                            nb->background_colour = in_code ? COLOR_CODE_BG : NS_TRANSPARENT;
+                            box_add_child(g_doc_root, nb);
+                        }
+                    }
                 }
                 word_len = 0;
             }
@@ -469,7 +511,7 @@ static void parse_html_to_boxes(int fetch_images) {
                     if (cur_x > 20) { cur_y += line_h + 6; cur_x = 20; }
                     if (g_num_boxes < MAX_BOXES) {
                         layout_box_t* b = &g_boxes[g_num_boxes++];
-                        b->type = BOX_HR;
+                        b->type = ITEM_HR;
                         b->x = 20;
                         b->y = cur_y;
                         b->w = g_win_w - 40;
@@ -493,7 +535,7 @@ static void parse_html_to_boxes(int fetch_images) {
                     cur_x = 20;
                     if (g_num_boxes < MAX_BOXES) {
                         layout_box_t* b = &g_boxes[g_num_boxes++];
-                        b->type = BOX_TEXT;
+                        b->type = ITEM_TEXT;
                         b->x = cur_x;
                         b->y = cur_y;
                         b->w = 12;
@@ -589,7 +631,7 @@ static void parse_html_to_boxes(int fetch_images) {
                         if (cur_x + bw > g_win_w - 36) { cur_y += 32; cur_x = 20; }
                         if (g_num_boxes < MAX_BOXES) {
                             layout_box_t* b = &g_boxes[g_num_boxes++];
-                            b->type = BOX_BUTTON;
+                            b->type = ITEM_BUTTON;
                             b->x = cur_x;
                             b->y = cur_y;
                             b->w = bw;
@@ -616,7 +658,7 @@ static void parse_html_to_boxes(int fetch_images) {
                             inp->is_focused = 0;
 
                             layout_box_t* b = &g_boxes[g_num_boxes++];
-                            b->type = BOX_INPUT;
+                            b->type = ITEM_INPUT;
                             b->x = cur_x;
                             b->y = cur_y;
                             b->w = iw;
@@ -660,7 +702,7 @@ static void parse_html_to_boxes(int fetch_images) {
                             int img_h = g_images[slot].disp_h > 0 ? g_images[slot].disp_h : 32;
 
                             layout_box_t* b = &g_boxes[g_num_boxes++];
-                            b->type = BOX_IMAGE;
+                            b->type = ITEM_IMAGE;
                             b->x = cur_x;
                             b->y = cur_y;
                             b->w = img_w;
@@ -711,7 +753,7 @@ static void parse_html_to_boxes(int fetch_images) {
                 }
                 if (g_num_boxes < MAX_BOXES) {
                     layout_box_t* b = &g_boxes[g_num_boxes++];
-                    b->type = in_header ? BOX_HEADER : BOX_TEXT;
+                    b->type = in_header ? ITEM_HEADER : ITEM_TEXT;
                     b->x = cur_x;
                     b->y = cur_y;
                     b->w = ww;
@@ -727,6 +769,18 @@ static void parse_html_to_boxes(int fetch_images) {
                     b->elem_idx = -1;
                     cur_x += ww + CHAR_W;
                     if (cur_y + line_h > g_doc_height) g_doc_height = cur_y + line_h;
+
+                    if (g_doc_root) {
+                        struct box* nb = box_create(in_header ? BOX_BLOCK : BOX_TEXT);
+                        if (nb) {
+                            nb->text = strdup(word_buf);
+                            nb->length = word_len;
+                            nb->width = ww;
+                            nb->height = line_h;
+                            nb->background_colour = in_code ? COLOR_CODE_BG : NS_TRANSPARENT;
+                            box_add_child(g_doc_root, nb);
+                        }
+                    }
                 }
                 word_len = 0;
             }
@@ -743,7 +797,7 @@ static void parse_html_to_boxes(int fetch_images) {
         int ww = word_len * CHAR_W;
         if (g_num_boxes < MAX_BOXES) {
             layout_box_t* b = &g_boxes[g_num_boxes++];
-            b->type = in_header ? BOX_HEADER : BOX_TEXT;
+            b->type = in_header ? ITEM_HEADER : ITEM_TEXT;
             b->x = cur_x;
             b->y = cur_y;
             b->w = ww;
@@ -763,7 +817,7 @@ static void parse_html_to_boxes(int fetch_images) {
 
     if (g_num_boxes == 0) {
         layout_box_t* b = &g_boxes[g_num_boxes++];
-        b->type = BOX_TEXT;
+        b->type = ITEM_TEXT;
         b->x = 20; b->y = 20; b->w = 120; b->h = LINE_H;
         strcpy(b->text, "Empty page.");
         b->text_len = 11;
@@ -771,6 +825,11 @@ static void parse_html_to_boxes(int fetch_images) {
         b->link_idx = -1;
         b->elem_idx = -1;
         g_doc_height = 40;
+    }
+
+    if (g_doc_root) {
+        int netsurf_h = layout_document_tree(g_doc_root, g_win_w - 40);
+        if (netsurf_h > g_doc_height) g_doc_height = netsurf_h;
     }
 }
 
@@ -941,6 +1000,15 @@ static void redraw(void) {
     int view_y = HEADER_H;
     int view_h = g_win_h - HEADER_H - STATUSBAR_H;
 
+    if (g_doc_root && g_nsfb) {
+        struct redraw_context ctx;
+        ctx.interactive = true;
+        ctx.background_images = true;
+        ctx.plot = &fb_plotters;
+        ctx.priv = g_nsfb;
+        redraw_box_tree(g_doc_root, 20, HEADER_H, g_scroll_y, view_h, &ctx);
+    }
+
     for (int i = 0; i < g_num_boxes; i++) {
         layout_box_t* b = &g_boxes[i];
         int sy = view_y + b->y - g_scroll_y;
@@ -949,8 +1017,8 @@ static void redraw(void) {
         if (sy + b->h < view_y || sy > view_y + view_h) continue;
 
         switch (b->type) {
-            case BOX_TEXT:
-            case BOX_HEADER: {
+            case ITEM_TEXT:
+            case ITEM_HEADER: {
                 if (b->bg_color != 0) {
                     fill_rect(g_fb, g_win_w, g_win_h, sx - 2, sy - 1, b->w + 4, b->h + 2, b->bg_color);
                 }
@@ -962,18 +1030,18 @@ static void redraw(void) {
                 if (b->link_idx >= 0) {
                     fill_rect(g_fb, g_win_w, g_win_h, sx, sy + b->h - 3, b->w, 1, col);
                 }
-                if (b->type == BOX_HEADER && b->is_header && b->h >= 24) {
+                if (b->type == ITEM_HEADER && b->is_header && b->h >= 24) {
                     fill_rect(g_fb, g_win_w, g_win_h, sx, sy + b->h - 2, b->w > 120 ? b->w : 120, 2, 0x3867D6);
                 }
                 break;
             }
 
-            case BOX_HR: {
+            case ITEM_HR: {
                 fill_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, 1, b->color);
                 break;
             }
 
-            case BOX_IMAGE: {
+            case ITEM_IMAGE: {
                 if (b->elem_idx >= 0 && b->elem_idx < g_num_images) {
                     browser_image_t* bimg = &g_images[b->elem_idx];
                     if (bimg->loaded == 1 && bimg->img && bimg->img->pixels) {
@@ -989,7 +1057,7 @@ static void redraw(void) {
                 break;
             }
 
-            case BOX_INPUT: {
+            case ITEM_INPUT: {
                 if (b->elem_idx >= 0 && b->elem_idx < g_num_inputs) {
                     browser_input_t* inp = &g_inputs[b->elem_idx];
                     fill_rect(g_fb, g_win_w, g_win_h, sx, sy, b->w, b->h, COLOR_INPUT_BG);
@@ -1009,7 +1077,7 @@ static void redraw(void) {
                 break;
             }
 
-            case BOX_BUTTON: {
+            case ITEM_BUTTON: {
                 draw_btn(sx, sy, b->w, b->h, b->text, 0, 0x3B4A5A);
                 break;
             }
@@ -1139,10 +1207,10 @@ static void handle_click(int x, int y) {
         for (int i = 0; i < g_num_boxes; i++) {
             layout_box_t* b = &g_boxes[i];
             if (doc_x >= b->x && doc_x <= b->x + b->w && doc_y >= b->y && doc_y <= b->y + b->h) {
-                if (b->type == BOX_INPUT && b->elem_idx >= 0) {
+                if (b->type == ITEM_INPUT && b->elem_idx >= 0) {
                     hit_input = b->elem_idx;
                     break;
-                } else if (b->type == BOX_BUTTON && b->elem_idx >= 0) {
+                } else if (b->type == ITEM_BUTTON && b->elem_idx >= 0) {
                     submit_form(b->elem_idx);
                     return;
                 } else if (b->link_idx >= 0 && b->link_idx < g_num_links) {
@@ -1330,6 +1398,13 @@ void _start(void) {
     g_win_idx = woos_create_window(g_win_w, g_win_h, "NetSurf Browser", 0);
     if (g_win_idx < 0) return;
 
+    // Initialize NetSurf Framebuffer & Toolkit
+    g_nsfb = framebuffer_initialise("ram", g_win_w, g_win_h, 32);
+    if (g_nsfb) {
+        g_nsfb->ptr = (uint8_t*)g_fb;
+        g_fbtk = fbtk_init(g_nsfb);
+    }
+
     // Check if system opened a file
     char open_file[64];
     if (woos_system_get_open_file(open_file, sizeof(open_file)) == 0 && open_file[0] != '\0') {
@@ -1349,6 +1424,11 @@ void _start(void) {
         while (woos_ipc_recv(&msg) > 0) {
             if (msg.type == MSG_CLOSE) {
                 free_page_images();
+                if (g_doc_root) {
+                    box_free_tree(g_doc_root);
+                    g_doc_root = NULL;
+                }
+                framebuffer_finalise();
                 woos_destroy_window(g_win_idx);
                 return;
             } else if (msg.type == MSG_RESIZE) {
@@ -1359,6 +1439,10 @@ void _start(void) {
                     if (new_h > MAX_WIN_H) new_h = MAX_WIN_H;
                     g_win_w = new_w;
                     g_win_h = new_h;
+                    if (g_nsfb) {
+                        framebuffer_resize(g_nsfb, g_win_w, g_win_h, 32);
+                        g_nsfb->ptr = (uint8_t*)g_fb;
+                    }
                     parse_html_to_boxes(0);
                     need_redraw = 1;
                 }

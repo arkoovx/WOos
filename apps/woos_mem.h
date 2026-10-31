@@ -15,7 +15,7 @@ typedef struct wasm_block {
 static uint8_t g_wasm_heap[WASM_HEAP_SIZE];
 static wasm_block_t* g_wasm_heap_head = 0;
 
-static inline void wasm_heap_init_if_needed(void) {
+void wasm_heap_init_if_needed(void) {
     if (!g_wasm_heap_head) {
         g_wasm_heap_head = (wasm_block_t*)g_wasm_heap;
         g_wasm_heap_head->size = WASM_HEAP_SIZE;
@@ -24,7 +24,7 @@ static inline void wasm_heap_init_if_needed(void) {
     }
 }
 
-static inline void* woos_malloc(size_t size) {
+void* woos_malloc(size_t size) {
     if (size == 0) return 0;
     wasm_heap_init_if_needed();
 
@@ -55,7 +55,7 @@ static inline void* woos_malloc(size_t size) {
     return 0;
 }
 
-static inline void woos_free(void* ptr) {
+void woos_free(void* ptr) {
     if (!ptr) return;
     wasm_block_t* cur = (wasm_block_t*)((uint8_t*)ptr - sizeof(wasm_block_t));
     cur->used = 0;
@@ -103,7 +103,7 @@ static inline int woos_memcmp(const void* s1, const void* s2, size_t n) {
     return 0;
 }
 
-static inline void* woos_realloc(void* ptr, size_t new_size) {
+void* woos_realloc(void* ptr, size_t new_size) {
     if (!ptr) return woos_malloc(new_size);
     if (new_size == 0) {
         woos_free(ptr);
@@ -119,6 +119,15 @@ static inline void* woos_realloc(void* ptr, size_t new_size) {
         woos_free(ptr);
     }
     return new_ptr;
+}
+
+void* woos_calloc(size_t nmemb, size_t size) {
+    size_t total = nmemb * size;
+    void* p = woos_malloc(total);
+    if (p) {
+        woos_memset(p, 0, total);
+    }
+    return p;
 }
 
 #endif

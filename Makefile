@@ -128,8 +128,42 @@ apps/fetch.wasm: apps/fetch.c apps/woos.h
 apps/imageview.wasm: apps/imageview.c apps/image.h apps/woos_mem.h apps/woos.h apps/woos_dialog.h
 	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iexternal/stb/include -Wl,--no-entry -Wl,--initial-memory=33554432 -Wl,--export-memory -Wl,--export=_start apps/imageview.c -o apps/imageview.wasm
 
-apps/browser.wasm: apps/browser.c apps/woos.h apps/icons.h apps/woos_dialog.h apps/image.h apps/woos_mem.h
-	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iapps -Iexternal/stb/include -Wl,--no-entry -Wl,--initial-memory=33554432 -Wl,--export-memory -Wl,--export=_start apps/browser.c -o apps/browser.wasm
+NETSURF_SRCS := external/netsurf/libnsfb/libnsfb.c \
+                external/netsurf/libnsfb/surface.c \
+                external/netsurf/libnsfb/cursor.c \
+                external/netsurf/libnsfb/palette.c \
+                external/netsurf/libnsfb/generic.c \
+                external/netsurf/libnsfb/util.c \
+                external/netsurf/libnsfb/ram.c \
+                external/netsurf/libnsfb/32bpp-xrgb8888.c \
+                external/netsurf/libnsfb/32bpp-xbgr8888.c \
+                external/netsurf/libnsfb/16bpp.c \
+                external/netsurf/libnsfb/8bpp.c \
+                external/netsurf/libnsfb/api.c \
+                external/netsurf/frontends/framebuffer/framebuffer.c \
+                external/netsurf/frontends/framebuffer/fbtk/fbtk.c \
+                external/netsurf/frontends/framebuffer/fbtk/window.c \
+                external/netsurf/frontends/framebuffer/fbtk/user.c \
+                external/netsurf/frontends/framebuffer/fbtk/text.c \
+                external/netsurf/frontends/framebuffer/fbtk/scroll.c \
+                external/netsurf/frontends/framebuffer/fbtk/bitmap.c \
+                external/netsurf/frontends/framebuffer/fbtk/fill.c \
+                external/netsurf/frontends/framebuffer/fbtk/event.c \
+                external/netsurf/libsvgtiny/svgtiny_list.c \
+                external/netsurf/libsvgtiny/svgtiny_path.c \
+                external/netsurf/libsvgtiny/svgtiny_gradient.c \
+                external/netsurf/render/box.c \
+                external/netsurf/render/layout.c \
+                external/netsurf/render/redraw.c
+
+apps/browser.wasm: apps/browser.c $(NETSURF_SRCS) apps/woos.h apps/icons.h apps/woos_dialog.h apps/image.h apps/woos_mem.h
+	clang --target=wasm32 -nostdlib -O2 -fno-builtin \
+		-I. -Iapps -Iexternal/netsurf -Iexternal/netsurf/include \
+		-Iexternal/netsurf/libnsfb -Iexternal/netsurf/frontends \
+		-Iexternal/netsurf/frontends/framebuffer -Iexternal/netsurf/libsvgtiny \
+		-Iexternal/stb/include \
+		-Wl,--no-entry -Wl,--initial-memory=33554432 -Wl,--export-memory -Wl,--export=_start \
+		apps/browser.c $(NETSURF_SRCS) -o apps/browser.wasm
 
 woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm apps/terminal.wasm apps/notepad.wasm apps/explorer.wasm apps/wasi_test.wasm apps/fetch.wasm apps/imageview.wasm apps/browser.wasm
 	python3 tools/build_fat.py

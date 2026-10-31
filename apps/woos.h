@@ -325,23 +325,20 @@ WASI_API("path_rename")
 uint32_t wasi_path_rename(uint32_t old_fd, const char* old_path, uint32_t old_path_len, uint32_t new_fd, const char* new_path, uint32_t new_path_len);
 
 // Basic libc-like helpers for standalone WASM
-__attribute__((used))
-void* memset(void* s, int c, size_t n) {
+static inline void* memset(void* s, int c, size_t n) {
     uint8_t* p = (uint8_t*)s;
     while (n--) *p++ = (uint8_t)c;
     return s;
 }
 
-__attribute__((used))
-void* memcpy(void* dest, const void* src, size_t n) {
+static inline void* memcpy(void* dest, const void* src, size_t n) {
     uint8_t* d = (uint8_t*)dest;
     const uint8_t* s = (const uint8_t*)src;
     while (n--) *d++ = *s++;
     return dest;
 }
 
-__attribute__((used))
-void* memmove(void* dest, const void* src, size_t n) {
+static inline void* memmove(void* dest, const void* src, size_t n) {
     uint8_t* d = (uint8_t*)dest;
     const uint8_t* s = (const uint8_t*)src;
     if (d < s) {
@@ -353,6 +350,18 @@ void* memmove(void* dest, const void* src, size_t n) {
     }
     return dest;
 }
+
+#ifndef _WOOS_MEMCMP_DEFINED
+#define _WOOS_MEMCMP_DEFINED
+static inline int memcmp(const void* s1, const void* s2, size_t n) {
+    const unsigned char* p1 = (const unsigned char*)s1;
+    const unsigned char* p2 = (const unsigned char*)s2;
+    for (size_t i = 0; i < n; i++) {
+        if (p1[i] != p2[i]) return (int)p1[i] - (int)p2[i];
+    }
+    return 0;
+}
+#endif
 
 static inline size_t strlen(const char* s) {
     size_t len = 0;
