@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #define MAX_THREADS 16
+#define THREAD_STACK_PAGES 128
 
 typedef struct context {
     uint64_t r15;

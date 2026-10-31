@@ -500,6 +500,21 @@ static duk_ret_t js_location_assign(duk_context *ctx) {
     return 0;
 }
 
+static void js_attach_dom_methods(duk_context *ctx) {
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "appendChild");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "removeChild");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "addEventListener");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "removeEventListener");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "setAttribute");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "getAttribute");
+}
+
 static duk_ret_t js_doc_create_element(duk_context *ctx) {
     const char *tag = duk_get_top(ctx) > 0 ? duk_to_string(ctx, 0) : "div";
     duk_push_object(ctx);
@@ -515,16 +530,7 @@ static duk_ret_t js_doc_create_element(duk_context *ctx) {
     duk_put_prop_string(ctx, -2, "className");
     duk_push_object(ctx);
     duk_put_prop_string(ctx, -2, "style");
-    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
-    duk_put_prop_string(ctx, -2, "appendChild");
-    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
-    duk_put_prop_string(ctx, -2, "removeChild");
-    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
-    duk_put_prop_string(ctx, -2, "addEventListener");
-    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
-    duk_put_prop_string(ctx, -2, "setAttribute");
-    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
-    duk_put_prop_string(ctx, -2, "getAttribute");
+    js_attach_dom_methods(ctx);
     return 1;
 }
 
@@ -539,8 +545,7 @@ static duk_ret_t js_doc_get_element_by_id(duk_context *ctx) {
             duk_put_prop_string(ctx, -2, "value");
             duk_push_object(ctx);
             duk_put_prop_string(ctx, -2, "style");
-            duk_push_c_function(ctx, js_noop, DUK_VARARGS);
-            duk_put_prop_string(ctx, -2, "addEventListener");
+            js_attach_dom_methods(ctx);
             return 1;
         }
     }
@@ -549,8 +554,7 @@ static duk_ret_t js_doc_get_element_by_id(duk_context *ctx) {
     duk_put_prop_string(ctx, -2, "id");
     duk_push_object(ctx);
     duk_put_prop_string(ctx, -2, "style");
-    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
-    duk_put_prop_string(ctx, -2, "addEventListener");
+    js_attach_dom_methods(ctx);
     return 1;
 }
 
@@ -619,6 +623,16 @@ static void js_init_environment(void) {
     int is_https = (strncmp(g_url, "https://", 8) == 0);
     duk_push_string(g_js_ctx, is_https ? "https:" : "http:");
     duk_put_prop_string(g_js_ctx, -2, "protocol");
+    duk_push_string(g_js_ctx, "");
+    duk_put_prop_string(g_js_ctx, -2, "search");
+    duk_push_string(g_js_ctx, "");
+    duk_put_prop_string(g_js_ctx, -2, "hash");
+    duk_push_string(g_js_ctx, "/");
+    duk_put_prop_string(g_js_ctx, -2, "pathname");
+    duk_push_string(g_js_ctx, "www.google.com");
+    duk_put_prop_string(g_js_ctx, -2, "hostname");
+    duk_push_string(g_js_ctx, "www.google.com");
+    duk_put_prop_string(g_js_ctx, -2, "host");
     duk_push_c_function(g_js_ctx, js_location_assign, 1);
     duk_put_prop_string(g_js_ctx, -2, "assign");
     duk_push_c_function(g_js_ctx, js_location_assign, 1);
@@ -626,6 +640,26 @@ static void js_init_environment(void) {
     duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
     duk_put_prop_string(g_js_ctx, -2, "reload");
     duk_put_prop_string(g_js_ctx, -2, "location");
+
+    // google API
+    duk_push_object(g_js_ctx);
+    duk_push_string(g_js_ctx, "webhp");
+    duk_put_prop_string(g_js_ctx, -2, "sn");
+    duk_push_string(g_js_ctx, "ru");
+    duk_put_prop_string(g_js_ctx, -2, "kHL");
+    duk_push_string(g_js_ctx, "");
+    duk_put_prop_string(g_js_ctx, -2, "kEI");
+    duk_push_object(g_js_ctx);
+    duk_put_prop_string(g_js_ctx, -2, "erd");
+    duk_push_object(g_js_ctx);
+    duk_put_prop_string(g_js_ctx, -2, "xjs");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "ml");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "log");
+    duk_dup(g_js_ctx, -1);
+    duk_put_prop_string(g_js_ctx, -3, "google");
+    duk_put_prop_string(g_js_ctx, -2, "google");
 
     // document
     duk_push_object(g_js_ctx);
@@ -651,16 +685,19 @@ static void js_init_environment(void) {
     duk_put_prop_string(g_js_ctx, -2, "tagName");
     duk_push_object(g_js_ctx);
     duk_put_prop_string(g_js_ctx, -2, "style");
+    js_attach_dom_methods(g_js_ctx);
     duk_put_prop_string(g_js_ctx, -2, "body");
 
     duk_push_object(g_js_ctx);
     duk_push_string(g_js_ctx, "head");
     duk_put_prop_string(g_js_ctx, -2, "tagName");
+    js_attach_dom_methods(g_js_ctx);
     duk_put_prop_string(g_js_ctx, -2, "head");
 
     duk_push_object(g_js_ctx);
     duk_push_string(g_js_ctx, "html");
     duk_put_prop_string(g_js_ctx, -2, "tagName");
+    js_attach_dom_methods(g_js_ctx);
     duk_put_prop_string(g_js_ctx, -2, "documentElement");
 
     duk_put_prop_string(g_js_ctx, -2, "document");
@@ -712,11 +749,21 @@ static int is_safe_script(const char* code) {
 static void js_eval_script(const char* code) {
     if (!g_js_ctx || !code || code[0] == '\0') return;
     if (!is_safe_script(code)) return;
-    duk_push_string(g_js_ctx, code);
+
+    size_t code_len = strlen(code);
+    char* wrapped = (char*)malloc(code_len + 32);
+    if (!wrapped) return;
+
+    memcpy(wrapped, "try {\n", 6);
+    memcpy(wrapped + 6, code, code_len);
+    memcpy(wrapped + 6 + code_len, "\n} catch (e) {}\0", 17);
+
+    duk_push_string(g_js_ctx, wrapped);
     if (duk_peval(g_js_ctx) != 0) {
         // Safe evaluation
     }
     duk_pop(g_js_ctx);
+    free(wrapped);
 }
 
 static void parse_html_to_boxes(int fetch_images) {

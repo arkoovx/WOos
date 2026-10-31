@@ -62,7 +62,7 @@ void thread_create(void (*entry_point)(void)) {
     }
 
     thread_t* t = &g_threads[slot];
-    uint32_t needed_stack_pages = 16;
+    uint32_t needed_stack_pages = THREAD_STACK_PAGES;
 
     // Освобождаем старое PML4 если этот слот был пользовательским процессом
     if (t->cr3 != 0 && t->cr3 != g_kernel_cr3) {
@@ -323,8 +323,8 @@ void process_create(void) {
     memset(user_stack_phys, 0, 4096);
     vmm_map_page(pml4, 0x100001000, (uint64_t)user_stack_phys, VMM_PAGE_USER | VMM_PAGE_WRITABLE | VMM_PAGE_PRESENT);
 
-    // 4. Выделяем стек ядра для переключения TSS (16 страниц, как и у всех потоков)
-    uint32_t needed_kernel_pages = 16;
+    // 4. Выделяем стек ядра для переключения TSS
+    uint32_t needed_kernel_pages = THREAD_STACK_PAGES;
     void* kernel_stack_page = pmm_alloc_pages_multi(needed_kernel_pages);
     if (!kernel_stack_page) {
         serial_printf("[Scheduler] Error: failed to allocate kernel stack page for process!\n");

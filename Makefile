@@ -230,7 +230,7 @@ clean:
 
 # Запуск WoOS в QEMU с виртуальной сетью (user-mode NAT)
 # Порт хоста 8080 → порт ОС 80 (для теста HTTP-сервера)
-run:
+run: os.img
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-drive file=os.img,format=raw,index=0,media=disk \

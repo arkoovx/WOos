@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.59.3
+- Устранение паники ядра (General Protection Fault #13), защита от переполнения стека потоков, расширение резервирования кучи и безопасное выполнение JavaScript (`sched.h`, `sched.c`, `pmm.c`, `apps/browser.c`, `Makefile`):
+  - Устранение Kernel Panic `CPU EXCEPTION: 13 (General Protection Fault)`:
+    - Исправлено критическое переполнение стека ядра: размер стека потоков (`THREAD_STACK_PAGES`) в `sched.h` и `sched.c` увеличен с 16 страниц (64 КБ) до 128 страниц (512 КБ). Предотвращено перезаписывание контекста соседних потоков (включая композитор) во время ресурсоемких криптографических операций BearSSL TLS, декодирования chunked-ответов и исполнения WebAssembly/Duktape.
+  - Исправление диапазона резервирования кучи ядра (`kheap`) в PMM (`pmm.c`):
+    - В функции `page_is_reserved()` диапазон защищаемой памяти расширен с 64 МБ до полных 128 МБ (`0x02000000ull` .. `0x0A000000ull`), в полном соответствии с константой `KHEAP_ARENA_SIZE` в `kheap.c`. Это исключило наложение выделяемых физических страниц PMM на динамическую область кучи ядра.
+  - Безопасное выполнение JavaScript и расширение DOM API для Google (`apps/browser.c`):
+    - Обертывание выполнения скриптов в JavaScript-конструкцию `try { ... } catch (e) {}` перед вызовом `duk_peval`, что полностью предотвратило аварийный вызов `longjmp` / `__builtin_trap()` при возникновении любых динамических ошибок выполнения.
+    - В среду выполнения Duktape добавлены глобальные объекты и свойства `window.google` и `google` (`sn`, `kHL`, `kEI`, `erd`, `xjs`, `ml`, `log`), необходимые скриптам главной страницы Google.
+    - Объект `location` дополнен свойствами `search`, `hash`, `pathname`, `hostname` и `host`.
+    - Все возвращаемые DOM-элементы (`js_doc_get_element_by_id`, `js_doc_create_element`, `document.body`, `document.head`, `document.documentElement`) дополнены безопасными заглушками методов манипуляции деревом (`appendChild`, `removeChild`, `addEventListener`, `removeEventListener`, `setAttribute`, `getAttribute`).
+  - Гарантированная пересборка образа системы в Makefile:
+    - Цель `run` дополнена явной зависимостью от `os.img`, гарантируя автоматическую сборку свежего дискового образа перед запуском виртуальной машины.
+
 ## 1.59.2
 - Комплексное исправление веб-серфинга, устранение WASM-ловушек, интерактивный скроллбар и поддержка колеса мыши (`apps/browser.c`, `apps/compositor.c`, `mouse.c`, `external/duktape/duk_shims.c`, `tools/build_fat.py`):
   - Устранение сбоя Google и ловушки WASM unreachable (`[trap] unreachable executed ()`):
