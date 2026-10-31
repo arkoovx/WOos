@@ -129,7 +129,7 @@ apps/imageview.wasm: apps/imageview.c apps/image.h apps/woos_mem.h apps/woos.h a
 	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iexternal/stb/include -Wl,--no-entry -Wl,--initial-memory=33554432 -Wl,--export-memory -Wl,--export=_start apps/imageview.c -o apps/imageview.wasm
 
 apps/browser.wasm: apps/browser.c apps/woos.h apps/icons.h apps/woos_dialog.h apps/image.h apps/woos_mem.h
-	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iapps -Iexternal/stb/include -Wl,--no-entry -Wl,--initial-memory=16777216 -Wl,--export-memory -Wl,--export=_start apps/browser.c -o apps/browser.wasm
+	clang --target=wasm32 -nostdlib -O2 -fno-builtin -I. -Iapps -Iexternal/stb/include -Wl,--no-entry -Wl,--initial-memory=33554432 -Wl,--export-memory -Wl,--export=_start apps/browser.c -o apps/browser.wasm
 
 woosfs.bin: tools/build_fat.py apps/compositor.wasm apps/calc.wasm apps/terminal.wasm apps/notepad.wasm apps/explorer.wasm apps/wasi_test.wasm apps/fetch.wasm apps/imageview.wasm apps/browser.wasm
 	python3 tools/build_fat.py

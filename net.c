@@ -611,6 +611,61 @@ static const char* find_case_header(const char* buf, const char* name) {
     return NULL;
 }
 
+static uint32_t http_unchunk(char* body, uint32_t body_len) {
+    if (!body || body_len == 0) return 0;
+    char* src = body;
+    char* dst = body;
+    char* end = body + body_len;
+
+    while (src < end) {
+        while (src < end && (*src == '\r' || *src == '\n' || *src == ' ' || *src == '\t')) {
+            src++;
+        }
+        if (src >= end) break;
+
+        uint32_t chunk_sz = 0;
+        int has_digits = 0;
+        while (src < end) {
+            char c = *src;
+            uint32_t val = 0;
+            if (c >= '0' && c <= '9') val = (uint32_t)(c - '0');
+            else if (c >= 'a' && c <= 'f') val = (uint32_t)(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F') val = (uint32_t)(c - 'A' + 10);
+            else break;
+            chunk_sz = (chunk_sz << 4) | val;
+            has_digits = 1;
+            src++;
+        }
+
+        if (!has_digits) break;
+
+        while (src < end && *src != '\n') src++;
+        if (src < end && *src == '\n') src++;
+
+        if (chunk_sz == 0) {
+            break;
+        }
+
+        uint32_t to_copy = chunk_sz;
+        if ((uint32_t)(end - src) < to_copy) {
+            to_copy = (uint32_t)(end - src);
+        }
+
+        if (dst != src) {
+            extern void* memmove(void* dest, const void* src, size_t n);
+            memmove(dst, src, to_copy);
+        }
+        dst += to_copy;
+        src += to_copy;
+
+        if (src < end && *src == '\r') src++;
+        if (src < end && *src == '\n') src++;
+    }
+
+    *dst = '\0';
+    return (uint32_t)(dst - body);
+}
+
 static int parse_url(const char* url, int* is_https, char* host, uint32_t host_sz, uint16_t* port, const char** path, int* had_scheme) {
     if (!url || !host || host_sz < 4) return -1;
     const char* p = url;
@@ -758,7 +813,7 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
     str_cat(req, path, sizeof(req));
     str_cat(req, " HTTP/1.1\r\nHost: ", sizeof(req));
     str_cat(req, host_buf, sizeof(req));
-    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (compatible; WoOS/1.55; +http://woos.org)\r\nAccept: text/html,*/*\r\nConnection: close\r\n\r\n", sizeof(req));
+    str_cat(req, "\r\nUser-Agent: Mozilla/5.0 (compatible; WoOS/1.55; +http://woos.org)\r\nAccept: text/html,application/xhtml+xml,*/*\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", sizeof(req));
 
     uint32_t req_len = 0;
     while (req[req_len] != '\0') req_len++;
@@ -881,6 +936,16 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
         }
     }
 
+    // Check if Transfer-Encoding: chunked is present in headers
+    int is_chunked = 0;
+    const char* te = find_case_header(out_buf, "transfer-encoding:");
+    if (te) {
+        while (*te == ' ' || *te == '\t') te++;
+        if (find_substr((char*)te, "chunked") || find_substr((char*)te, "CHUNKED")) {
+            is_chunked = 1;
+        }
+    }
+
     // Strip HTTP response headers so browser gets clean HTML
     char* body = find_substr(out_buf, "\r\n\r\n");
     if (body) {
@@ -892,9 +957,29 @@ static int32_t net_http_fetch_single(const char* url, char* out_buf, uint32_t ma
 
     if (body) {
         extern void* memmove(void* dest, const void* src, size_t n);
-        uint32_t body_len = 0;
-        while (body[body_len] != '\0') body_len++;
-        memmove(out_buf, body, body_len + 1);
+        uint32_t hdr_len = (uint32_t)(body - out_buf);
+        uint32_t body_len = (total_rx > hdr_len) ? (total_rx - hdr_len) : 0;
+
+        // Heuristic: if is_chunked or body starts with hex followed by \r\n (e.g. 7892\r\n)
+        if (!is_chunked && body_len > 4) {
+            char* p = body;
+            int hex_cnt = 0;
+            while (*p && ((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F'))) {
+                hex_cnt++;
+                p++;
+            }
+            if (hex_cnt >= 1 && hex_cnt <= 8 && *p == '\r' && *(p + 1) == '\n') {
+                is_chunked = 1;
+            }
+        }
+
+        if (is_chunked) {
+            serial_printf("[HTTP] Decoding chunked transfer body...\n");
+            body_len = http_unchunk(body, body_len);
+        }
+
+        memmove(out_buf, body, body_len);
+        out_buf[body_len] = '\0';
         total_rx = body_len;
     }
 

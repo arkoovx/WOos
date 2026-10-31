@@ -208,22 +208,31 @@ def main():
 
     welcome_htm = b"""<!DOCTYPE html>
 <html>
-<head><title>Welcome to WoOS Navigator</title></head>
+<head><title>Welcome to WoOS NetSurf Navigator</title></head>
 <body>
 <h1>WoOS Web Browser</h1>
-<p>Welcome to <b>WoOS Navigator</b> with native <b>HTTPS (TLS 1.2)</b> and HTTP browsing!</p>
+<p><img src="/LOGO.PNG" width="160" height="48"></p>
+<p>Welcome to <b>WoOS Navigator</b> powered by NetSurf layout engine with native <b>HTTPS (TLS 1.2)</b>, inline images, and interactive web search!</p>
 <hr>
-<h3>Quick Search &amp; Popular Portals:</h3>
+<h3>Search the Web</h3>
+<form action="https://html.duckduckgo.com/html/" method="GET">
+<input type="text" name="q" placeholder="Search the web (Google, Wikipedia, DuckDuckGo)..." value="">
+<input type="submit" value="Search">
+</form>
+<hr>
+<h3>Popular Web Portals:</h3>
 <p>
-<a href="https://www.wikipedia.org">Wikipedia - The Free Encyclopedia (HTTPS)</a><br>
-<a href="https://www.google.com">Google Search (HTTPS)</a><br>
-<a href="https://wiby.me">Wiby Web Search (HTTPS)</a><br>
-<a href="http://frogfind.com">FrogFind Lightweight Search (HTTP)</a><br>
+<a href="https://www.google.com/?gbv=1">Google Search (Pure HTML)</a><br>
+<a href="https://html.duckduckgo.com/html/">DuckDuckGo Search (HTML5)</a><br>
+<a href="https://en.m.wikipedia.org">Wikipedia - The Free Encyclopedia (Mobile HTTPS)</a><br>
+<a href="https://wiby.me">Wiby Web Search</a><br>
+<a href="http://frogfind.com">FrogFind Lightweight Portal</a><br>
 <a href="https://example.com">Example Domain (Cloudflare HTTPS)</a><br>
 </p>
 <hr>
-<h3>File Downloads:</h3>
-<p>Click [Download] in the toolbar or navigate to any file link (.zip, .png, .jpg, .wasm) to download directly to your Desktop!</p>
+<h3>Local Images &amp; Downloads:</h3>
+<p>Local Gallery: <a href="/PHOTO.JPG">Photo (JPEG)</a> | <a href="/WALLPAP.BMP">Wallpaper (BMP)</a></p>
+<p>Click [Download] in the toolbar to save any remote file or package to your Desktop!</p>
 </body>
 </html>
 """
