@@ -230,7 +230,7 @@ run:
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-drive file=os.img,format=raw,index=0,media=disk \
-		-m 128M \
+		-m 256M \
 		-serial stdio \
 		-vga virtio \
 		-device virtio-net-pci,netdev=net0 \
@@ -242,7 +242,7 @@ run-bg: os.img
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-drive file=os.img,format=raw,index=0,media=disk \
-		-m 128M \
+		-m 256M \
 		-serial file:serial.log \
 		-vga virtio \
 		-device virtio-net-pci,netdev=net0 \
