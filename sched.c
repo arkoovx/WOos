@@ -4,13 +4,17 @@
 #include "timer.h"
 #include "vmm.h"
 #include "tss.h"
+#include <stddef.h>
+
+extern void* memset(void* s, int c, size_t n);
+extern void* memcpy(void* dest, const void* src, size_t n);
 
 static uint64_t g_kernel_cr3 = 0;
 uint64_t g_current_kernel_stack_top = 0;
 
 
 
-static thread_t g_threads[MAX_THREADS];
+static thread_t g_threads[MAX_THREADS] __attribute__((aligned(16)));
 static uint32_t g_num_threads = 0;
 static uint32_t g_current_thread_idx = 0;
 static uint8_t g_sched_ready = 0;
@@ -35,6 +39,7 @@ void sched_init(void) {
     main_thread->stack_limit = 0; // Не отслеживаем стек для kmain
     main_thread->cr3 = g_kernel_cr3;
     main_thread->kernel_stack_top = 0x0009F000; // Стековая вершина загрузки ядра (в безопасной низкой памяти)
+    __asm__ volatile ("fxsave (%0)" :: "r"(main_thread->fpu_state));
 
     g_num_threads = 1;
     g_sched_ready = 1;
@@ -105,6 +110,14 @@ void thread_create(void (*entry_point)(void)) {
     t->cr3 = g_kernel_cr3;
     t->kernel_stack_top = stack_top;
 
+    static uint8_t s_default_fpu[512] __attribute__((aligned(16)));
+    static int s_default_fpu_inited = 0;
+    if (!s_default_fpu_inited) {
+        __asm__ volatile ("fxsave (%0)" :: "r"(s_default_fpu));
+        s_default_fpu_inited = 1;
+    }
+    memcpy(t->fpu_state, s_default_fpu, 512);
+
     serial_printf("[Scheduler] Created thread %d (entry=%p, stack=%p, pages=%u)\n", 
                   (int)t->id, entry_point, t->stack_limit, t->stack_pages_count);
     if (slot == g_num_threads) {
@@ -170,6 +183,8 @@ uint64_t schedule_interrupt(uint64_t current_rsp) {
         return 0;
     }
 
+    __asm__ volatile ("fxsave (%0)" :: "r"(g_threads[g_current_thread_idx].fpu_state));
+
     g_threads[next_idx].state = THREAD_RUNNING;
     g_current_thread_idx = next_idx;
     g_current_kernel_stack_top = g_threads[next_idx].kernel_stack_top;
@@ -180,7 +195,7 @@ uint64_t schedule_interrupt(uint64_t current_rsp) {
     // Переключаем виртуальное адресное пространство
     vmm_switch((pml4_t*)g_threads[next_idx].cr3);
 
-
+    __asm__ volatile ("fxrstor (%0)" :: "r"(g_threads[next_idx].fpu_state));
 
     return g_threads[next_idx].rsp;
 }
@@ -228,6 +243,8 @@ uint64_t schedule_irq(uint64_t current_rsp, uint64_t vector) {
         g_threads[g_current_thread_idx].state = THREAD_READY;
     }
 
+    __asm__ volatile ("fxsave (%0)" :: "r"(g_threads[g_current_thread_idx].fpu_state));
+
     g_threads[best_idx].state = THREAD_RUNNING;
     g_current_thread_idx = best_idx;
     g_current_kernel_stack_top = g_threads[best_idx].kernel_stack_top;
@@ -235,7 +252,7 @@ uint64_t schedule_irq(uint64_t current_rsp, uint64_t vector) {
     tss_set_rsp0(g_threads[best_idx].kernel_stack_top);
     vmm_switch((pml4_t*)g_threads[best_idx].cr3);
 
-
+    __asm__ volatile ("fxrstor (%0)" :: "r"(g_threads[best_idx].fpu_state));
 
     return g_threads[best_idx].rsp;
 }
@@ -257,9 +274,6 @@ void thread_exit(int status) {
         __asm__ __volatile__("hlt");
     }
 }
-
-extern void* memset(void* s, int c, size_t n);
-extern void* memcpy(void* dest, const void* src, size_t n);
 
 void process_create(void) {
     if (g_num_threads >= MAX_THREADS) {

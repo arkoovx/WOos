@@ -24,6 +24,27 @@ __attribute__((used)) static const char* magic = "KERNEL_START_MARKER";
 
 uint64_t g_tsc_per_ms = 2000000ULL;
 
+void fpu_init(void) {
+    uint64_t cr0;
+    __asm__ volatile ("mov %%cr0, %0" : "=r"(cr0));
+    cr0 &= ~(1ULL << 2); // Clear EM (bit 2) - Emulation
+    cr0 &= ~(1ULL << 3); // Clear TS (bit 3) - Task Switch
+    cr0 |= (1ULL << 1);  // Set MP (bit 1) - Monitor Coprocessor
+    cr0 |= (1ULL << 5);  // Set NE (bit 5) - Numeric Error
+    __asm__ volatile ("mov %0, %%cr0" :: "r"(cr0));
+
+    uint64_t cr4;
+    __asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
+    cr4 |= (1ULL << 9);  // Set OSFXSR (bit 9) - FXSAVE/FXRSTOR support
+    cr4 |= (1ULL << 10); // Set OSXMMEXCPT (bit 10) - Unmasked SIMD FP exceptions
+    __asm__ volatile ("mov %0, %%cr4" :: "r"(cr4));
+
+    __asm__ volatile ("fninit");
+
+    uint32_t mxcsr = 0x1F80; // Mask all SIMD FP exceptions (bits 7-12)
+    __asm__ volatile ("ldmxcsr %0" :: "m"(mxcsr));
+}
+
 void calibrate_tsc(void) {
     uint32_t start_ticks = timer_ticks();
     // Ждем изменения тика
@@ -137,6 +158,8 @@ static void run_stage(video_info_t* video, init_stage_t stage) {
             break;
         case INIT_PLATFORM:
             serial_printf("[WoOS Kernel] Initializing platform components...\n");
+            fpu_init();
+            serial_printf("[WoOS Kernel] FPU and SSE initialized.\n");
             fb_init(video);
             fb_enable_write_combining(video);
             serial_printf("[WoOS Kernel] Framebuffer driver initialized with Write-Combining.\n");

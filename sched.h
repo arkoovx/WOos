@@ -44,6 +44,7 @@ typedef struct thread {
     uint64_t cr3;              // Физический адрес PML4 (0 для ядра)
     uint64_t kernel_stack_top; // Вершина стека ядра для переключения TSS
     char app_path[64];         // Путь к исполняемому WASM приложению
+    uint8_t fpu_state[512] __attribute__((aligned(16))); // Область FXSAVE/FXRSTOR
 } thread_t;
 
 void sched_init(void);
