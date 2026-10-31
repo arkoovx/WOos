@@ -330,6 +330,7 @@ uint32_t wasi_path_unlink_file(uint32_t dirfd, const char* path, uint32_t path_l
 WASI_API("path_rename")
 uint32_t wasi_path_rename(uint32_t old_fd, const char* old_path, uint32_t old_path_len, uint32_t new_fd, const char* new_path, uint32_t new_path_len);
 
+#ifndef _STRING_H_
 // Basic libc-like helpers for standalone WASM
 static inline void* memset(void* s, int c, size_t n) {
     uint8_t* p = (uint8_t*)s;
@@ -450,6 +451,7 @@ static inline int strncmp(const char* s1, const char* s2, size_t n) {
     }
     return 0;
 }
+#endif
 
 static inline int strcasecmp_custom(const char* s1, const char* s2) {
     while (*s1 && *s2) {

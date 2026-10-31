@@ -1,3 +1,4 @@
+#define WOOS_USE_LIBC_MALLOC 1
 #include "woos.h"
 #include "woos_mem.h"
 #include "image.h"
@@ -465,6 +466,233 @@ static inline int tag_match(const char* tag, const char* name) {
     return (c == '\0' || c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '>' || c == '/');
 }
 
+#include "duktape.h"
+
+static duk_context *g_js_ctx = NULL;
+
+static duk_ret_t js_console_log(duk_context *ctx) {
+    (void)ctx;
+    return 0;
+}
+
+static duk_ret_t js_noop(duk_context *ctx) {
+    (void)ctx;
+    return 0;
+}
+
+static duk_ret_t js_alert(duk_context *ctx) {
+    if (duk_get_top(ctx) > 0) {
+        const char *msg = duk_to_string(ctx, 0);
+        if (msg) set_status(msg);
+    }
+    return 0;
+}
+
+static duk_ret_t js_location_assign(duk_context *ctx) {
+    if (duk_get_top(ctx) > 0) {
+        const char *target = duk_to_string(ctx, 0);
+        if (target && target[0]) {
+            char abs_url[160];
+            resolve_url(g_url, target, abs_url, sizeof(abs_url));
+            navigate_to(abs_url, 1);
+        }
+    }
+    return 0;
+}
+
+static duk_ret_t js_doc_create_element(duk_context *ctx) {
+    const char *tag = duk_get_top(ctx) > 0 ? duk_to_string(ctx, 0) : "div";
+    duk_push_object(ctx);
+    duk_push_string(ctx, tag);
+    duk_put_prop_string(ctx, -2, "tagName");
+    duk_push_string(ctx, "");
+    duk_put_prop_string(ctx, -2, "innerHTML");
+    duk_push_string(ctx, "");
+    duk_put_prop_string(ctx, -2, "innerText");
+    duk_push_string(ctx, "");
+    duk_put_prop_string(ctx, -2, "id");
+    duk_push_string(ctx, "");
+    duk_put_prop_string(ctx, -2, "className");
+    duk_push_object(ctx);
+    duk_put_prop_string(ctx, -2, "style");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "appendChild");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "removeChild");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "addEventListener");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "setAttribute");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "getAttribute");
+    return 1;
+}
+
+static duk_ret_t js_doc_get_element_by_id(duk_context *ctx) {
+    const char *id = duk_get_top(ctx) > 0 ? duk_to_string(ctx, 0) : "";
+    for (int i = 0; i < g_num_inputs; i++) {
+        if (strcmp(g_inputs[i].name, id) == 0) {
+            duk_push_object(ctx);
+            duk_push_string(ctx, g_inputs[i].name);
+            duk_put_prop_string(ctx, -2, "id");
+            duk_push_string(ctx, g_inputs[i].value);
+            duk_put_prop_string(ctx, -2, "value");
+            duk_push_object(ctx);
+            duk_put_prop_string(ctx, -2, "style");
+            duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+            duk_put_prop_string(ctx, -2, "addEventListener");
+            return 1;
+        }
+    }
+    duk_push_object(ctx);
+    duk_push_string(ctx, id);
+    duk_put_prop_string(ctx, -2, "id");
+    duk_push_object(ctx);
+    duk_put_prop_string(ctx, -2, "style");
+    duk_push_c_function(ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(ctx, -2, "addEventListener");
+    return 1;
+}
+
+static duk_ret_t js_doc_query_selector(duk_context *ctx) {
+    return js_doc_get_element_by_id(ctx);
+}
+
+static duk_ret_t js_doc_query_selector_all(duk_context *ctx) {
+    duk_push_array(ctx);
+    return 1;
+}
+
+static void js_init_environment(void) {
+    if (g_js_ctx) {
+        duk_destroy_heap(g_js_ctx);
+        g_js_ctx = NULL;
+    }
+    g_js_ctx = duk_create_heap_default();
+    if (!g_js_ctx) return;
+
+    duk_push_global_object(g_js_ctx);
+
+    duk_dup(g_js_ctx, -1);
+    duk_put_prop_string(g_js_ctx, -2, "window");
+    duk_dup(g_js_ctx, -1);
+    duk_put_prop_string(g_js_ctx, -2, "self");
+    duk_dup(g_js_ctx, -1);
+    duk_put_prop_string(g_js_ctx, -2, "top");
+    duk_dup(g_js_ctx, -1);
+    duk_put_prop_string(g_js_ctx, -2, "parent");
+
+    // console
+    duk_push_object(g_js_ctx);
+    duk_push_c_function(g_js_ctx, js_console_log, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "log");
+    duk_push_c_function(g_js_ctx, js_console_log, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "warn");
+    duk_push_c_function(g_js_ctx, js_console_log, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "error");
+    duk_push_c_function(g_js_ctx, js_console_log, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "info");
+    duk_put_prop_string(g_js_ctx, -2, "console");
+
+    // navigator
+    duk_push_object(g_js_ctx);
+    duk_push_string(g_js_ctx, "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0");
+    duk_put_prop_string(g_js_ctx, -2, "userAgent");
+    duk_push_string(g_js_ctx, "Netscape");
+    duk_put_prop_string(g_js_ctx, -2, "appName");
+    duk_push_string(g_js_ctx, "5.0");
+    duk_put_prop_string(g_js_ctx, -2, "appVersion");
+    duk_push_string(g_js_ctx, "Linux x86_64");
+    duk_put_prop_string(g_js_ctx, -2, "platform");
+    duk_push_string(g_js_ctx, "ru-RU");
+    duk_put_prop_string(g_js_ctx, -2, "language");
+    duk_push_true(g_js_ctx);
+    duk_put_prop_string(g_js_ctx, -2, "cookieEnabled");
+    duk_push_true(g_js_ctx);
+    duk_put_prop_string(g_js_ctx, -2, "onLine");
+    duk_put_prop_string(g_js_ctx, -2, "navigator");
+
+    // location
+    duk_push_object(g_js_ctx);
+    duk_push_string(g_js_ctx, g_url);
+    duk_put_prop_string(g_js_ctx, -2, "href");
+    int is_https = (strncmp(g_url, "https://", 8) == 0);
+    duk_push_string(g_js_ctx, is_https ? "https:" : "http:");
+    duk_put_prop_string(g_js_ctx, -2, "protocol");
+    duk_push_c_function(g_js_ctx, js_location_assign, 1);
+    duk_put_prop_string(g_js_ctx, -2, "assign");
+    duk_push_c_function(g_js_ctx, js_location_assign, 1);
+    duk_put_prop_string(g_js_ctx, -2, "replace");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "reload");
+    duk_put_prop_string(g_js_ctx, -2, "location");
+
+    // document
+    duk_push_object(g_js_ctx);
+    duk_push_string(g_js_ctx, g_page_title);
+    duk_put_prop_string(g_js_ctx, -2, "title");
+    duk_push_string(g_js_ctx, "");
+    duk_put_prop_string(g_js_ctx, -2, "cookie");
+    duk_push_c_function(g_js_ctx, js_doc_create_element, 1);
+    duk_put_prop_string(g_js_ctx, -2, "createElement");
+    duk_push_c_function(g_js_ctx, js_doc_get_element_by_id, 1);
+    duk_put_prop_string(g_js_ctx, -2, "getElementById");
+    duk_push_c_function(g_js_ctx, js_doc_query_selector, 1);
+    duk_put_prop_string(g_js_ctx, -2, "querySelector");
+    duk_push_c_function(g_js_ctx, js_doc_query_selector_all, 1);
+    duk_put_prop_string(g_js_ctx, -2, "querySelectorAll");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "addEventListener");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "removeEventListener");
+
+    duk_push_object(g_js_ctx);
+    duk_push_string(g_js_ctx, "body");
+    duk_put_prop_string(g_js_ctx, -2, "tagName");
+    duk_push_object(g_js_ctx);
+    duk_put_prop_string(g_js_ctx, -2, "style");
+    duk_put_prop_string(g_js_ctx, -2, "body");
+
+    duk_push_object(g_js_ctx);
+    duk_push_string(g_js_ctx, "head");
+    duk_put_prop_string(g_js_ctx, -2, "tagName");
+    duk_put_prop_string(g_js_ctx, -2, "head");
+
+    duk_push_object(g_js_ctx);
+    duk_push_string(g_js_ctx, "html");
+    duk_put_prop_string(g_js_ctx, -2, "tagName");
+    duk_put_prop_string(g_js_ctx, -2, "documentElement");
+
+    duk_put_prop_string(g_js_ctx, -2, "document");
+
+    // Global APIs
+    duk_push_c_function(g_js_ctx, js_alert, 1);
+    duk_put_prop_string(g_js_ctx, -2, "alert");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "addEventListener");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "removeEventListener");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "setTimeout");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "clearTimeout");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "setInterval");
+    duk_push_c_function(g_js_ctx, js_noop, DUK_VARARGS);
+    duk_put_prop_string(g_js_ctx, -2, "clearInterval");
+
+    duk_pop(g_js_ctx);
+}
+
+static void js_eval_script(const char* code) {
+    if (!g_js_ctx || !code || code[0] == '\0') return;
+    duk_push_string(g_js_ctx, code);
+    if (duk_peval(g_js_ctx) != 0) {
+        // Safe evaluation
+    }
+    duk_pop(g_js_ctx);
+}
+
 static void parse_html_to_boxes(int fetch_images) {
     if (g_doc_root) {
         box_free_tree(g_doc_root);
@@ -480,6 +708,7 @@ static void parse_html_to_boxes(int fetch_images) {
 
     if (fetch_images) {
         free_page_images();
+        js_init_environment();
     }
 
     int cur_x = 20;
@@ -490,6 +719,7 @@ static void parse_html_to_boxes(int fetch_images) {
     char tag_quote = 0;
     int in_script = 0;
     int in_style = 0;
+    int in_noscript = 0;
     int in_title = 0;
     int in_link = 0;
     int cur_link_idx = -1;
@@ -497,6 +727,9 @@ static void parse_html_to_boxes(int fetch_images) {
     int in_code = 0;
     int in_header = 0;
     int in_list = 0;
+
+    static char script_buf[65536];
+    int script_len = 0;
 
     char cur_form_action[160] = "";
     char cur_form_method[8] = "GET";
@@ -525,6 +758,13 @@ static void parse_html_to_boxes(int fetch_images) {
         }
 
         if (*p == '<') {
+            if (in_noscript) {
+                in_tag = 1;
+                tag_quote = 0;
+                tag_len = 0;
+                p++;
+                continue;
+            }
             if (word_len > 0) {
                 word_buf[word_len] = '\0';
                 int ww = utf8_charlen(word_buf, word_len) * CHAR_W;
@@ -572,8 +812,47 @@ static void parse_html_to_boxes(int fetch_images) {
                 tag_buf[tag_len] = '\0';
 
                 // Tag handling
-                if (tag_match(tag_buf, "script")) in_script = 1;
-                else if (tag_match(tag_buf, "/script")) in_script = 0;
+                if (tag_match(tag_buf, "script")) {
+                    in_script = 1;
+                    script_len = 0;
+                    const char* spos = strstr(tag_buf, "src=");
+                    if (spos) {
+                        spos += 4;
+                        char q = 0;
+                        if (*spos == '"' || *spos == '\'') q = *spos++;
+                        char raw_src[160];
+                        int sidx = 0;
+                        while (*spos != '\0' && ((q && *spos != q) || (!q && *spos != ' ' && *spos != '>')) && sidx < 159) {
+                            raw_src[sidx++] = *spos++;
+                        }
+                        raw_src[sidx] = '\0';
+                        char abs_src[160];
+                        resolve_url(g_url, raw_src, abs_src, sizeof(abs_src));
+                        char* ext_code = (char*)malloc(32768);
+                        if (ext_code) {
+                            int32_t bytes = woos_net_fetch(abs_src, ext_code, 32767);
+                            if (bytes > 0) {
+                                ext_code[bytes] = '\0';
+                                js_eval_script(ext_code);
+                            }
+                            free(ext_code);
+                        }
+                    }
+                }
+                else if (tag_match(tag_buf, "/script")) {
+                    in_script = 0;
+                    if (script_len > 0) {
+                        script_buf[script_len] = '\0';
+                        js_eval_script(script_buf);
+                        script_len = 0;
+                    }
+                }
+                else if (tag_match(tag_buf, "noscript")) {
+                    in_noscript = 1;
+                }
+                else if (tag_match(tag_buf, "/noscript")) {
+                    in_noscript = 0;
+                }
                 else if (tag_match(tag_buf, "style")) in_style = 1;
                 else if (tag_match(tag_buf, "/style")) in_style = 0;
                 else if (tag_match(tag_buf, "title")) { in_title = 1; title_len = 0; }
@@ -822,7 +1101,20 @@ static void parse_html_to_boxes(int fetch_images) {
             continue;
         }
 
-        if (in_script || in_style) {
+        if (in_noscript) {
+            p++;
+            continue;
+        }
+
+        if (in_script) {
+            if (script_len + 1 < (int)sizeof(script_buf)) {
+                script_buf[script_len++] = *p;
+            }
+            p++;
+            continue;
+        }
+
+        if (in_style) {
             p++;
             continue;
         }

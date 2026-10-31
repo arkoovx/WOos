@@ -3,6 +3,21 @@
 
 #include "woos.h"
 
+#if defined(_STDLIB_H_) || defined(WOOS_USE_LIBC_MALLOC)
+void* malloc(size_t size);
+void free(void* ptr);
+void* realloc(void* ptr, size_t size);
+
+static inline void wasm_heap_init_if_needed(void) {}
+static inline void* woos_malloc(size_t size) { return malloc(size); }
+static inline void woos_free(void* ptr) { free(ptr); }
+static inline void* woos_realloc(void* ptr, size_t size) { return realloc(ptr, size); }
+static inline void* woos_memcpy(void* dst, const void* src, size_t n) { return memcpy(dst, src, n); }
+static inline void* woos_memset(void* dst, int val, size_t n) { return memset(dst, val, n); }
+static inline void* woos_memmove(void* dest, const void* src, size_t n) { return memmove(dest, src, n); }
+static inline int woos_memcmp(const void* s1, const void* s2, size_t n) { return memcmp(s1, s2, n); }
+#else
+
 #define WASM_HEAP_SIZE (16 * 1024 * 1024)
 
 typedef struct wasm_block {
@@ -129,5 +144,6 @@ void* woos_calloc(size_t nmemb, size_t size) {
     }
     return p;
 }
+#endif
 
 #endif

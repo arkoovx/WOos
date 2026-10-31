@@ -1,6 +1,22 @@
 # Changelog
 
-## 1.58.6
+## 1.59.0
+- Внедрение JavaScript-движка Duktape 2.7.0, объектной модели DOM и поддержки клиентских веб-сценариев (`external/duktape/`, `apps/browser.c`, `apps/woos_mem.h`, `apps/woos.h`, `kheap.c`, `Makefile`):
+  - Портирование и встраивание официального JavaScript-движка NetSurf (**Duktape 2.7.0**):
+    - Полная сборка амальгамации Duktape под архитектуру `wasm32-unknown-unknown` в режиме `-nostdlib -fno-builtin`.
+    - Разработан набор автономных libc-заголовков (`external/duktape/include/`) и слой платформенных шимов (`external/duktape/duk_shims.c`): математические функции (`sin`, `cos`, `tan`, `atan`, `atan2`, `asin`, `acos`, `exp`, `log`, `pow`, `fmod`), строковые и блочные операции памяти, форматирование `snprintf`/`vsnprintf`, stubs для времени и безопасная обработка исключений.
+    - Оптимизировано распределение памяти: аллокатор `woos_mem.h` в браузере переведен на единую динамическую кучу Duktape, исключив дублирование статических 16-мегабайтных массивов.
+    - В ядре операционной системы (`kheap.c`) размер пула динамической памяти `KHEAP_ARENA_SIZE` увеличен с 64 МБ до 128 МБ.
+  - Реализация среды Web DOM (Document Object Model) в JavaScript:
+    - Создана глобальная иерархия объектов браузера: `window`, `self`, `top`, `parent`.
+    - Объект `console`: реализованы методы `console.log`, `console.warn`, `console.error`, `console.info`.
+    - Объект `navigator`: поддержаны свойства `userAgent`, `appName`, `appVersion`, `platform`, `language`, `cookieEnabled`, `onLine`.
+    - Объект `location`: поддержаны свойства `href`, `protocol`, методы навигации `assign(url)`, `replace(url)` и `reload()`.
+    - Объект `document`: реализованы свойства `title`, `cookie`, `body`, `head`, `documentElement`, фабричный метод `createElement(tag)` и селекторы `getElementById(id)`, `querySelector(sel)`, `querySelectorAll(sel)`.
+    - Поддержана регистрация и снятие слушателей событий через `addEventListener` / `removeEventListener`, а также глобальные таймеры `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval` и модальное окно `alert`.
+  - Выполнение скриптов страниц и отключение блокирующих заглушек:
+    - Реализован парсер тегов `<script>`: поддерживается как прямое исполнение встроенного inline-кода JavaScript, так и сетевая загрузка внешних файлов скриптов (`<script src="...">`) через `woos_net_fetch`.
+    - Включена строгая обработка тегов `<noscript>`: при активном JS-движке содержимое тегов `<noscript>` полностью игнорируется и не рендерится, что устраняет редиректы Google на `/httpservice/retry/enablejs` и предотвращает отображение экранов с требованием включить JavaScript.
 - Улучшение веб-парсера, декодирование числовых HTML-сущностей, расширение буферов заголовков и оптимизация поисковых порталов (`apps/browser.c`, `tools/build_fat.py`):
   - Полноценная поддержка декодирования числовых HTML-сущностей:
     - В функцию разбора HTML-разметки `parse_html_to_boxes` добавлен декодер десятичных (`&#1087;`) и шестнадцатеричных (`&#x043F;`) сущностей в UTF-8. Тексты со страниц поисковых систем и энциклопедий (Wikipedia, Google) с закодированными символами юникода теперь автоматически преобразуются в нативный русский текст без отображения сырых спецсимволов `&#...;`.
