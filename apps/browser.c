@@ -723,8 +723,17 @@ static void js_init_environment(void) {
 
 static int is_safe_script(const char* code) {
     if (!code || code[0] == '\0') return 0;
+    while (*code == ' ' || *code == '\t' || *code == '\r' || *code == '\n') code++;
+    if (*code == '\0') return 0;
+
+    // Reject JSON-LD or JSON data blocks
+    if (*code == '{' || strstr(code, "\"@context\"") != NULL) return 0;
+
     size_t len = strlen(code);
     if (len > 2048) return 0; // Skip large scripts/bundles (>2KB)
+
+    // Reject template literals
+    if (strchr(code, '`') != NULL) return 0;
 
     // Check for ES6+ / unsupported features that trigger longjmp/trap in Duktape
     static const char* es6_words[] = {
@@ -732,6 +741,9 @@ static int is_safe_script(const char* code) {
         "const ", "\nconst ", ";const ", "const\t", "{const ", "(const ",
         "class ", "\nclass ", ";class ", "class{",
         "=>",
+        " of ",
+        "?.",
+        "??",
         "async ", "\nasync ",
         "await ",
         "import ", "\nimport ",
@@ -819,6 +831,61 @@ static void parse_html_to_boxes(int fetch_images) {
     const char* p = g_html;
 
     while (*p != '\0') {
+        if (in_script) {
+            if (p[0] == '<' && p[1] == '/' && strncasecmp_custom(p + 2, "script", 6) == 0) {
+                char next = p[8];
+                if (next == '>' || next == ' ' || next == '\t' || next == '\r' || next == '\n' || next == '/') {
+                    in_script = 0;
+                    if (script_len > 0) {
+                        script_buf[script_len] = '\0';
+                        if (is_safe_script(script_buf)) {
+                            js_eval_script(script_buf);
+                        }
+                        script_len = 0;
+                    }
+                    const char* close_tag = strchr(p, '>');
+                    if (close_tag) p = close_tag + 1;
+                    else p += 8;
+                    continue;
+                }
+            }
+            if (script_len + 1 < (int)sizeof(script_buf)) {
+                script_buf[script_len++] = *p;
+            }
+            p++;
+            continue;
+        }
+
+        if (in_style) {
+            if (p[0] == '<' && p[1] == '/' && strncasecmp_custom(p + 2, "style", 5) == 0) {
+                char next = p[7];
+                if (next == '>' || next == ' ' || next == '\t' || next == '\r' || next == '\n' || next == '/') {
+                    in_style = 0;
+                    const char* close_tag = strchr(p, '>');
+                    if (close_tag) p = close_tag + 1;
+                    else p += 7;
+                    continue;
+                }
+            }
+            p++;
+            continue;
+        }
+
+        if (in_noscript) {
+            if (p[0] == '<' && p[1] == '/' && strncasecmp_custom(p + 2, "noscript", 8) == 0) {
+                char next = p[10];
+                if (next == '>' || next == ' ' || next == '\t' || next == '\r' || next == '\n' || next == '/') {
+                    in_noscript = 0;
+                    const char* close_tag = strchr(p, '>');
+                    if (close_tag) p = close_tag + 1;
+                    else p += 10;
+                    continue;
+                }
+            }
+            p++;
+            continue;
+        }
+
         // 1. Skip HTML comments: <!-- ... -->
         if (p[0] == '<' && p[1] == '!' && p[2] == '-' && p[3] == '-') {
             const char* end_c = strstr(p + 4, "-->");
@@ -831,13 +898,6 @@ static void parse_html_to_boxes(int fetch_images) {
         }
 
         if (*p == '<') {
-            if (in_noscript) {
-                in_tag = 1;
-                tag_quote = 0;
-                tag_len = 0;
-                p++;
-                continue;
-            }
             if (word_len > 0) {
                 word_buf[word_len] = '\0';
                 int ww = utf8_charlen(word_buf, word_len) * CHAR_W;
@@ -884,38 +944,21 @@ static void parse_html_to_boxes(int fetch_images) {
                 in_tag = 0;
                 tag_buf[tag_len] = '\0';
 
-                // Tag handling inside <noscript>: ignore everything until </noscript>
-                if (in_noscript) {
-                    if (tag_match(tag_buf, "/noscript")) {
-                        in_noscript = 0;
-                    }
-                    p++;
-                    continue;
-                }
-
-                if (tag_match(tag_buf, "script")) {
-                    in_script = 1;
-                    script_len = 0;
-                    // Do not fetch remote external scripts to prevent network stalls and crashes
-                }
-                else if (tag_match(tag_buf, "/script")) {
-                    in_script = 0;
-                    if (script_len > 0) {
-                        script_buf[script_len] = '\0';
-                        if (is_safe_script(script_buf)) {
-                            js_eval_script(script_buf);
-                        }
+                int self_closing = (tag_len > 0 && tag_buf[tag_len - 1] == '/');
+                if (!self_closing && tag_match(tag_buf, "script")) {
+                    if (strstr(tag_buf, "json") != NULL || strstr(tag_buf, "template") != NULL) {
+                        in_script = 0;
+                    } else {
+                        in_script = 1;
                         script_len = 0;
                     }
                 }
-                else if (tag_match(tag_buf, "noscript")) {
+                else if (!self_closing && tag_match(tag_buf, "noscript")) {
                     in_noscript = 1;
                 }
-                else if (tag_match(tag_buf, "/noscript")) {
-                    in_noscript = 0;
+                else if (!self_closing && tag_match(tag_buf, "style")) {
+                    in_style = 1;
                 }
-                else if (tag_match(tag_buf, "style")) in_style = 1;
-                else if (tag_match(tag_buf, "/style")) in_style = 0;
                 else if (tag_match(tag_buf, "title")) { in_title = 1; title_len = 0; }
                 else if (tag_match(tag_buf, "/title")) {
                     in_title = 0;
@@ -1162,24 +1205,6 @@ static void parse_html_to_boxes(int fetch_images) {
             } else {
                 if (tag_len + 1 < (int)sizeof(tag_buf)) tag_buf[tag_len++] = *p;
             }
-            p++;
-            continue;
-        }
-
-        if (in_noscript) {
-            p++;
-            continue;
-        }
-
-        if (in_script) {
-            if (script_len + 1 < (int)sizeof(script_buf)) {
-                script_buf[script_len++] = *p;
-            }
-            p++;
-            continue;
-        }
-
-        if (in_style) {
             p++;
             continue;
         }
